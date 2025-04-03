@@ -5,7 +5,7 @@ cachetools==5.5.2
 cbor==1.0.0
 cbor2==5.6.5
 certifi==2025.1.31
-charset-normalizer==3.4.1
+charset-normalizer==3.1.0
 cloudpickle==3.1.1
 contourpy==1.1.1
 coppeliasim-zmqremoteapi-client==2.0.4
@@ -69,6 +69,7 @@ pyzmq==26.2.1
 requests==2.32.3
 requests-oauthlib==2.0.0
 rich==13.9.4
+-e git+git@github.com:uncore-team/rl_coppelia.git@8590f62d92f5733ffa6ef2c812c6b6d3c3b3ab3d#egg=rl_coppelia
 rsa==4.9
 scipy==1.10.1
 six==1.17.0
