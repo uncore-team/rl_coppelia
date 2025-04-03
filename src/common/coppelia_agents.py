@@ -2,8 +2,8 @@ import logging
 import math
 import random
 
-from rl_spin_decoupler.spindecoupler import AgentSide # type: ignore
-from rl_spin_decoupler.socketcomms.comms import BaseCommPoint # type: ignore
+from spindecoupler import AgentSide # type: ignore
+from socketcomms.comms import BaseCommPoint # type: ignore
 
 
 class CoppeliaAgent:

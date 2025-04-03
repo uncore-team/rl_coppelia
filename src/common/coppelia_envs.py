@@ -6,8 +6,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-sys.path.append(os.path.abspath("../dependencies"))
-from rl_spin_decoupler.spindecoupler import RLSide  # type: ignore
+from spindecoupler import RLSide  # type: ignore
 
 
 class CoppeliaEnv(gym.Env):

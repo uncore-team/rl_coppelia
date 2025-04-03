@@ -17,7 +17,6 @@ for path in common_paths:
     if project_path:
         break
 sys.path.append(os.path.abspath(os.path.join(project_path,"src")))
-sys.path.append(os.path.abspath(os.path.join(project_path,"dependencies")))
 
 from common import utils
 from common.coppelia_agents import BurgerBotAgent, TurtleBotAgent
