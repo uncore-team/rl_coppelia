@@ -1,0 +1,40 @@
+{
+    "params_env": {
+        "var_action_time_flag": false,
+        "fixed_actime": 0.06,
+        "bottom_actime_limit": 0.2,
+        "upper_actime_limit": 3.0,
+        "bottom_lspeed_limit": 0.05,
+        "upper_lspeed_limit": 0.5,
+        "bottom_aspeed_limit": -0.5,
+        "upper_aspeed_limit": 0.5,
+        "finish_episode_flag": false,
+        "dist_thresh_finish_flag": 0.5,
+        "obs_time": false,
+        "reward_dist_1": 0.25,
+        "reward_1": 0.25,
+        "reward_dist_2": 0.125,
+        "reward_2": 0.5,
+        "reward_dist_3": 0.015,
+        "reward_3": 1,
+        "max_count": 400,
+        "max_time": 80,
+        "max_dist": 3,
+        "finish_flag_penalty": -0.1,
+        "overlimit_penalty": -0.5,
+        "crash_penalty": -1,
+        "max_crash_dist": 0.1
+
+    },
+    "params_train": {
+        "sb3_algorithm": "SAC",
+        "policy": "MlpPolicy",
+        "total_timesteps": 400,
+        "callback_frequency": 20,
+        "n_training_steps": 4
+    },
+    "params_test": {
+        "sb3_algorithm": "",
+        "testing_iterations": 50
+    }
+}
