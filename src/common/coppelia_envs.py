@@ -119,7 +119,7 @@ class CoppeliaEnv(gym.Env):
 
         # Send action to agent and receive an observation.
         logging.info(f"Send act to agent: { {key: round(value, 3) for key, value in self.action_dic.items()} }.")
-        self.lat, self.observation, _reward = self._commstoagent.stepSendActGetObs(self.action_dic)
+        self.lat, self.observation, _reward, _ato = self._commstoagent.stepSendActGetObs(self.action_dic)
         logging.info(f"Obs rec STEP: { {key: round(value, 3) for key, value in self.observation.items()} }")
 
         # Update counters
@@ -158,7 +158,8 @@ class CoppeliaEnv(gym.Env):
         logging.info("RESET Call")
 
         # Get the initial observation after resetting the environment
-        self.observation = self._commstoagent.resetGetObs()
+        self.observation, _ = self._commstoagent.resetGetObs()
+        print(self.observation)
 
         # Reset counters and termination flags
         self.terminated = False

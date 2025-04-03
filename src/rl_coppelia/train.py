@@ -14,7 +14,7 @@ from tensorboard.backend.event_processing import event_accumulator
 import threading
 import select
 from stable_baselines3.common.callbacks import BaseCallback
-
+import traceback
 
 
 class StopTrainingOnKeypress(BaseCallback): # TODO Check that the confirmation message appear two times
@@ -259,6 +259,7 @@ def main(args):
 
         
     except Exception as e:
+        traceback.print_exc()
         logging.critical(f"There was an error during the learning process. Exception: {e}")
         # sys.exit()
 
@@ -288,6 +289,7 @@ def main(args):
         convergence_time, _, _, _ = utils.get_convergence_time (experiment_csv_path, convergence_threshold=0.01)
     except Exception as e:
         logging.error(f"No convergence time was found. Exception: {e}")
+        convergence_time = 0.0
 
     # Construct the dictionary with some data to store in the records file
     data_to_store ={

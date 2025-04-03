@@ -48,7 +48,7 @@ def sysCall_thread():
     
     # Get the id of the upcoming script logs
     file_id = utils.get_file_index (model_name, paths["tf_logs"], robot_name)
-    utils.logging_config(paths["script_logs"],comm_side, robot_name, file_id, log_level=logging.INFO, verbose=True)
+    utils.logging_config(paths["script_logs"],comm_side, robot_name, file_id, log_level=logging.INFO, verbose=2)
          
     logging.info(" ----- START EXPERIMENT ----- ")
     
