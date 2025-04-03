@@ -8,3 +8,4 @@ echo "PYTHONPATH set to: $PYTHONPATH"
 
 # Install all the required packages (including 'rl_coppelia' package in editable mode
 pip install -r requirements.txt
+pip install -e .
