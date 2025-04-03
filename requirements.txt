@@ -69,7 +69,6 @@ pyzmq==26.2.1
 requests==2.32.3
 requests-oauthlib==2.0.0
 rich==13.9.4
--e git+git@github.com:AdrianBanulsA/rl_coppelia.git@16f92461f1b87090241e6e2c3a5e2efc71fe2f35#egg=rl_coppelia
 rsa==4.9
 scipy==1.10.1
 six==1.17.0
