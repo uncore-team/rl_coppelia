@@ -249,6 +249,7 @@ def find_coppelia_path():
     common_paths = [
         os.path.expanduser("~/Documents"),  # Search in Documents folder
         os.path.expanduser("~/Downloads"),  # Search in Downloads folder
+        os.path.expanduser("~/devel"),
         "/opt", "/usr/local", "/home"     # Common system directories
     ]
     
@@ -546,9 +547,21 @@ def start_coppelia_and_simulation(base_path, args, params_env, comms_port):
         zmq_port = find_next_free_port(zmq_port)    
         ws_port = find_next_free_port(ws_port)
         if args.no_gui:
-            process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe, "-h", f"-GzmqRemoteApi.rpcPort={zmq_port}", f"-GwsRemoteApi.port={ws_port}"])
+            # process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe, "-h", f"-GzmqRemoteApi.rpcPort={zmq_port}", f"-GwsRemoteApi.port={ws_port}"])
+            process = subprocess.Popen([
+                "gnome-terminal", 
+                "--", 
+                "bash", "-c", 
+                f"{coppelia_exe} -h -GzmqRemoteApi.rpcPort={zmq_port} -GwsRemoteApi.port={ws_port}; exec bash"
+            ])
         else:
-            process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe, f"-GzmqRemoteApi.rpcPort={zmq_port}", f"-GwsRemoteApi.port={ws_port}"])
+            # process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe, f"-GzmqRemoteApi.rpcPort={zmq_port}", f"-GwsRemoteApi.port={ws_port}"])
+            process = subprocess.Popen([
+                "gnome-terminal", 
+                "--", 
+                "bash", "-c", 
+                f"{coppelia_exe} -GzmqRemoteApi.rpcPort={zmq_port} -GwsRemoteApi.port={ws_port}; exec bash"
+            ])
             
     # Wait for CoppeliaSim connection
     try:

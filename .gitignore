@@ -6,3 +6,4 @@ configs/*
 !configs/params_file.json
 src/rl_coppelia.egg-info/
 .vscode/
+dependencies/rl_spin_decoupler
