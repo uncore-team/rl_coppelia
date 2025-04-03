@@ -8,7 +8,7 @@ DEPS_DIR="$BASE_DIR/dependencies/rl_spin_decoupler"
 SHELL_CONFIG="$HOME/.bashrc"  # Default for bash shell; change to ~/.zshrc for zsh users
 
 # Add the export line to the config file only if it is not already there
-if ! grep -q "PYTHONPATH" "$SHELL_CONFIG"; then
+if ! grep -q "export PYTHONPATH=\"$DEPS_DIR" "$SHELL_CONFIG"; then
   echo "export PYTHONPATH=\"$DEPS_DIR:\$PYTHONPATH\"" >> "$SHELL_CONFIG"
   echo "PYTHONPATH has been added to $SHELL_CONFIG"
 else
