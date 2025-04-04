@@ -24,7 +24,7 @@ AGENT_SCRIPT_COPPELIA = "/Agent_Script"
 AGENT_SCRIPT_PYTHON = "common/agent_copp.py"
 
 
-def initial_warnings(args):
+def initial_warnings(self):
     """
     Checks the provided arguments for missing values and sets default values if necessary.
 
@@ -39,18 +39,18 @@ def initial_warnings(args):
         
     """
 
-    if hasattr(args, "robot_name") and not args.robot_name:
+    if hasattr(self.args, "robot_name") and not self.args.robot_name:
         logging.warning("WARNING: '--robot_name' was not specified, so default name 'burgerBot' will be used")
     
-    if hasattr(args, "params_file") and not args.params_file:
-        if args.command == 'train':
-            args.params_file = "../configs/params_file.json"
+    if hasattr(self.args, "params_file") and not self.args.params_file:
+        if self.args.command == 'train':
+            self.args.params_file = os.path.join(self.base_path, "configs", "params_file.json")
         logging.warning("WARNING: '--params_file' was not specified, so default file will be used.")
 
-    if hasattr(args, "model_name") and not args.model_name:  
+    if hasattr(self.args, "model_name") and not self.args.model_name:  
         logging.warning("WARNING: '--model_name' is required for testing functionality. The testing experiment will use the last saved model.")
 
-    if hasattr(args, "scene_path") and not args.scene_path:
+    if hasattr(self.args, "scene_path") and not self.args.scene_path:
         logging.warning(f"WARNING: '--scene_path' was not specified, so default one will be used: <robot_name>_scene.ttt. If this doesn't exist, it will use burgerBot_scene.ttt")
 
 

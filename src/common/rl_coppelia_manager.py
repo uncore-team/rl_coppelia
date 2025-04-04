@@ -59,6 +59,7 @@ class RLCoppeliaManager():
         self.args = args
 
         self.base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
         if (not hasattr(args, "robot_name") and hasattr(args, "model_name")) or args.robot_name is None:
             self.robot_name = args.model_name.split('_')[0]
             args.robot_name = self.robot_name
@@ -80,7 +81,7 @@ class RLCoppeliaManager():
                                 log_level=logging.INFO, save_files = False, verbose = args.verbose)
 
         # Show possible warnings obtained during the parsing arguments function.
-        utils.initial_warnings(args)
+        utils.initial_warnings(self)
 
         # In train and test cases   #TODO This will not work for auto_trainings or sat_trainings, as they need different params files
         if hasattr(args, "params_file"):

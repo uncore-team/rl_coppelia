@@ -93,6 +93,7 @@ class CoppeliaAgent:
         Returns:
             tuple: distance and angle.
         """
+
         _, data, _ = self.sim.checkDistance(self.robot_baselink, self.target)
         distance = data[6]
         
@@ -132,8 +133,12 @@ class CoppeliaAgent:
         
         # Reset positions and orientation
         random_ori = random.uniform(-math.pi, math.pi)
+        # try:
         self.sim.setObjectPosition(self.robot_baselink, [0, 0, 0.06969],-1)
         self.sim.setObjectOrientation(self.robot_baselink, [0,0,random_ori],-1)
+        # except:
+        # self.sim.setObjectPosition(self.robot, -1, [0, 0, 0.080])
+        # self.sim.setObjectOrientation(self.robot, [0,0,math.pi],-1)
 
         # Randomize target position
         delta_x = random.uniform(-2, 2)

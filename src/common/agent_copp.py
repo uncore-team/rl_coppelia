@@ -37,7 +37,7 @@ def sysCall_thread():
     robot_name = "turtleBot"
     model_name = None
     comms_port = 49054
-    base_path = os.path.dirname(os.getcwd())
+    base_path = ""
     params_env = {}
     
     # Instantiate the simulation object
@@ -57,6 +57,7 @@ def sysCall_thread():
         agent = TurtleBotAgent(sim, params_env, comms_port=comms_port)
     elif robot_name == "burgerBot":
         agent = BurgerBotAgent(sim, params_env, comms_port=comms_port)
+        agent.robot_baselink = agent.robot
 
     # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
     while not agent.finish_rec:
