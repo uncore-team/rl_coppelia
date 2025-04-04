@@ -51,6 +51,7 @@ def main():
 
     save_parser = subparsers.add_parser("save", help="Save a trained model, along with all the date generated during its training/testing processes")
     save_parser.add_argument("--model_name", type=str, help="Name of the model to be saved (it must be located under 'models' folder)", required=True)
+    save_parser.add_argument("--new_name", type=str, help="New name for saving the model", required=True)
     save_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
 
     tf_start_parser = subparsers.add_parser("tf_start", help="Starts the tensorboard to check the metrics generated during the training of a model.")
