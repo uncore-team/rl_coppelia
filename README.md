@@ -47,7 +47,23 @@ Any new robot name used in the `main.py` script will generate a new folder withi
 
 ## Notes Before Running anything
 
-- **Note 1**: When running train/test functionalities, the content inside the `agent_copp` will be copied into the `Agent_Script` code section of the CoppeliaSim scene automatically. Just keep it in mind in case you need to make a backup of your scene.
+- **Note 1**: You need to clone this project with its submodule, `rl_spin_decoupler`, which is a repository located at https://github.com/uncore-team/rl_spin_decoupler.git. For doing that, please clone the repository and initialize the submodule (just the first time) using the next commands:
+
+```bash
+git clone --recurse-submodules git@github.com:uncore-team/rl_coppelia.git
+```
+
+```bash
+git submodule init
+```
+
+```bash
+git submodule update
+```
+
+At this point, the repository and it's submodule should be correctly cloned.
+
+- **Note 2**: When running train/test functionalities, the content inside the `agent_copp` will be copied into the `Agent_Script` code section of the CoppeliaSim scene automatically. Just keep it in mind in case you need to make a backup of your scene.
 
 ## Installation
 
@@ -56,19 +72,23 @@ Before using this project, ensure that the following dependencies are installed:
 - **Python 3.x** (preferably 3.6 or later). It has been tested with python 3.8.10.
 - **CoppeliaSim**: The simulator must be installed and configured correctly for the project to work. The project has been tested with CoppeliaSim Edu v4.9.0 (rev. 6) 64bit.
 
-To install the required Python libraries, you can use:
+To install the required Python libraries, you can directly use the `install.sh` file included in the root directory of the project. This will also add the rl_spin_decoupler package to the path:
 
 ```bash
-pip install -r requirements.txt
+chmod +x install.sh
 ```
-
-About `dependencies/rl_spin_decoupler` package, the user must clone here the next repository: https://github.com/uncore-team/rl_spin_decoupler.git
-
-You also need to install the rl_coppelia package, that's the reason why there is a setup.py script inside the project folder. It's recommended to install it in editable mode (-e), so any changes you make in the code will be automatically reflecting without needing to reinstall the package.
 
 ```bash
-pip install -e .
+./install.sh
 ```
+
+```bash
+source ~/.bashrc
+```
+
+Last command is important to refresh the changes made in the path. After that, don't forget to activate again your virtualenv (in case you were using one).
+
+Everything should be already installed, including the `rl_coppelia` package. In fact, it is installed in editable mode (-e), so any changes you make in the code will be automatically reflected without needing to reinstall the package.
 
 From now on, you will need to operate from the `src` subfolder.
 
@@ -77,10 +97,12 @@ From now on, you will need to operate from the `src` subfolder.
 To start training a model for a robot, execute the train option of the `rl_coppelia` package. You do not need to have CoppeliaSim opened, in fact, by default a new instance of the programm will be opened if you do not use set the `dis_parallel_mode` to True. 
 
 ```bash
-rl_coppelia train --robot_name turtleBot
+rl_coppelia train --robot_name turtleBot --verbose 2
 ```
 
 - **`--robot_name`**: The name of the robot you wish to train or test for. This will create a folder for the robot in the `robots` directory. If no 'robot_name' is provided, it will be 'burgerBot' by default.
+
+- **`--verbose`**: Level of verbosity. For your first steps with this repository, it's recommended to set it to 2, so you can check all the logs generated during the process.
 
 For the training, as well as for creating the environment and for testing any model, there are some parameters needed which are assigned within the `configs/params_file.json` file. The user can replicate this file and change the parameters' values, and then use the argument `--params_file` indicating the absolute or relative path of the new json file (it's recommended to keep them in the same `configs` folder).
 
