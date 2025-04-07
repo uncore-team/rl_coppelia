@@ -53,7 +53,7 @@ Any new robot name used in the `main.py` script will generate a new folder withi
 git clone --recurse-submodules git@github.com:uncore-team/rl_coppelia.git
 ```
 
-If you already cloned it before reading this instructions (don't worry, I never read them neither), please use the next commands:
+If you already cloned it before reading these instructions (don't worry, I never read them neither), please use the next commands:
 
 ```bash
 git submodule init
