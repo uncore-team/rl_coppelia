@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import re
@@ -157,8 +158,9 @@ def main(args):
 
     # Save the old name just in case you need it in the future
     original_name_txt_path = os.path.join(results_dir, "original_model_name.txt")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(original_name_txt_path, 'a') as f:
-        f.write(f"{robot_name}_model_{model_id} --> {robot_name}_{rl_copp.args.new_name}\n")
+        f.write(f"[{timestamp}] {robot_name}_model_{model_id} --> {robot_name}_{rl_copp.args.new_name}\n")
 
 
 if __name__ == "__main__":

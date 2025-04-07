@@ -159,7 +159,6 @@ class CoppeliaEnv(gym.Env):
 
         # Get the initial observation after resetting the environment
         self.observation, _ = self._commstoagent.resetGetObs()
-        print(self.observation)
 
         # Reset counters and termination flags
         self.terminated = False
