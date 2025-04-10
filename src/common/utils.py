@@ -89,6 +89,8 @@ def logging_config(logs_dir, side_name, robot_name, experiment_id, log_level = l
             rotating_handler          # Save in log files
         ]
     elif save_files and verbose !=2:
+        # Set the log level for the rotating handler to WARNING
+        rotating_handler.setLevel(logging.WARNING)  # TODO we are overriding here the input parameter, I need to check this
         log_handlers =[rotating_handler]
     else:
         log_handlers =[logging.StreamHandler()]
@@ -359,6 +361,7 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
             "model_name": args.model_name,
             "base_path": base_path,
             "comms_port": comms_port,
+            "verbose": args.verbose,
             "testvar": comms_port+1,
         }
 
