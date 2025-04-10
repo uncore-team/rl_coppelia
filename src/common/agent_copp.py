@@ -21,11 +21,14 @@ sys.path.append(os.path.abspath(os.path.join(project_path,"src")))
 from common import utils
 from common.coppelia_agents import BurgerBotAgent, TurtleBotAgent
 
+sim = None
 
 def sysCall_init():
     """
     Initialize the simulation.
     """
+    global sim
+    sim = require('sim')    # type: ignore
     
     
 def sysCall_thread():
@@ -42,7 +45,7 @@ def sysCall_thread():
     verbose = 1
     
     # Instantiate the simulation object
-    sim = require('sim')    # type: ignore
+    # sim = require('sim')    # type: ignore
     
     # Generate tf and log paths
     paths = utils.get_robot_paths(base_path, robot_name, just_agent_logs = True)
@@ -60,6 +63,8 @@ def sysCall_thread():
         agent = BurgerBotAgent(sim, params_env, comms_port=comms_port)
         agent.robot_baselink = agent.robot
 
+    # sim.setNamedStringParameter('verbose_param', str(verbose))
+
     # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
     while not agent.finish_rec:
         logging.debug("Waiting for instructions...")
@@ -67,17 +72,23 @@ def sysCall_thread():
         # If an action is received, execute it
         if action is not None:
             # With this check we avoid calling cmd_vel script repeteadly for the same action
-            # if agent.execute_cmd_vel:
-            if len(action)>0:
-                agent.sim.callScriptFunction('cmd_vel', agent.handle_cmd_vel_script, action["linear"], action["angular"], agent.colorID)
-            if agent._waitingforrlcommands:
-                agent.colorID +=1
-                # agent.execute_cmd_vel = False
+            if agent.execute_cmd_vel:
+                if len(action)>0:
+                    agent.sim.callScriptFunction('cmd_vel', agent.handle_robot_scripts, action["linear"], action["angular"])
+            if verbose == 2:
+                if len(action)>0:
+                    agent.sim.callScriptFunction('draw_path', agent.handle_robot_scripts, action["linear"], action["angular"], agent.colorID)
+                    if agent._waitingforrlcommands:
+                        agent.colorID +=1
+            agent.execute_cmd_vel = False
         # FINISH command --> Break the loop
         if agent.finish_rec:
             break
+        # simTime = sim.getSimulationTime()
+        # print("Tiempo simulado:", simTime)
 
     # Stop the robot
-    sim.callScriptFunction('cmd_vel',agent.handle_cmd_vel_script,0,0)
+    sim.callScriptFunction('cmd_vel',agent.handle_robot_scripts,0,0)
+    sim.callScriptFunction('draw_path', agent.handle_robot_scripts, 0,0, agent.colorID)
 
     logging.info(" ----- END OF EXPERIMENT ----- ")

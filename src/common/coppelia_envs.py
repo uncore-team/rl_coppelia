@@ -81,6 +81,7 @@ class CoppeliaEnv(gym.Env):
         self.max_achieved = False
         self.reward = 0
         self.action_dic = {}
+        self.tol_lat = 0.3
 
 
     def step(self, action):
@@ -130,12 +131,14 @@ class CoppeliaEnv(gym.Env):
         # Calculate reward
         self.reward = self._calculate_reward()
         logging.info(f"LAT: {round(self.lat,4)}. RW: {self.reward}")
+        if self.lat > (self.params_env["fixed_actime"] + self.tol_lat):
+            logging.warning(f"WARNING: LAT is too big for current action time. Lat = {self.lat}, A_time = {self.params_env['fixed_actime']}")
 
         # Update episode
         if self.reward !=0:
             logging.debug(f"Episode {self.n_ep} is finished")
             self.n_ep=self.n_ep+1
-
+        
         # Observation conversion for consistency
         self.observation = np.array(list(self.observation.values()), dtype=np.float32)
 

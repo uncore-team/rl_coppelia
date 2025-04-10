@@ -1,10 +1,10 @@
 {
     "params_env": {
         "var_action_time_flag": false,
-        "fixed_actime": 0.06,
+        "fixed_actime": 0.5,
         "bottom_actime_limit": 0.2,
         "upper_actime_limit": 3.0,
-        "bottom_lspeed_limit": 0.05,
+        "bottom_lspeed_limit": 0.1,
         "upper_lspeed_limit": 0.5,
         "bottom_aspeed_limit": -0.5,
         "upper_aspeed_limit": 0.5,
@@ -29,8 +29,8 @@
     "params_train": {
         "sb3_algorithm": "SAC",
         "policy": "MlpPolicy",
-        "total_timesteps": 400000,
-        "callback_frequency": 10000,
+        "total_timesteps": 200,
+        "callback_frequency": 100,
         "n_training_steps": 2048
     },
     "params_test": {

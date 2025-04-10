@@ -36,7 +36,7 @@ class CoppeliaAgent:
             generator (CoppeliaObject): Obstacles' generator object in CoppeliaSim scene.
             handle_laser_get_observation_script (CoppeliaObject): Handle for using the script which gets the laser observations in CoppeliaSim scene.
             handle_obstaclegenerators_script (CoppeliaObject): Handle for using the script which generates the obstacles in CoppeliaSim scene.
-            handle_cmd_vel_script (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
+            handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
             _commstoRL (AgentSide): Object to interact with the RL side.
             finish_rec (bool): Flag activated when a FINISH command is received from RL side.
             params_env (dict): Dictionary of parameters for configuring the agent.
@@ -62,7 +62,7 @@ class CoppeliaAgent:
         self.robot = None
         self.robot_baselink = None
         self.target = None
-        self.handle_cmd_vel_script = None
+        self.handle_robot_scripts = None
 
         self.laser = None
         self.generator = None
@@ -126,7 +126,8 @@ class CoppeliaAgent:
         
         # Set speed to 0. It's important to do this before setting the position and orientation
         # of the robot, to avoid bugs with Coppelia simulation
-        self.sim.callScriptFunction('cmd_vel',self.handle_cmd_vel_script,0,0)
+        self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
+        self.sim.callScriptFunction('draw_path', self.handle_robot_scripts, 0,0, self.colorID)
 
         # Reset colorID counter
         self.colorID = 1
@@ -287,13 +288,13 @@ class BurgerBotAgent(CoppeliaAgent):
         Attributes:
             robot (CoppeliaObject): Robot object in CoppeliaSim scene.
             target (CoppeliaObject): Target object in CoppeliaSim scene.
-            handle_cmd_vel_script (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
+            handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
         """
         super(BurgerBotAgent, self).__init__(sim, params_env, comms_port)
 
         self.robot = sim.getObject("/Burger")
         self.target = sim.getObject("/Target")
-        self.handle_cmd_vel_script = sim.getScript(1, self.robot)
+        self.handle_robot_scripts = sim.getScript(1, self.robot)
 
         logging.info(f"BurgerBot Agent created successfully using port {comms_port}.")
 
@@ -316,7 +317,7 @@ class TurtleBotAgent(CoppeliaAgent):
             generator (CoppeliaObject): Obstacles' generator object in CoppeliaSim scene.
             handle_laser_get_observation_script (CoppeliaObject): Handle for using the script which gets the laser observations in CoppeliaSim scene.
             handle_obstaclegenerators_script (CoppeliaObject): Handle for using the script which generates the obstacles in CoppeliaSim scene.
-            handle_cmd_vel_script (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
+            handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
         """
         super(TurtleBotAgent, self).__init__(sim, params_env, comms_port)
 
@@ -327,6 +328,6 @@ class TurtleBotAgent(CoppeliaAgent):
         self.generator=sim.getObject('/ObstaclesGenerator')
         self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
         self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')
-        self.handle_cmd_vel_script = sim.getScript(1, self.robot)
+        self.handle_robot_scripts = sim.getScript(1, self.robot)
 
         logging.info(f"TurtleBot Agent created successfully using port {comms_port}.")
