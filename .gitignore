@@ -7,3 +7,5 @@ configs/*
 src/rl_coppelia.egg-info/
 .vscode/
 dependencies/rl_spin_decoupler
+tmp/*
+tmp/229/0.monitor.csv
