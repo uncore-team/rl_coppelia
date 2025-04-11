@@ -5,7 +5,11 @@ import sys
 
 project_folder = shutil.which("rl_coppelia")
 common_paths = [
-    os.path.expanduser("~/Documents"), ("~/Downloads"), ("~/devel")]
+        os.path.expanduser("~/Documents"),  # Search in Documents folder
+        os.path.expanduser("~/Downloads"),  # Search in Downloads folder
+        os.path.expanduser("~/devel"),
+        "/opt", "/usr/local", "/home"     # Common system directories
+    ]
 
 project_path = None
 
