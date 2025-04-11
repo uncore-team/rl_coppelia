@@ -95,21 +95,29 @@ class RLCoppeliaManager():
             self.free_comms_port = utils.find_next_free_port(start_port=49054)
 
 
-    def create_env(self):
+    def create_env(self, test_mode = False):
         """
         This function creates a custom environment using the CoppeliaEnv child classes (located in coppelia_envs.py script)
         
         If parallel mode has been selected, it will firstly search for the next free port after the default one (49054). After 
         that, it will create the custom environment depending on the robot name specified by the user, and it will vectorize it.
         """
-
-        if self.args.robot_name == "burgerBot":
-            self.env = make_vec_env(BurgerBotEnv, n_envs=1, 
-                            env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
-        elif self.args.robot_name == "turtleBot":
-            self.env = make_vec_env(TurtleBotEnv, n_envs=1, 
-                            env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
-        logging.info(f"Environment created: {self.env}")
+        if test_mode:
+            if self.args.robot_name == "burgerBot":
+                self.env_test = make_vec_env(BurgerBotEnv, n_envs=1, 
+                                env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
+            elif self.args.robot_name == "turtleBot":
+                self.env_test = make_vec_env(TurtleBotEnv, n_envs=1, 
+                                env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
+            logging.info(f"Environment for testing created: {self.env_test}")
+        else:
+            if self.args.robot_name == "burgerBot":
+                self.env = make_vec_env(BurgerBotEnv, n_envs=1, 
+                                env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
+            elif self.args.robot_name == "turtleBot":
+                self.env = make_vec_env(TurtleBotEnv, n_envs=1, 
+                                env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
+            logging.info(f"Environment for training created: {self.env}")
             
         
     def start_soppelia_sim(self):

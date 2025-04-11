@@ -13,7 +13,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from tensorboard.backend.event_processing import event_accumulator
 import threading
 import select
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 import traceback
 
 
@@ -201,6 +201,15 @@ def main(args):
     # Callback function for stopping the learning process if a specific key is pressed
     stop_callback = StopTrainingOnKeypress(key="F") 
 
+    # Callback for testing and saving the best model every x timesteps
+    # Separate evaluation env
+    rl_copp.create_env(test_mode=True)
+
+    # Use deterministic actions for evaluation
+    eval_callback = EvalCallback(rl_copp.env_test, best_model_save_path="./logs/",
+                                log_path="./logs/", eval_freq=500,
+                                deterministic=True, render=False)
+
     # Get the training algorithm from the parameters file
     try:
         ModelClass = getattr(stable_baselines3, rl_copp.params_train["sb3_algorithm"])
@@ -244,14 +253,14 @@ def main(args):
         if rl_copp.args.verbose ==0:
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
-                callback=[checkpoint_callback, stop_callback], 
+                callback=[checkpoint_callback, stop_callback, eval_callback], 
                 # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs"
                 )
         else:
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
-                callback=[checkpoint_callback, stop_callback], 
+                callback=[checkpoint_callback, stop_callback, eval_callback], 
                 # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs",
                 progress_bar = True
