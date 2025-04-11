@@ -3,6 +3,8 @@ import datetime
 import inspect
 import logging
 import os
+
+import numpy as np
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import sys
 import time
@@ -14,6 +16,7 @@ from tensorboard.backend.event_processing import event_accumulator
 import threading
 import select
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+from stable_baselines3.common.results_plotter import load_results, ts2xy
 import traceback
 
 
@@ -168,6 +171,59 @@ def _parse_tensorboard_logs(log_dir,
     return rows, last_row_dict
 
 
+class SaveOnBestTrainingRewardCallback(BaseCallback):
+    """
+    Callback for saving a model (the check is done every ``check_freq`` steps)
+    based on the training reward (in practice, we recommend using ``EvalCallback``).
+
+    :param check_freq: (int)
+    :param log_dir: (str) Path to the folder where the model will be saved.
+      It must contains the file created by the ``Monitor`` wrapper.
+    :param verbose: (int)
+    """
+
+    def __init__(self, check_freq, save_path, log_dir, verbose=1):
+        super().__init__(verbose)
+        self.check_freq = check_freq
+        self.log_dir = log_dir
+        self.save_path = os.path.join(save_path, "_best_model")
+        self.best_mean_reward = -np.inf
+
+    def _init_callback(self) -> None:
+        # Create folder if needed
+        if self.log_dir is not None:
+            os.makedirs(self.log_dir, exist_ok=True)
+
+    def _on_step(self) -> bool:
+       
+        if self.n_calls % self.check_freq == 0:
+            logging.info("Evaluating model")
+
+            # Retrieve training reward
+            x, y = ts2xy(load_results(self.log_dir), "timesteps")
+            if len(x) > 0:
+                # Mean training reward over the last 100 episodes
+                mean_reward = np.mean(y[-100:])
+                if self.verbose > 0:
+                    logging.info("Num timesteps: {}".format(self.num_timesteps))
+                    logging.info(
+                        "Best mean reward: {:.2f} - Last mean reward per episode: {:.2f}".format(
+                            self.best_mean_reward, mean_reward
+                        )
+                    )
+
+                # New best model, you could save the agent here
+                if mean_reward > self.best_mean_reward:
+                    self.best_mean_reward = mean_reward
+                    # Example for saving best model
+                    if self.verbose > 0:
+                        logging.info("Saving new best model at {} timesteps".format(x[-1]))
+                        logging.info("Saving new best model to {}.zip".format(self.save_path))
+                    self.model.save(self.save_path)
+
+        return True
+
+
 def main(args):
     """
     Train the model using a custom environment.
@@ -194,6 +250,9 @@ def main(args):
 
     logging.info(f"Training mode. Final trained model will be saved in {models_path}")
 
+    # Get final model name
+    to_save_model_path, model_name = utils.get_next_model_name(models_path, rl_copp.args.robot_name, rl_copp.file_id)
+
     # Callback function to save the model every x timesteps
     to_save_callbacks_path, _ = utils.get_next_model_name(callbacks_path, rl_copp.args.robot_name, rl_copp.file_id, callback_mode=True)
     checkpoint_callback = CheckpointCallback(save_freq=rl_copp.params_train['callback_frequency'], save_path=to_save_callbacks_path, name_prefix=rl_copp.args.robot_name)
@@ -202,13 +261,17 @@ def main(args):
     stop_callback = StopTrainingOnKeypress(key="F") 
 
     # Callback for testing and saving the best model every x timesteps
+    eval_callback = SaveOnBestTrainingRewardCallback(check_freq=2000, save_path=to_save_model_path, log_dir=rl_copp.log_monitor, verbose=1)
+
     # Separate evaluation env
-    rl_copp.create_env(test_mode=True)
+    # rl_copp.create_env(test_mode=True)
 
     # Use deterministic actions for evaluation
-    eval_callback = EvalCallback(rl_copp.env_test, best_model_save_path="./logs/",
-                                log_path="./logs/", eval_freq=500,
-                                deterministic=True, render=False)
+    # eval_callback = EvalCallback(rl_copp.env_test, best_model_save_path="./logs/",
+    #                             log_path="./logs/", eval_freq=500,
+    #                             deterministic=True, render=False)
+
+    
 
     # Get the training algorithm from the parameters file
     try:
@@ -276,7 +339,7 @@ def main(args):
     end_time = time.time()
 
     # Save the final trained model
-    to_save_model_path, model_name = utils.get_next_model_name(models_path, rl_copp.args.robot_name, rl_copp.file_id)
+    
     logging.info(f"PATH TO SAVE MODEL: {to_save_model_path}")
     model.save(to_save_model_path)
 

@@ -29,8 +29,8 @@
     "params_train": {
         "sb3_algorithm": "SAC",
         "policy": "MlpPolicy",
-        "total_timesteps": 1000,
-        "callback_frequency": 200,
+        "total_timesteps": 350000,
+        "callback_frequency": 10000,
         "n_training_steps": 2048
     },
     "params_test": {

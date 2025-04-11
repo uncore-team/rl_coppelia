@@ -55,7 +55,7 @@ def main(args):
     # Create parameter files
     logging.info("Create param files")
     param_files = utils.auto_create_param_files(
-        rl_copp.args.base_params_file,
+        os.path.join(rl_copp.base_path, "configs", rl_copp.args.base_params_file),
         session_dir,
         rl_copp.args.start_value,
         rl_copp.args.end_value,
