@@ -295,7 +295,7 @@ def main(args):
 
     # Get time to converge using the data from the training csv
     try:
-        convergence_time, _, _, _ = utils.get_convergence_time (experiment_csv_path, convergence_threshold=0.01)
+        convergence_time, _, _, _ = utils.get_convergence_point (experiment_csv_path, " Time", convergence_threshold=0.01)
     except Exception as e:
         logging.error(f"No convergence time was found. Exception: {e}")
         convergence_time = 0.0

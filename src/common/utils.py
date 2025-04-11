@@ -1128,11 +1128,15 @@ def get_data_for_spider(csv_path, args, column_names):
     
     data_to_extract = {}
 
+    df_filtered = df[df.iloc[:, 0].notna()]
     # Process each ID in the args.model_ids list
     for id in args.model_ids:
         # Search rows in the first column which finish with the provided ID
-        filter = df.iloc[:, 0].apply(lambda x: x.startswith(f'{args.robot_name}_model_{id}'))
-        filtered_rows = df[filter]
+        print(f'{args.robot_name}_model_{id}')
+        
+
+        filter = df_filtered.iloc[:, 0].apply(lambda x: x.startswith(f'{args.robot_name}_model_{id}'))
+        filtered_rows = df_filtered[filter]
         
         # If no row is found, then assign None
         if filtered_rows.empty:
@@ -1275,68 +1279,207 @@ def exponential_derivative(t, A, k, B):
     return A * k * np.exp(-k * t)
 
 
-def get_convergence_time (file_path, convergence_threshold=0.01):
+def get_convergence_point_works (file_path, x_axis, convergence_threshold=0.01):
     # Load the CSV data
     df = pd.read_csv(file_path)
     
-    # Convert timestamps to relative time in hours
-    df['Step timestamp'] = pd.to_datetime(df['Step timestamp'], format='%Y-%m-%d_%H-%M-%S')
-    start_time = df['Step timestamp'].iloc[0]
-    df['Relative time'] = (df['Step timestamp'] - start_time).dt.total_seconds() / 3600
+    # Get the x-axis values
+    if x_axis =="Time":
+        # Convert timestamps to relative time in hours
+        df['Step timestamp'] = pd.to_datetime(df['Step timestamp'], format='%Y-%m-%d_%H-%M-%S')
+        start_time = df['Step timestamp'].iloc[0]
+        df['Relative time'] = (df['Step timestamp'] - start_time).dt.total_seconds() / 3600
+        x_axis_values = df['Relative time'].values
     
-    time = df['Relative time'].values
+    elif x_axis =="Step":
+        x_axis_values = df['Step'].values
+        # x_axis_values = x_axis_values/1000
+        # x_axis_values = x_axis_values - x_axis_values[0]  # hace que empiece en 0
+
+    # Get y-axis, which will be always the reward
     reward = df['rollout/ep_rew_mean'].values
 
     # Fit the exponential model
-    initial_estimation = [np.max(reward), 0.1, np.min(reward)]
-    popt, _ = curve_fit(exponential_model, time, reward, p0=initial_estimation)
+    initial_estimation = [np.max(reward), 0.1, np.min(reward)]  # Initial estimation for the parameters A,k,B
+
+    popt, _ = curve_fit(exponential_model, x_axis_values, reward, p0=initial_estimation)
     A, k, B = popt  # Extract parameters of the exponential model
     
     # Compute the predicted values using the fitted model
-    reward_fit = exponential_model(time, A, k, B)
+    reward_fit = exponential_model(x_axis_values, A, k, B)
     
     # Compute the derivative of the exponential model
-    reward_derivative = exponential_derivative(time, A, k, B)
+    reward_derivative = exponential_derivative(x_axis_values, A, k, B)
+    print(reward_derivative)
     
-    # Find the time when the derivative crosses below the threshold or zero
+    # We need to adapt the threshold for each x_axis.
+    x_range = x_axis_values[-1] - x_axis_values[0]
+    print(f"x_range: {x_range}")
+    max_reward = np.max(reward)
+    min_reward = np.min(reward)
+    print(f"max_reward: {max_reward}")
+    print(f"min_reward: {min_reward}")
+    factor = 0.2
+    convergence_threshold = factor * (np.max(reward) - np.min(reward)) / x_range   
+    # convergence_threshold = factor * (np.max(reward) - np.min(reward)) / np.sqrt(x_range)
+    # convergence_threshold = factor * (np.max(reward) - np.min(reward))
+    print(f"convergence_threshold: {convergence_threshold}")
+
+    # Find the point in the x-axis when the derivative crosses below the threshold or zero
     for i in range(1, len(reward_derivative)):
         if reward_derivative[i] < convergence_threshold and reward_derivative[i - 1] >= convergence_threshold:
-            convergence_time = time[i]
+            convergence_point = x_axis_values[i]
+            print("break")
             break
     else:
         # TODO Check if this is a logical approach
-        convergence_time = time[-1]  # If no crossing found, return last time value
+        convergence_point = x_axis_values[-1]  # If no crossing found, return last x_axis value
 
-    return convergence_time, reward_fit, time, reward
+    idx_convergence = np.argmin(np.abs(x_axis_values - convergence_point))
+    print(idx_convergence)
+    reward_at_convergence = reward[idx_convergence]
+    return convergence_point, reward_fit, x_axis_values, reward, reward_at_convergence
     
+### TODO Funciona igual que la anterior, comprobar si son equivalentes, y buscar una forma mejor de hacerlo
+def get_convergence_point (file_path, x_axis, convergence_threshold=0.01):
+    # Load the CSV data
+    df = pd.read_csv(file_path)
+    
+    # Get the x-axis values
+    if x_axis =="Time":
+        # Convert timestamps to relative time in hours
+        df['Step timestamp'] = pd.to_datetime(df['Step timestamp'], format='%Y-%m-%d_%H-%M-%S')
+        start_time = df['Step timestamp'].iloc[0]
+        df['Relative time'] = (df['Step timestamp'] - start_time).dt.total_seconds() / 3600
+        x_axis_values = df['Relative time'].values
+    
+    elif x_axis =="Step":
+        x_axis_values = df['Step'].values
+        # x_axis_values = x_axis_values - x_axis_values[0]  # hace que empiece en 0
 
-def plot_convergence_time (file_path, convergence_threshold=0.01):
-    """
-    Finds the time at which the reward stabilizes (converges) based on a first-order fit.
+    # Get y-axis, which will be always the reward
+    reward = df['rollout/ep_rew_mean'].values
+
+    # Fit the exponential model
+    initial_estimation = [np.max(reward), 0.1, np.min(reward)]  # Initial estimation for the parameters A,k,B
+
+    popt, _ = curve_fit(exponential_model, x_axis_values, reward, p0=initial_estimation)
+    A, k, B = popt  # Extract parameters of the exponential model
     
-    Parameters:
-    - file_path (str): Path to the CSV file containing the reward data.
-    - convergence_threshold (float): Maximum slope value to consider the curve stabilized.
+    # Compute the predicted values using the fitted model
+    reward_fit = exponential_model(x_axis_values, A, k, B)
     
-    Returns:
-    - convergence_time (float): The estimated time in hours when the reward stabilizes.
-    """
-    # Calculate the convergence time
-    convergence_time, reward_fit, time, reward = get_convergence_time (file_path, convergence_threshold)
+    # Compute the derivative of the exponential model
+    reward_derivative = exponential_derivative(x_axis_values, A, k, B)
+    print(reward_derivative)
+
+    # Normalizar la derivada respecto a su valor máximo
+    max_derivative = np.max(np.abs(reward_derivative))
     
-    # Plot results
-    plt.figure(figsize=(8, 5))
-    plt.plot(time, reward, label='Original Data', marker='o', linestyle='')
-    plt.plot(time, reward_fit, label='Exponential Fit', linestyle='--')
-    plt.axvline(convergence_time, color='r', linestyle=':', label=f'Convergence Time: {convergence_time:.2f}h')
-    plt.xlabel('Time (hours)')
-    plt.ylabel('Reward')
-    plt.title('Reward Convergence Analysis')
-    plt.legend()
-    plt.grid()
-    plt.show()
+    factor = 0.02
+    # Umbral como porcentaje del valor máximo de la derivada
+    convergence_threshold = factor * max_derivative
+
+    print(f"convergence_threshold: {convergence_threshold}")
+
+    # Find the point in the x-axis when the derivative crosses below the threshold or zero
+    for i in range(1, len(reward_derivative)):
+        if reward_derivative[i] < convergence_threshold:
+            convergence_point = x_axis_values[i]
+            print("break")
+            break
+    else:
+        # TODO Check if this is a logical approach
+        convergence_point = x_axis_values[-1]  # If no crossing found, return last x_axis value
+
+    idx_convergence = np.argmin(np.abs(x_axis_values - convergence_point))
+    print(idx_convergence)
+    reward_at_convergence = reward[idx_convergence]
+    return convergence_point, reward_fit, x_axis_values, reward, reward_at_convergence
+
+
+def get_convergence_point_old(file_path, x_axis, convergence_threshold=0.01):
+    df = pd.read_csv(file_path)
     
-    return convergence_time
+    if x_axis == "Time":
+        df['Step timestamp'] = pd.to_datetime(df['Step timestamp'], format='%Y-%m-%d_%H-%M-%S')
+        start_time = df['Step timestamp'].iloc[0]
+        x_axis_values = (df['Step timestamp'] - start_time).dt.total_seconds() / 3600
+    elif x_axis == "Step":
+        x_axis_values = df['Step'].values
+    
+    x_axis_values = x_axis_values - x_axis_values[0]
+    reward = df['rollout/ep_rew_mean'].values
+    
+    try:
+        # Ajuste con límites para mayor estabilidad
+        initial_estimation = [np.max(reward), 0.1, np.min(reward)] 
+        bounds = ([0.5*np.max(reward), 0, 0], [2*np.max(reward), 10, np.max(reward)])
+        popt, _ = curve_fit(exponential_model, x_axis_values, reward, p0=initial_estimation)
+        A, k, B = popt
+        reward_fit = exponential_model(x_axis_values, A, k, B)
+        
+        # Cálculo de target_reward más flexible
+        target_reward = B + 0.8*(A - B)  # 90% del rango en lugar de 95%
+        print(target_reward)
+        
+        # Encuentra todos los puntos que superan el target
+        convergence_indices = np.where(reward_fit >= target_reward)[0]
+        
+        if len(convergence_indices) > 0:
+            idx_convergence = convergence_indices[0]
+            convergence_point = x_axis_values[idx_convergence]
+            reward_at_convergence = reward[idx_convergence]
+        else:
+            # Fallback: usar el último punto si no se alcanza el target
+            idx_convergence = len(x_axis_values) - 1
+            convergence_point = x_axis_values[idx_convergence]
+            reward_at_convergence = reward[idx_convergence]
+            print("Warning: No se alcanzó el target de convergencia, usando el último punto")
+            
+    except Exception as e:
+        print(f"Error en el ajuste exponencial: {e}")
+        # Fallback: devolver valores por defecto
+        idx_convergence = len(x_axis_values) - 1
+        convergence_point = x_axis_values[idx_convergence]
+        reward_fit = reward
+        reward_at_convergence = reward[idx_convergence]
+    
+    return convergence_point, reward_fit, x_axis_values, reward, reward_at_convergence
+
+
+
+# def plot_convergence_point (file_path, x_axis, convergence_threshold=0.01):
+#     """
+#     Finds the poitn at which the reward stabilizes (converges) based on a first-order fit.
+    
+#     Parameters:
+#     - file_path (str): Path to the CSV file containing the reward data.
+#     - convergence_threshold (float): Maximum slope value to consider the curve stabilized.
+    
+#     Returns:
+#     - convergence_point (float): The estimated point in the x-axiswhen the reward stabilizes.
+#     """
+#     # Calculate the convergence time
+#     convergence_point, reward_fit, x_axis_values, reward = get_convergence_point (file_path, x_axis, convergence_threshold)
+    
+#     # Plot results
+#     plt.figure(figsize=(8, 5))
+#     plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
+#     plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
+#     plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence {x_axis}: {convergence_point:.2f}h')
+#     if x_axis == "Time":
+#         plt.xlabel('Time (hours)')
+#         plt.title('Reward Convergence Analysis vs Time')
+#     elif x_axis == "Step":
+#         plt.xlabel('Step')
+#         plt.title('Reward Convergence Analysis vs Step')
+#     plt.ylabel('Reward')
+#     plt.legend()
+#     plt.grid()
+#     plt.show()
+    
+#     return convergence_point
 
 
 # def find_convergence_time(base_path, model_id, robot_name="turtleBot", window_fraction=1, slope_threshold=0.1):
