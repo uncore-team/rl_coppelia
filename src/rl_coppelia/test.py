@@ -14,7 +14,7 @@ def _init_metrics_test(env):
     This function is called at the beginning of each episode during the testing process, so we can get the final metrics
     obtained during the test after finishing each episode.
 
-    Parameters:
+    Args:
         env (gym): Custom environment to get the metrics from.
 
     Returns:
@@ -27,7 +27,7 @@ def _get_metrics_test(env):
     """
     Private function for getting the all the desired metrics at the end of each episode, during the testing process.
 
-    Parameters:
+    Args:
         env (gym): Custom environment to get the metrics from.
 
     Returns:

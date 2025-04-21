@@ -19,7 +19,7 @@ class CoppeliaEnv(gym.Env):
         simulates the robot's movement in response to linear and angular speed commands using a 
         CoppeliaSim scene.
         
-        Parameters:
+        Args:
             params_env (dict): Dictionary of parameters for configuring the environment
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
         
@@ -88,7 +88,7 @@ class CoppeliaEnv(gym.Env):
         """
         Execute one time step within the environment.
 
-        Parameters:
+        Args:
             action (np.array): Action vector..
 
         Returns:
@@ -152,7 +152,7 @@ class CoppeliaEnv(gym.Env):
         """
         Reset the environment to an initial state and return the initial observation.
 
-        Parameters: None
+        Args: None
 
         Returns:
             observation (np.array): The initial state.
@@ -188,7 +188,7 @@ class CoppeliaEnv(gym.Env):
         reduction is half of the maximum reward. The function scales the reduction 
         linearly from 0 to max_reward/2 as time_elapsed goes from 0 to max_time.
         
-        Parameters: 
+        Args: 
             max_reward (float): The maximum reward.
             
         Returns:
@@ -211,7 +211,7 @@ class CoppeliaEnv(gym.Env):
         """
         Private method to calculate the reward based on distance.
 
-        Parameters: None
+        Args: None
 
         Returns:
             reward (float): The computed reward.
@@ -263,7 +263,7 @@ class CoppeliaEnv(gym.Env):
     #     """
     #     Private method to calculate the reward based on distance.
 
-    #     Parameters: None
+    #     Args: None
 
     #     Returns:
     #         reward (float): The computed reward.
@@ -309,7 +309,7 @@ class CoppeliaEnv(gym.Env):
 #         """
 #         Private method to calculate the reward based on distance.
 
-#         Parameters: None
+#         Args: None
 
 #         Returns:
 #             reward (float): The computed reward.
@@ -355,7 +355,7 @@ class CoppeliaEnv(gym.Env):
         """
         Private method to calculate the reward based on distance.
 
-        Parameters: None
+        Args: None
 
         Returns:
             reward (float): The computed reward.
@@ -397,7 +397,7 @@ class BurgerBotEnv(CoppeliaEnv):
         """
         Custom environment for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaEnv class.
 
-        Parameters:
+        Args:
             params_env (dict): Dictionary of parameters for configuring the environment
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
 
@@ -423,7 +423,7 @@ class TurtleBotEnv(CoppeliaEnv):
         """
         Custom environment for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaEnv class.
 
-        Parameters:
+        Args:
             params_env (dict): Dictionary of parameters for configuring the environment
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
 

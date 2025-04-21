@@ -39,7 +39,7 @@ class RLCoppeliaManager():
         environment through different functions for environment creation, simulation startup, training process, testing process,
         and chained training process. Additionally, it manages logging, parameter loading, and saving of models and training 
         results.
-        Parameters:
+        Args:
             args (Namespace): Command-line arguments passed to the script.
 
         Attributes:

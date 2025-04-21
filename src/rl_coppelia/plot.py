@@ -35,7 +35,7 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     """
     Plots multiple spider charts on the same figure to compare different models.
 
-    Parameters:
+    Args:
     - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
     - title (str): The title of the chart.
     """
@@ -120,7 +120,7 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
     """
     Plots the reward-time graph and shows the time at which the reward stabilizes (converges) based on a first-order fit.
 
-    Parameters:
+    Args:
     - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
     - title (str): The title of the chart.
     """
@@ -162,7 +162,7 @@ def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
     """
     Plot the same metric of multiple models for comparing them. X axis will be the number of steps.
 
-    Parameters:
+    Args:
     - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
     - title (str): The title of the chart.
     """

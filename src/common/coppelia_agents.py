@@ -15,7 +15,7 @@ class CoppeliaAgent:
         receive actions and return observations in a reinforcement learning (RL) setup. The
         environment simulates the robot's movement in response to actions.
         
-        Parameters:
+        Args:
             sim: Coppelia object for handling the scene's objects.
             params_env (dict): Dictionary of parameters for configuring the agent.
             comms_port (int, optional): The port to be used for communication with the RL system. Defaults to 49054.
@@ -280,7 +280,7 @@ class BurgerBotAgent(CoppeliaAgent):
         """
         Custom agent for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
-        Parameters:
+        Args:
             sim: Coppelia object for handling the scene's objects.
             params_env (dict): Dictionary of parameters for configuring the agent.
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
@@ -304,7 +304,7 @@ class TurtleBotAgent(CoppeliaAgent):
         """
         Custom agent for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
-        Parameters:
+        Args:
             sim: Coppelia object for handling the scene's objects.
             params_env (dict): Dictionary of parameters for configuring the agent.
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.

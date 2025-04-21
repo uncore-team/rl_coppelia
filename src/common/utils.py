@@ -32,7 +32,7 @@ def initial_warnings(self):
     `params_file`, `model_name`, `scene_path`) are missing or empty, the function prints the corresponding
     warning logs, and set some of them to their default values if neccesary.
 
-    Parameters:
+    Args:
         args (Namespace): The command-line arguments passed to the script.
 
     Returns:
@@ -58,7 +58,7 @@ def logging_config(logs_dir, side_name, robot_name, experiment_id, log_level = l
     """
     Configures the logging system for the application.
 
-    Parameters:
+    Args:
         logs_dir (str): Directory where log files will be saved.
         side_name (str): Name of the process side (e.g., "agent" or "rl").
         robot_name (str): Name of the robot used in the experiment.
@@ -106,7 +106,7 @@ def get_last_model(models_path):
     """
     Gets the last modified model (so it should be the last trained model) inside the models folder
 
-    Parameters:
+    Args:
         models_path (str): Path to the models folder.
     
     Returns:
@@ -136,7 +136,7 @@ def get_file_index(args, tf_path, robot_name):
 
     In testing mode: retrieves the model ID of the specified model followed by a timestamp: <model_ID>_<timestamp>.
 
-    Parameters:
+    Args:
     #TODO model_name/args
         tf_path (str): Path to the TensorBoard log directory.
         robot_name (str): Name of the robot, used to identify log files.
@@ -172,7 +172,7 @@ def get_next_model_name(path, robot_name, next_index, callback_mode = False):
     """
     Generates a new model/caollback filename based on the training stage.
 
-    Parameters:
+    Args:
         path (str): Directory where the model/callback should be saved.
         robot_name (str): Name of the robot used in training.
         next_index (str): The next model/callback index number.
@@ -199,7 +199,7 @@ def get_robot_paths(base_dir, robot_name, just_agent_logs = False):
     """
     Generate the paths for working with a robot, and create the needed folders if they don't exist
 
-    Parameters:
+    Args:
         base_dir (str): base path where the subfolders will be craeted
         robot_name (str): name of the robot.
         just_agent_logs (bool, optional): Only for generating the paths needed for the agent.
@@ -268,7 +268,7 @@ def stop_coppelia_simulation (sim):
     """
     Check if Coppelia simulation is running and, in that case, it stops the simulation.
 
-    Parameters:
+    Args:
         sim: CoppeliaSim object.
     """
     # Check simulation's state before stopping it
@@ -298,7 +298,7 @@ def is_coppelia_running():
 def is_scene_loaded(sim, scene_path):
     """
     Check if the desired scene is loaded.
-    Parameters:
+    Args:
         sim: CoppeliaSim object.
         scene_path (str): Path to the scene
 
@@ -454,7 +454,7 @@ def create_discs_under_target(sim, params_env):
     sets their colors, positions them at different heights, and gives them specific names.
     Removes any existing child discs before creating new ones.
     
-    Parameters:
+    Args:
         sim (coppeliaObject): Simulation object for CoppeliaSim.
         params_env (dict): Parameters of the environment - radius of the discs.
 
@@ -506,7 +506,7 @@ def start_coppelia_and_simulation(base_path, args, params_env, comms_port):
     """
     Run CoppeliaSim if it's not already running and open the scene if it's not loaded.
 
-    Parameters:
+    Args:
         base_path (str): Path of the base directory.
         args: It will use two of the input arguments: robot_name and no_gui.
             robot_name (str): NAme of the current robot.
@@ -632,7 +632,7 @@ def _get_default_params ():
     """
     Private function for setting the different parameters to their default values, in case that reading the json fails.
 
-    Parameters: None
+    Args: None
 
     Return:
         dicts: Three dictionaries with the parameters of the environment, the training and the testing process.
@@ -684,7 +684,7 @@ def load_params(file_path):
     """
     Load the configuration file as a dictionary.
 
-    Parameters:
+    Args:
         file_path (str): Path to the JSON configuration file.
 
     Returns:
@@ -715,7 +715,7 @@ def get_output_csv(model_name, metrics_path, train_flag=True):
     Get the path to to csv file that will be generated for storing the training/inference metrics. The name of the file
     will be unique, as it makes use of the timestamp.
 
-    Parameters:
+    Args:
         model_name (str): Name of the model file, as it will be used for identifying the csv file.
         metrics_path (str): Path to store the csv files with the obtained metrics.
         train_flag (bool): True if the script has been executed in training mode, False in case of running a test. True by default.
@@ -739,7 +739,7 @@ def update_records_file (file_path, exp_name, start_time, end_time, other_metric
     """
     Function to update the train or test record file, so the user can track all the training or testing attempts.
 
-    Parameters:
+    Args:
         file_path (str): Path to the csv file which stores the training/testing records.
         exp_name (str): ID of the experiment.
         start_time (timestamp): Time at the beggining of the experiment.
@@ -780,7 +780,7 @@ def copy_json_with_id(source_path, destination_dir, file_id):
     """
     Copies the given JSON file to a specified directory and appends a file_id to its name.
 
-    Parameters:
+    Args:
         source_path (str): Path to the original JSON file.
         destination_dir (str): Directory where the file should be copied to.
         file_id (str): The file ID to append to the copied file's name.
@@ -815,7 +815,7 @@ def get_algorithm_for_model(model_name, csv_path):
     and returns the value in the "Algorithm" column for that row. Doing this we can be sure
     that we are testing the model using the same algorithm that was used for training it.
 
-    Parameters:
+    Args:
         model_name (str): The model name to search for.
         csv_path (str): The path to the CSV file.
 
@@ -888,7 +888,7 @@ def auto_create_param_files(base_params_file, output_dir, start_value, end_value
     Creates parameter files with incrementing fixed_actime values.
     First cleans the output directory of any existing JSON files, preserving CSV files.
     
-    Parameters:
+    Args:
         base_params_file (str): Path to the base parameters file.
         output_dir (str): Directory to save the generated parameter files.
         start_value (float): Starting value for fixed_actime.
@@ -942,20 +942,19 @@ def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
     Runs the training process using a specified parameter file. This function executes the training
     through a subprocess, optionally suppressing the GUI and enabling parallel mode.
 
-    Parameters:
-    
-    - args:
-        - robot_name (str).
-        - dis_parallel_mode (bool).
-        - model_ids (int).
-    - mode (str): For choosing between different possible modes.
-    - file (str, optional): The parameter file to use for the training modes.
-    - no_gui (bool): A flag to suppress the GUI during training/testing. Default is True.
+    Args:
+        args (argparse):
+            robot_name (str).
+            dis_parallel_mode (bool).
+            model_ids (int).
+        mode (str): For choosing between different possible modes.
+        file (str, optional): The parameter file to use for the training modes.
+        no_gui (bool): A flag to suppress the GUI during training/testing. Default is True.
 
     Returns:
-    - str: The name of the parameter file used for training.
-    - str: The status of the training ("Success" or "Failed").
-    - float: The duration of the training in hours.
+        str: The name of the parameter file used for training.
+        str: The status of the training ("Success" or "Failed").
+        float: The duration of the training in hours.
     """
     model_name = ""
 
@@ -1100,7 +1099,7 @@ def get_data_for_spider(csv_path, args, column_names):
     that ends with a given ID (formatted as '<robot_name>_model_<id>'), and returns the 
     mean of specific columns' data for the matched rows for each ID in the provided list.
 
-    Parameters:
+    Args:
     - csv_path (str): The file path to the CSV file containing the experiment data.
     - args (argparse.Namespace): An object containing the arguments passed via argparse.
       - args.robot_name (str): The name of the robot used to filter the experiment names.
@@ -1157,7 +1156,7 @@ def process_spider_data (df, tolerance=0.05):
     - Inverse scaling for `rollout/ep_len_mean` to prioritize lower values.
     - A tolerance is applied to avoid exact 0 or 1 in the normalized values.
 
-    Parameters:
+    Args:
     - df (DataFrame): Dataframe with data for each ID as pandas.Series.
     - tolerance (float): Percentage tolerance applied to prevent normalization from reaching 0 or 1.
 
@@ -1222,7 +1221,7 @@ def plot_multiple_spider(data_list, labels, names, title='Models Comparison'):
     """
     Plots multiple spider charts on the same figure to compare different models.
 
-    Parameters:
+    Args:
     - data_list (list of lists): A list of several lsit of metrics, one per model.
     - labels (list): List of labels for the axes (metrics).
     - names (list): List of names corresponding to each dataset (for the legend). They correspond to the action time in seconds.
@@ -1453,7 +1452,7 @@ def get_convergence_point_old(file_path, x_axis, convergence_threshold=0.01):
 #     """
 #     Finds the poitn at which the reward stabilizes (converges) based on a first-order fit.
     
-#     Parameters:
+#     Args:
 #     - file_path (str): Path to the CSV file containing the reward data.
 #     - convergence_threshold (float): Maximum slope value to consider the curve stabilized.
     
@@ -1487,7 +1486,7 @@ def get_convergence_point_old(file_path, x_axis, convergence_threshold=0.01):
 #     Estimates the convergence time of the reward function by performing a linear fit
 #     on the final portion of the training data.
 
-#     Parameters:
+#     Args:
 #     - model_id (str): ID of the model to analyze.
 #     - data_folder (str): Path to the folder containing the CSV files.
 #     - threshold (float): Slope threshold to determine when the reward has stabilized.
