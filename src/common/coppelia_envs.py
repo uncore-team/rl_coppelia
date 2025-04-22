@@ -43,6 +43,7 @@ class CoppeliaEnv(gym.Env):
         super(CoppeliaEnv, self).__init__()
 
         # Open the baseline server on the specified port
+        logging.info(f"Trying to establish communication using the port {comms_port}")
         self._commstoagent = RLSide(port= comms_port)
         logging.info(f"Communication opened using port {comms_port}")
 
@@ -143,9 +144,13 @@ class CoppeliaEnv(gym.Env):
         self.observation = np.array(list(self.observation.values()), dtype=np.float32)
 
         # Add additional information (optional)
-        self.info = {}
+        self.info = {"terminated": self.terminated, "truncated": self.truncated}
+        logging.info(f"info in step: {self.info}")
 
         return self.observation, self.reward, self.terminated, self.truncated, self.info
+    
+    def get_last_info(self):
+        return self.info
 
 
     def reset(self, seed=None):
@@ -165,6 +170,7 @@ class CoppeliaEnv(gym.Env):
 
         # Reset counters and termination flags
         self.terminated = False
+        self.truncated = False 
         self.count=0
         self.time_elapsed=0
 

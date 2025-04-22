@@ -90,16 +90,19 @@ class RLCoppeliaManager():
             self.params_env, self.params_train, self.params_test = utils.load_params(args.params_file)
 
         self.current_sim = None
-        self.free_comms_port_1 = 49054
-        self.free_comms_port_2 = 45054
-        if hasattr(args, "dis_parallel_mode") and not self.args.dis_parallel_mode:
-            self.free_comms_port_1 = utils.find_next_free_port(start_port=49054)
-            self.free_comms_port_2 = utils.find_next_free_port(start_port=45054)
 
+        # The next free port to be used for the communication between the agent (CoppeliaSim) and the RL side (Python)
+        self.free_comms_port = 49054
+
+        if hasattr(args, "dis_parallel_mode") and not self.args.dis_parallel_mode:  # If the parallel mode is not disabled, then it will search for the next free port
+            self.free_comms_port = utils.find_next_free_port(start_port=49054)
+
+        # Temporary folder for storing a tensorboard monitor file during training. This is needed for saving a model 
+        # based ion the mean reward obtained during training.
         self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
 
 
-    def create_env(self, test_mode = False):
+    def create_env(self):
         """
         This function creates a custom environment using the CoppeliaEnv child classes (located in coppelia_envs.py script)
         
@@ -107,35 +110,39 @@ class RLCoppeliaManager():
         that, it will create the custom environment depending on the robot name specified by the user, and it will vectorize it.
         """
         
-        if test_mode:
-            if self.args.robot_name == "burgerBot":
-                self.env_test = make_vec_env(BurgerBotEnv, n_envs=1, monitor_dir=self.log_monitor,
-                                env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port_2})
-            elif self.args.robot_name == "turtleBot":
-                self.env_test = make_vec_env(TurtleBotEnv, n_envs=1, monitor_dir=self.log_monitor,
-                                env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port_2})
-            logging.info(f"Environment for testing created: {self.env_test}")
-        else:
-            if self.args.robot_name == "burgerBot":
-                self.env = make_vec_env(BurgerBotEnv, n_envs=1, monitor_dir=self.log_monitor,
-                                env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port_1})
-            elif self.args.robot_name == "turtleBot":
-                self.env = make_vec_env(TurtleBotEnv, n_envs=1, monitor_dir=self.log_monitor,
-                                env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port_1})
-            logging.info(f"Environment for training created: {self.env}")
+        if self.args.robot_name == "burgerBot":
+            self.env = make_vec_env(BurgerBotEnv, n_envs=1, monitor_dir=self.log_monitor,
+                            env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
+            self.env_test = make_vec_env(BurgerBotEnv, n_envs=1, monitor_dir=self.log_monitor,
+                            env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port+50})
+            
+            
+        elif self.args.robot_name == "turtleBot":
+            self.env = make_vec_env(TurtleBotEnv, n_envs=1, monitor_dir=self.log_monitor,
+                            env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
+            self.env_test = make_vec_env(TurtleBotEnv, n_envs=1, monitor_dir=self.log_monitor,
+                            env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port+50})
+            
+        logging.info(f"Environment for training created: {self.env}. Comms port: {self.free_comms_port}")  
+        logging.info(f"Environment for testing created: {self.env_test}. Comms port: {self.free_comms_port+50}")
+        
             
         
-    def start_soppelia_sim(self):
+    def start_coppelia_sim(self):
         """
         Run CoppeliaSim and open the selected scene. It will override the code of the 'Agent_Script' file inside the scene with the
         content of the agent_coppelia_script.py.
         """
-        self.current_sim = utils.start_coppelia_and_simulation(self.base_path, self.args, self.params_env, self.free_comms_port_1)
+        self.current_sim = utils.start_coppelia_and_simulation(self.base_path, self.args, self.params_env, self.free_comms_port)
+        self.current_test_sim = utils.start_coppelia_and_simulation(self.base_path, self.args, self.params_env, self.free_comms_port+50)
+        
 
 
-    def stop_coppelia_sim(self):
+    def stop_coppelia_sim(self, test_mode = False):
         """
         Check if Coppelia simulation is running and, in that case, it stops the simulation.
         """
         utils.stop_coppelia_simulation(self.current_sim)
+        utils.stop_coppelia_simulation(self.current_test_sim)
+        
 

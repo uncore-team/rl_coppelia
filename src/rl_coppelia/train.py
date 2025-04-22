@@ -18,6 +18,7 @@ import threading
 import select
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.results_plotter import load_results, ts2xy
+from stable_baselines3.common.evaluation import evaluate_policy
 import traceback
 
 
@@ -190,10 +191,10 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
         self.save_path = f"{save_path}_best_train_rw"
         self.best_mean_reward = -np.inf
 
-    def _init_callback(self) -> None:
-        # Create folder if needed
-        if self.log_dir is not None:
-            os.makedirs(self.log_dir, exist_ok=True)
+    # def _init_callback(self) -> None:
+    #     # Create folder if needed
+    #     if self.log_dir is not None:
+    #         os.makedirs(self.log_dir, exist_ok=True)
 
     def _on_step(self) -> bool:
         if self.n_calls>1000 and self.n_calls % self.check_freq == 0:
@@ -224,6 +225,69 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
         return True
 
 
+class CustomEvalCallback(EvalCallback):
+    def __init__(self, *args, rl_manager=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.rl_manager = rl_manager
+        self.steps_since_eval = 0
+
+    def _on_step(self) -> bool:
+        self.steps_since_eval += 1
+        if (self.eval_freq > 0 and self.n_calls % self.eval_freq == 0)  or self.steps_since_eval >= self.eval_freq:
+
+            # Obtener los infos devueltos por step()
+            infos = self.locals.get("infos", [])
+            terminated = False
+            truncated = False
+            # Recorrer todos los entornos (en tu caso solo uno, pero así es generalizable)
+            for idx, info in enumerate(infos):
+                if info.get("terminated", False):
+                    terminated = True
+                    print(f"Episodio terminado en env {idx}")
+
+                if info.get("truncated", False):
+                    truncated = True
+                    print(f"Episodio truncado en env {idx}")
+            logging.info(f"terminated: {terminated}, truncated: {truncated}")
+
+            if not (terminated or truncated):  # Si no está terminado ni truncado
+                logging.info(f"Waiting for episode to finish before doing the evaluation. {self.steps_since_eval}")
+                return True  # esperar al siguiente paso
+            else:
+                logging.info("Episode is finished, so let's do the evaluation")
+
+            self.eval_env = self.rl_manager.env_test
+
+            episode_rewards, _ = evaluate_policy(
+                self.model,
+                self.eval_env,
+                n_eval_episodes=self.n_eval_episodes,
+                render=self.render,
+                deterministic=self.deterministic,
+                return_episode_rewards=True,
+                warn=False,
+            )
+
+            mean_reward = sum(episode_rewards) / len(episode_rewards)
+            if self.verbose > 0:
+                logging.info(f"Evaluation at step {self.num_timesteps}: mean_reward={mean_reward:.2f}")
+
+            if self.best_model_save_path is not None and mean_reward > self.best_mean_reward:
+                self.best_mean_reward = mean_reward
+                model_name = os.path.basename(self.best_model_save_path)
+                self.model.save(os.path.join(self.best_model_save_path, f"{model_name}_best_test_rw_{self.num_timesteps}"))
+
+            if self.log_path is not None:
+                with open(f"{self.log_path}/evaluations.csv", "a") as f:
+                    f.write(f"{self.num_timesteps},{mean_reward}\n")
+
+            self.steps_since_eval = 0
+
+
+        return True
+
+
+
 def main(args):
     """
     Train the model using a custom environment.
@@ -234,7 +298,7 @@ def main(args):
     rl_copp = RLCoppeliaManager(args)
 
     ### Start CoppeliaSim instance
-    rl_copp.start_soppelia_sim()
+    rl_copp.start_coppelia_sim()
 
     ### Create the environment
     rl_copp.create_env()
@@ -260,18 +324,18 @@ def main(args):
     # Callback function for stopping the learning process if a specific key is pressed
     stop_callback = StopTrainingOnKeypress(key="F") 
 
-    # Callback for testing and saving the best model every x timesteps
-    eval_callback = SaveOnBestTrainingRewardCallback(check_freq=500, save_path=to_save_model_path, log_dir=rl_copp.log_monitor, verbose=1)
+    # Callback for saving the best model based on the training reward every x timesteps
+    eval_train_callback = SaveOnBestTrainingRewardCallback(check_freq=300, save_path=to_save_model_path, log_dir=rl_copp.log_monitor, verbose=1)
 
-    # Separate evaluation env
-    # rl_copp.create_env(test_mode=True)
-
-    # Use deterministic actions for evaluation
-    # eval_callback = EvalCallback(rl_copp.env_test, best_model_save_path="./logs/",
-    #                             log_path="./logs/", eval_freq=500,
-    #                             deterministic=True, render=False)
-
-    
+    # Callback for evaluating and saving the best model based on the testing reward every x timesteps
+    eval_test_callback = CustomEvalCallback(
+        rl_copp.env_test,
+        best_model_save_path=to_save_model_path,
+        eval_freq=50,
+        deterministic=True,
+        render=False,
+        rl_manager=rl_copp 
+    )
 
     # Get the training algorithm from the parameters file
     try:
@@ -302,7 +366,7 @@ def main(args):
     # Make a copy of the configuration file for saving the parameters that will be used for this training
     utils.copy_json_with_id(rl_copp.args.params_file, parameters_used_path, rl_copp.file_id)
 
-    logging.warning("Training will start in few senconds. If you want to end it at any time, press 'F' + Enter key, and then 'Y' + Enter key."
+    logging.warning("Training will start in few seconds. If you want to end it at any time, press 'F' + Enter key, and then 'Y' + Enter key."
                     " It's not recommended to pause and then resume the training, as it will affect the current episode. That said, grab a cup of coffee and enjoy the process ☕️")
     
     time.sleep(8)
@@ -316,14 +380,14 @@ def main(args):
         if rl_copp.args.verbose ==0:
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
-                callback=[checkpoint_callback, stop_callback, eval_callback], 
+                callback=[checkpoint_callback, stop_callback, eval_train_callback, eval_test_callback], 
                 # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs"
                 )
         else:
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
-                callback=[checkpoint_callback, stop_callback, eval_callback], 
+                callback=[checkpoint_callback, stop_callback, eval_train_callback, eval_test_callback], 
                 # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs",
                 progress_bar = True
@@ -333,7 +397,6 @@ def main(args):
     except Exception as e:
         traceback.print_exc()
         logging.critical(f"There was an error during the learning process. Exception: {e}")
-        # sys.exit()
 
     # Save a timestamp of the ending of the training
     end_time = time.time()
@@ -341,7 +404,7 @@ def main(args):
     # Save the final trained model
     
     logging.info(f"PATH TO SAVE MODEL: {to_save_model_path}")
-    model.save(to_save_model_path)
+    model.save(os.path.join(to_save_model_path, f"{model_name}_last"))
 
     # Parse metrics from tensorboard log and save them in a csv file. Also, we get the metrics of the last row of that csv file
     _, experiment_csv_path = utils.get_output_csv(model_name, training_metrics_path)
@@ -377,6 +440,7 @@ def main(args):
     
     # Send a FINISH command to the agent
     rl_copp.env.envs[0].unwrapped._commstoagent.stepExpFinished()   # Unwrapped is needed so we can access the attributes of our wrapped env 
+    rl_copp.env_test.envs[0].unwrapped._commstoagent.stepExpFinished() 
 
     logging.info("Training completed")
 

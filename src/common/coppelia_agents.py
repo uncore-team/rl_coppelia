@@ -76,11 +76,12 @@ class CoppeliaAgent:
         # AgentSide doesn't have a timeout, so we do this loop in case that Coppelia scene is executed before the RL.
         while True:
             try:
+                logging.info(f"Trying to establish communication using the port {comms_port}")
                 self._commstoRL = AgentSide(BaseCommPoint.get_ip(),comms_port)
                 break
             except:
-                logging.info("Connection with RL failed. Retrying in few senconds...")
-                sim.wait(5/self._control_timestep)
+                logging.info("Connection with RL failed. Retrying in few secs...")
+                sim.wait(20)
         
         # Process control variables
         self.finish_rec = False

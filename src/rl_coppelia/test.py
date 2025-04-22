@@ -52,7 +52,7 @@ def main(args):
     rl_copp = RLCoppeliaManager(args)
 
     ### Start CoppeliaSim instance
-    rl_copp.start_soppelia_sim()
+    rl_copp.start_coppelia_sim()
 
     ### Create the environment
     rl_copp.create_env()
