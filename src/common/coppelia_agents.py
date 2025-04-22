@@ -170,6 +170,11 @@ class CoppeliaAgent:
                 # Last action is finished
                 logging.info("Act completed.")
                 self.execute_cmd_vel = False
+
+                # TODO Check if this is the right way to do the experiments. If you uncomment the next line
+                # then the speed will be set to 0 after each action finishes.
+                # self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
+
                 
                 # Get an observation
                 if self.laser is not None:

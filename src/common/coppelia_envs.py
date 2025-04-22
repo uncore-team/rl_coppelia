@@ -145,9 +145,9 @@ class CoppeliaEnv(gym.Env):
 
         # Add additional information (optional)
         self.info = {"terminated": self.terminated, "truncated": self.truncated}
-        logging.info(f"info in step: {self.info}")
 
         return self.observation, self.reward, self.terminated, self.truncated, self.info
+    
     
     def get_last_info(self):
         return self.info

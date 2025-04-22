@@ -108,6 +108,9 @@ class RLCoppeliaManager():
         
         If parallel mode has been selected, it will firstly search for the next free port after the default one (49054). After 
         that, it will create the custom environment depending on the robot name specified by the user, and it will vectorize it.
+
+        Two instances are created: ``env``, for training, and ``env_test`` for the EvalCallback that will evaluate the last model every
+        x timesteps.
         """
         
         if self.args.robot_name == "burgerBot":
@@ -132,6 +135,8 @@ class RLCoppeliaManager():
         """
         Run CoppeliaSim and open the selected scene. It will override the code of the 'Agent_Script' file inside the scene with the
         content of the agent_coppelia_script.py.
+
+        Two different instances are needed, so one will be used for training and the other for evaluating during the EvalCallback
         """
         self.current_sim = utils.start_coppelia_and_simulation(self.base_path, self.args, self.params_env, self.free_comms_port)
         self.current_test_sim = utils.start_coppelia_and_simulation(self.base_path, self.args, self.params_env, self.free_comms_port+50)
@@ -140,7 +145,7 @@ class RLCoppeliaManager():
 
     def stop_coppelia_sim(self, test_mode = False):
         """
-        Check if Coppelia simulation is running and, in that case, it stops the simulation.
+        Check if Coppelia simulations are running and, if so, stops every instance.
         """
         utils.stop_coppelia_simulation(self.current_sim)
         utils.stop_coppelia_simulation(self.current_test_sim)
