@@ -83,16 +83,23 @@ def logging_config(logs_dir, side_name, robot_name, experiment_id, log_level = l
         backupCount=4           # Keep the last 4 log files, remove the older ones
     )
 
-    if save_files and verbose==2:
-        log_handlers =[
-            logging.StreamHandler(),  # Show through terminal
-            rotating_handler          # Save in log files
-        ]
-    elif save_files and verbose !=2:
-        # Set the log level for the rotating handler to WARNING
-        rotating_handler.setLevel(logging.WARNING)  # TODO we are overriding here the input parameter, I need to check this
-        log_handlers =[rotating_handler]
-    else:
+    if save_files:
+        if verbose==3:  # All through terminal and saved in log files
+            log_handlers =[
+                logging.StreamHandler(),  # Show through terminal
+                rotating_handler          # Save in log files
+            ]
+        elif verbose==2:    # Just show the progress bar through terminal, but save everything in log files
+            log_handlers =[rotating_handler]
+
+        elif verbose ==1:   # Just show progress bar through terminal, and save just warning in log files
+            # Set the log level for the rotating handler to WARNING
+            rotating_handler.setLevel(logging.WARNING)  
+            log_handlers =[rotating_handler]
+        elif verbose ==0:   # Nothing in terminal, and just the errors will be saved in log files
+            rotating_handler.setLevel(logging.ERROR) 
+            log_handlers =[rotating_handler]
+    else:   # Nothing will be saved in log files (actually it's a deprecated option)
         log_handlers =[logging.StreamHandler()]
 
     logging.basicConfig(
@@ -1011,6 +1018,7 @@ def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
     try:
         # Run the command as a subprocess and capture the output
         process = subprocess.Popen(cmd, stderr=subprocess.STDOUT, text=True)        
+        time.sleep(2)
 
         # Get the id of the new process.
         coppelia_pid = get_new_coppelia_pid(before_pids)
@@ -1031,6 +1039,7 @@ def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
         if coppelia_pid:
             try:
                 for pid in coppelia_pid:
+                    time.sleep(3)
                     coppelia_proc = psutil.Process(pid)
                     logging.info(f"Closing CoppeliaSim (PID {pid})...")
                     coppelia_proc.terminate()

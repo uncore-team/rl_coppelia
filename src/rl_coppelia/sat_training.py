@@ -35,7 +35,15 @@ import time
 import concurrent.futures
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
+from concurrent.futures import ThreadPoolExecutor
+from threading import Semaphore
 
+
+
+def limited_auto_run(rl_manager, file, semaphore):
+    with semaphore:
+        return utils.auto_run_mode(rl_manager.args, "sampling_at", file, no_gui=True)
+    
 
 def main(args):
     """
@@ -67,32 +75,30 @@ def main(args):
     summary_csv = os.path.join(session_dir, f"training_summary_{rl_copp.args.robot_name}_{rl_copp.args.session_name}_{timestamp}.csv")
     
     results = []
+
+    # Manage semaphore for avoiding the experiments to collide between them
+    max_workers = rl_copp.args.max_workers
+    semaphore = Semaphore(max_workers)
     
     # If parallel mode is enabled, run the trainings in parallel
     if not rl_copp.args.dis_parallel_mode:
-        logging.info(f"Running {len(param_files)} trainings in parallel with max_workers={rl_copp.args.max_workers}")
+        logging.info(f"Running {len(param_files)} trainings in parallel with max_workers={max_workers}")
 
-        # Submit all training jobs with a delay between submissions.
-        futures = []            
-        with concurrent.futures.ProcessPoolExecutor(max_workers=rl_copp.args.max_workers) as executor:
+        futures = []
+        with ThreadPoolExecutor() as executor:
             for file in param_files:
-                futures.append(executor.submit(utils.auto_run_mode, rl_copp.args, "sampling_at", file, no_gui=True))
-                logging.info(f"Submitted job for {os.path.basename(file)}, waiting {8} seconds before next submission...")
-                time.sleep(8)  # Wait before starting the next process.
-            
-            # Collect results as they complete.
-            for future in concurrent.futures.as_completed(futures):
+                future = executor.submit(limited_auto_run, rl_copp, file, semaphore)
+                futures.append((future, file))
+                logging.info(f"Submitted job for {os.path.basename(file)}, waiting 40 seconds before next submission...")
+                time.sleep(40)
+
+            for future, file in futures:
                 try:
                     results.append(future.result())
                 except Exception as exc:
-                    file_name = "unknown"
-                    for f, submitted_future in zip(param_files, futures):
-                        if submitted_future == future:
-                            file_name = os.path.basename(f)
-                            break
+                    file_name = os.path.basename(file)
                     logging.error(f"{file_name} generated an exception: {exc}")
-
-                    fixed_actime = os.path.basename(file_name).split('_')[-1].replace('.json', '')
+                    fixed_actime = os.path.basename(file).split('_')[-1].replace('.json', '')
                     results.append((file_name, fixed_actime, "Exception", 0))
 
     # If parallel mode is not enabled, run the trainings sequentially

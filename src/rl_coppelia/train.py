@@ -191,7 +191,6 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
         self.log_dir = log_dir
         model_name = os.path.basename(save_path)
         self.save_path = os.path.join(save_path, f"{model_name}_best_train_rw")
-        print(self.save_path)
         self.best_mean_reward = -np.inf
 
     def _on_step(self) -> bool:
@@ -366,6 +365,7 @@ def main(args):
     train_log_file_path = os.path.join(train_log_path,f"{rl_copp.args.robot_name}_tflogs_{rl_copp.file_id}")
 
     logging.info(f"Training mode. Final trained model will be saved in {models_path}")
+    logging.info(f"EXPERIMENT ID: {rl_copp.file_id}")
 
     # Get final model name
     to_save_model_path, model_name = utils.get_next_model_name(models_path, rl_copp.args.robot_name, rl_copp.file_id)
