@@ -89,7 +89,10 @@ def sysCall_thread():
         if agent.finish_rec:
             break
         # simTime = sim.getSimulationTime()
-        # print("Tiempo simulado:", simTime)
+        # print("Tiempo simulado REAL:", simTime)
+        # current_sim_time = agent.sim.getSimulationTime()
+        # episode_elapsed_time = current_sim_time - agent.episode_start_time
+        # print("\nTiempo simulado relativo:", episode_elapsed_time)
 
     # Stop the robot
     sim.callScriptFunction('cmd_vel',agent.handle_robot_scripts,0,0)

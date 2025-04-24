@@ -189,25 +189,22 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
         super().__init__(verbose)
         self.check_freq = check_freq
         self.log_dir = log_dir
-        self.save_path = f"{save_path}_best_train_rw"
+        model_name = os.path.basename(save_path)
+        self.save_path = os.path.join(save_path, f"{model_name}_best_train_rw")
+        print(self.save_path)
         self.best_mean_reward = -np.inf
 
-    # def _init_callback(self) -> None:
-    #     # Create folder if needed
-    #     if self.log_dir is not None:
-    #         os.makedirs(self.log_dir, exist_ok=True)
-
     def _on_step(self) -> bool:
-        if self.n_calls>1000 and self.n_calls % self.check_freq == 0:
+        if self.n_calls>50000 and self.n_calls % self.check_freq == 0:
             logging.info("Evaluating model")
 
             # Retrieve training reward
             x, y = ts2xy(load_results(self.log_dir), "timesteps")
             if len(x) > 0:
                 # Mean training reward over the last 50 episodes
+                print(x)
                 mean_reward = np.mean(y[-50:])
                 if self.verbose > 0:
-                    logging.info("Num timesteps: {}".format(self.num_timesteps))
                     logging.info(
                         "Best mean reward: {:.2f} - Last mean reward per episode: {:.2f}".format(
                             self.best_mean_reward, mean_reward
@@ -268,76 +265,77 @@ class CustomEvalCallback(EvalCallback):
         self.steps_since_eval += 1
 
         # Perform evaluation every eval_freq steps
-        if (self.eval_freq > 0 and self.n_calls % self.eval_freq == 0) or self.steps_since_eval >= self.eval_freq:
-            infos = self.locals.get("infos", [])
-            terminated = False
-            truncated = False
+        if (self.num_timesteps > 50000):
+            if (self.eval_freq > 0 and self.n_calls % self.eval_freq == 0) or self.steps_since_eval >= self.eval_freq:
+                infos = self.locals.get("infos", [])
+                terminated = False
+                truncated = False
 
-            # Check all environments for termination or truncation (in case of multi-env)
-            for idx, info in enumerate(infos):
-                if info.get("terminated", False):
-                    terminated = True
-                    logging.debug(f"Episode terminated in env {idx}")
-                if info.get("truncated", False):
-                    truncated = True
-                    logging.debug(f"Episode truncated in env {idx}")
+                # Check all environments for termination or truncation (in case of multi-env)
+                for idx, info in enumerate(infos):
+                    if info.get("terminated", False):
+                        terminated = True
+                        logging.debug(f"Episode terminated in env {idx}")
+                    if info.get("truncated", False):
+                        truncated = True
+                        logging.debug(f"Episode truncated in env {idx}")
 
-            logging.info(f"terminated: {terminated}, truncated: {truncated}")
+                logging.info(f"terminated: {terminated}, truncated: {truncated}")
 
-            # If episode is still running, then continue the training process until the current episode is finished
-            if not (terminated or truncated):
-                logging.info(f"Waiting for episode to finish before doing the evaluation. Steps since last eval: {self.steps_since_eval}")
-                return True
-            else:
-                logging.info("Episode is finished, starting the evaluation.")
+                # If episode is still running, then continue the training process until the current episode is finished
+                if not (terminated or truncated):
+                    logging.info(f"Waiting for episode to finish before doing the evaluation. Steps since last eval: {self.steps_since_eval}")
+                    return True
+                else:
+                    logging.info("Episode is finished, starting the evaluation.")
 
-            # Set evaluation environment
-            self.eval_env = self.rl_manager.env_test
+                # Set evaluation environment
+                self.eval_env = self.rl_manager.env_test
 
-            # Evaluate policy over n_eval_episodes
-            episode_rewards, _ = evaluate_policy(
-                self.model,
-                self.eval_env,
-                n_eval_episodes=self.n_eval_episodes,
-                render=self.render,
-                deterministic=self.deterministic,
-                return_episode_rewards=True,
-                warn=False,
-            )
-
-            mean_reward = sum(episode_rewards) / len(episode_rewards)
-            if self.verbose > 0:
-                logging.info(f"Evaluation at step {self.num_timesteps}: mean_reward={mean_reward:.2f}")
-
-            # Save new best model if it outperforms previous best
-            if self.best_model_save_path is not None and mean_reward > self.best_mean_reward:
-                self.best_mean_reward = mean_reward
-                model_name = os.path.basename(self.best_model_save_path)
-
-                # Remove any previous best models matching the pattern
-                for file_path in glob.glob(self.pattern):
-                    try:
-                        os.remove(file_path)
-                        logging.info(f"Removed previous best model: {file_path}")
-                    except OSError as e:
-                        logging.error(f"Error: It was not possible to remove the file {file_path}: {e}")
-
-                # Save new best model with updated timestep
-                new_model_path = os.path.join(
-                    self.best_model_save_path, f"{model_name}_best_test_rw_{self.num_timesteps}"
+                # Evaluate policy over n_eval_episodes
+                episode_rewards, _ = evaluate_policy(
+                    self.model,
+                    self.eval_env,
+                    n_eval_episodes=self.n_eval_episodes,
+                    render=self.render,
+                    deterministic=self.deterministic,
+                    return_episode_rewards=True,
+                    warn=False,
                 )
-                self.model.save(new_model_path)
-                logging.info(f"New best model saved: {new_model_path}")
 
-            # Log evaluation result to CSV file if logging path is defined
-            if self.log_path is not None:
-                log_file_path = os.path.join(self.log_path, "evaluations.csv")
-                with open(log_file_path, "a") as f:
-                    f.write(f"{self.num_timesteps},{mean_reward}\n")
-                logging.info(f"Logged evaluation result to {log_file_path}")
+                mean_reward = sum(episode_rewards) / len(episode_rewards)
+                if self.verbose > 0:
+                    logging.info(f"Evaluation at step {self.num_timesteps}: mean_reward={mean_reward:.2f}")
 
-            # Reset step counter since last evaluation
-            self.steps_since_eval = 0
+                # Save new best model if it outperforms previous best
+                if self.best_model_save_path is not None and mean_reward > self.best_mean_reward:
+                    self.best_mean_reward = mean_reward
+                    model_name = os.path.basename(self.best_model_save_path)
+
+                    # Remove any previous best models matching the pattern
+                    for file_path in glob.glob(self.pattern):
+                        try:
+                            os.remove(file_path)
+                            logging.info(f"Removed previous best model: {file_path}")
+                        except OSError as e:
+                            logging.error(f"Error: It was not possible to remove the file {file_path}: {e}")
+
+                    # Save new best model with updated timestep
+                    new_model_path = os.path.join(
+                        self.best_model_save_path, f"{model_name}_best_test_rw_{self.num_timesteps}"
+                    )
+                    self.model.save(new_model_path)
+                    logging.info(f"New best model saved: {new_model_path}")
+
+                # Log evaluation result to CSV file if logging path is defined
+                if self.log_path is not None:
+                    log_file_path = os.path.join(self.log_path, "evaluations.csv")
+                    with open(log_file_path, "a") as f:
+                        f.write(f"{self.num_timesteps},{mean_reward}\n")
+                    logging.info(f"Logged evaluation result to {log_file_path}")
+
+                # Reset step counter since last evaluation
+                self.steps_since_eval = 0
 
         return True
 
@@ -380,13 +378,17 @@ def main(args):
     stop_callback = StopTrainingOnKeypress(key="F") 
 
     # Callback for saving the best model based on the training reward every x timesteps
-    eval_train_callback = SaveOnBestTrainingRewardCallback(check_freq=300, save_path=to_save_model_path, log_dir=rl_copp.log_monitor, verbose=1)
+    eval_train_callback = SaveOnBestTrainingRewardCallback(
+        check_freq=1000, 
+        save_path=to_save_model_path, 
+        log_dir=rl_copp.log_monitor, 
+        verbose=1)
 
     # Callback for evaluating and saving the best model based on the testing reward every x timesteps
     eval_test_callback = CustomEvalCallback(
         rl_copp.env_test,
         best_model_save_path=to_save_model_path,
-        eval_freq=50,
+        eval_freq=1500,
         deterministic=True,
         render=False,
         rl_manager=rl_copp 

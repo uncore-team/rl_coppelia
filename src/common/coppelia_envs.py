@@ -148,7 +148,7 @@ class CoppeliaEnv(gym.Env):
 
         return self.observation, self.reward, self.terminated, self.truncated, self.info
     
-    
+
     def get_last_info(self):
         return self.info
 
@@ -166,7 +166,7 @@ class CoppeliaEnv(gym.Env):
         logging.info("RESET Call")
 
         # Get the initial observation after resetting the environment
-        self.observation, _ = self._commstoagent.resetGetObs(timeout = 20.0)
+        self.observation, _ato = self._commstoagent.resetGetObs(timeout = 20.0)
 
         # Reset counters and termination flags
         self.terminated = False

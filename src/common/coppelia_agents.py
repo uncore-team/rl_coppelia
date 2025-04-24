@@ -55,6 +55,7 @@ class CoppeliaAgent:
         self._waitingforrlcommands = True
         self._lastaction = None
         self._lastactiont0 = 0.0
+        self.lat = 0.0
         self.reward = 0
         self.execute_cmd_vel = False
         self.colorID = 1
@@ -85,6 +86,8 @@ class CoppeliaAgent:
         
         # Process control variables
         self.finish_rec = False
+        self.episode_start_time = 0.0
+        self.reset_flag = False
         
     
     def get_observation(self):
@@ -165,17 +168,13 @@ class CoppeliaAgent:
 
         # Waiting state --> It waits until the current action is finished
         if not self._waitingforrlcommands: # not waiting new commands from RL, just executing last action
-            
-            if (self.sim.getSimulationTime()-self._lastactiont0 >= self._rltimestep): # last action finished
-                # Last action is finished
+            self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time
+            if (self.current_sim_offset_time-self._lastactiont0 >= self._rltimestep): # last action finished
+            # if (self.sim.getSimulationTime()-self._lastactiont0 >= self._rltimestep):
+
                 logging.info("Act completed.")
                 self.execute_cmd_vel = False
 
-                # TODO Check if this is the right way to do the experiments. If you uncomment the next line
-                # then the speed will be set to 0 after each action finishes.
-                # self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
-
-                
                 # Get an observation
                 if self.laser is not None:
                     distance, angle, laser_obs = self.get_observation()
@@ -195,7 +194,6 @@ class CoppeliaAgent:
                     else:
                         observation = {"distance": distance, "angles": angle}
                     
-
                 logging.info(f"Obs send STEP: { {key: round(value, 3) for key, value in observation.items()} }")
 
                 # Send observation to RL
@@ -215,6 +213,10 @@ class CoppeliaAgent:
                 # STEP received
                 if rl_instruction[0] == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
                     logging.info("Received: REC_ACTION_SEND_OBS")
+                    if self.reset_flag:
+                        self.episode_start_time = self.sim.getSimulationTime()
+                        self._lastactiont0 = 0.0
+                        self.reset_flag = False
 
                     # Receive an action
                     action = rl_instruction[1]
@@ -225,12 +227,13 @@ class CoppeliaAgent:
                         self._rltimestep = action["action_time"]
 
                     # Get actual time of the last action
-                    lat = self.sim.getSimulationTime()-self._lastactiont0
-                    self._lastactiont0 = self.sim.getSimulationTime()
-                    logging.info(f"LAT: {round(lat,4)}")
+                    self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time
+                    self.lat = self.current_sim_offset_time-self._lastactiont0
+                    self._lastactiont0 = self.current_sim_offset_time
+                    logging.info(f"LAT: {round(self.lat,4)}")
                     self._waitingforrlcommands = False # from now on, we are waiting to execute the action
                     self.execute_cmd_vel = True
-                    self._commstoRL.stepSendLastActDur(lat)
+                    self._commstoRL.stepSendLastActDur(self.lat)
             
                 # RESET received
                 elif rl_instruction[0] == AgentSide.WhatToDo.RESET_SEND_OBS:
@@ -266,6 +269,9 @@ class CoppeliaAgent:
                     self._commstoRL.resetSendObs(obs=observation)
 
                     action = None
+                    
+                    # Set reset flag to True, so the simulation time is reset
+                    self.reset_flag = True
                     
                 # FINISH received --> the loop ends (train or inference has finished)
                 elif rl_instruction[0] == AgentSide.WhatToDo.FINISH:
