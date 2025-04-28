@@ -830,6 +830,10 @@ def get_algorithm_for_model(model_name, csv_path):
         alg_name (str): The value from the "Algorithm" column corresponding to the row where 
                      the model name is found
     """
+    # Just keep the name until the '_best' part
+    if "_best" in model_name:
+        model_name.split("_best")[0]
+
     with open(csv_path, 'r', newline='') as csvfile:
         reader = csv.DictReader(csvfile)
         # Get the key of the first column (assumed to contain the model names)
