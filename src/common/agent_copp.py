@@ -25,53 +25,75 @@ sys.path.append(os.path.abspath(os.path.join(project_path,"src")))
 from common import utils
 from common.coppelia_agents import BurgerBotAgent, TurtleBotAgent
 
+
 sim = None
+agent = None
+verbose = 1
+sim_initialized = False
+
 
 def sysCall_init():
     """
     Initialize the simulation.
     """
-    global sim
+    global sim, agent, verbose, sim_initialized, robot_name, params_env, comms_port
     sim = require('sim')    # type: ignore
-    
-    
+
+    # Solo se inicializa la primera vez
+    if not sim_initialized:
+        comm_side = "agent"
+        robot_name = "turtleBot"
+        model_name = None
+        comms_port = 49054
+        base_path = ""
+        params_env = {}
+        verbose = 1
+
+        # Generar rutas de logs y tf
+        paths = utils.get_robot_paths(base_path, robot_name, just_agent_logs=True)
+        print(paths)
+        file_id = utils.get_file_index(model_name, paths["tf_logs"], robot_name)
+        print(file_id)
+        utils.logging_config(paths["script_logs"], comm_side, robot_name, file_id, log_level=logging.INFO, verbose=verbose)
+        print("after logging config")
+
+        logging.info(" ----- START EXPERIMENT ----- ")
+
+        # Crear agente
+        if robot_name == "turtleBot":
+            agent = TurtleBotAgent(sim, params_env, comms_port=comms_port)
+        elif robot_name == "burgerBot":
+            agent = BurgerBotAgent(sim, params_env, comms_port=comms_port)
+            agent.robot_baselink = agent.robot
+        print("after initialize agent")
+        sim_initialized = True
+
+
 def sysCall_thread():
-    """
-    Main loop to continuously handle instructions and actions.
-    """    
-    # Define comm_side, robot name and base path
-    comm_side = "agent"
-    robot_name = "turtleBot"
-    model_name = None
-    comms_port = 49054
-    base_path = ""
-    params_env = {}
-    verbose = 1
-    
-    # Instantiate the simulation object
-    # sim = require('sim')    # type: ignore
-    
-    # Generate tf and log paths
-    paths = utils.get_robot_paths(base_path, robot_name, just_agent_logs = True)
-    
-    # Get the id of the upcoming script logs
-    file_id = utils.get_file_index (model_name, paths["tf_logs"], robot_name)
-    utils.logging_config(paths["script_logs"],comm_side, robot_name, file_id, log_level=logging.INFO, verbose=verbose)
-         
-    logging.info(" ----- START EXPERIMENT ----- ")
-    
-    # Instantiate agent object
+    global sim, agent, robot_name, params_env, comms_port
+
+    # Crear agente
     if robot_name == "turtleBot":
         agent = TurtleBotAgent(sim, params_env, comms_port=comms_port)
     elif robot_name == "burgerBot":
         agent = BurgerBotAgent(sim, params_env, comms_port=comms_port)
         agent.robot_baselink = agent.robot
+    print("after initialize agent")
 
-    # sim.setNamedStringParameter('verbose_param', str(verbose))
 
-    # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
-    while not agent.finish_rec:
-        logging.debug("Waiting for instructions...")
+def sysCall_sensing():
+    """
+    Main loop to continuously handle instructions and actions.
+    """  
+    global sim, agent, verbose, sim_initialized
+
+    simTime = sim.getSimulationTime()
+    print("Tiempo simulado :", simTime)
+    realTime = sim.getSystemTime()
+    print("Tiempo real :", realTime)
+
+    if agent and not agent.finish_rec:
+        # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
         action = agent.agent_step()
         # If an action is received, execute it
         if action is not None:
@@ -79,23 +101,18 @@ def sysCall_thread():
             if agent.execute_cmd_vel:
                 if len(action)>0:
                     agent.sim.callScriptFunction('cmd_vel', agent.handle_robot_scripts, action["linear"], action["angular"])
-            if verbose == 2:
+            if verbose == 3:
                 if len(action)>0:
                     agent.sim.callScriptFunction('draw_path', agent.handle_robot_scripts, action["linear"], action["angular"], agent.colorID)
                     if agent._waitingforrlcommands:
                         agent.colorID +=1
             agent.execute_cmd_vel = False
-        # FINISH command --> Break the loop
-        if agent.finish_rec:
-            break
-        # simTime = sim.getSimulationTime()
-        # print("Tiempo simulado REAL:", simTime)
-        # current_sim_time = agent.sim.getSimulationTime()
-        # episode_elapsed_time = current_sim_time - agent.episode_start_time
-        # print("\nTiempo simulado relativo:", episode_elapsed_time)
 
-    # Stop the robot
-    sim.callScriptFunction('cmd_vel',agent.handle_robot_scripts,0,0)
-    sim.callScriptFunction('draw_path', agent.handle_robot_scripts, 0,0, agent.colorID)
+    # FINISH command --> Finish the experiment
+    if agent and agent.finish_rec:
+        # Stop the robot
+        sim.callScriptFunction('cmd_vel',agent.handle_robot_scripts,0,0)
+        sim.callScriptFunction('draw_path', agent.handle_robot_scripts, 0,0, agent.colorID)
 
-    logging.info(" ----- END OF EXPERIMENT ----- ")
+        logging.info(" ----- END OF EXPERIMENT ----- ")
+    

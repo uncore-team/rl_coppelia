@@ -73,6 +73,23 @@ class CoppeliaAgent:
 
         self.sim = sim
         self.params_env = params_env
+
+        # retries = 0
+        # MAX_RETRIES = 5
+        
+        ## AgentSide doesn't have a timeout, so we do this loop in case that Coppelia scene is executed before the RL.
+        # while retries < MAX_RETRIES:
+        #     try:
+        #         logging.info(f"Trying to establish communication using the port {comms_port}")
+        #         self._commstoRL = AgentSide(BaseCommPoint.get_ip(),comms_port)
+        #         break
+        #     except Exception as e:
+        #         logging.error(f"Connection with RL failed: {str(e)}. Retrying in few secs...")
+        #         retries += 1
+        #         if retries >= MAX_RETRIES:
+        #             logging.error("Max retries reached. Exiting.")
+        #             raise Exception("Failed to establish connection with RL after multiple attempts.")
+        #         self.sim.wait(2)
         
         # AgentSide doesn't have a timeout, so we do this loop in case that Coppelia scene is executed before the RL.
         while True:
