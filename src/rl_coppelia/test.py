@@ -52,10 +52,10 @@ def main(args):
     rl_copp = RLCoppeliaManager(args)
 
     ### Start CoppeliaSim instance
-    rl_copp.start_coppelia_sim()
+    rl_copp.start_coppelia_sim(test_mode=True)
 
     ### Create the environment
-    rl_copp.create_env()
+    rl_copp.create_env(test_mode=True)
 
     ### Test the model
 
@@ -107,8 +107,8 @@ def main(args):
 
 
     # Open a csv file to store the metrics
-    with open(experiment_csv_path, mode='w', newline='') as file:
-        writer = csv.writer(file)
+    with open(experiment_csv_path, mode='w', newline='') as metrics_file:
+        metrics_writer = csv.writer(metrics_file)
         headers = [
             'Initial distance (m)', 
             'Reached distance (m)', 
@@ -119,7 +119,7 @@ def main(args):
             'Truncated', 
             'Crashes'
         ]
-        writer.writerow(headers)
+        metrics_writer.writerow(headers)
         
         # Run test x iterations
         for i in range(n_iter):  
@@ -140,8 +140,11 @@ def main(args):
             # it will continue trying to get the best reward using the trained model.
             while not (terminated or truncated):
                 action, _states = model.predict(observation, deterministic = True)
-                observation, _, terminated, truncated, _ = rl_copp.env.envs[0].step(action)
-
+                observation, _, terminated, truncated, info = rl_copp.env.envs[0].step(action)
+                with open("linear_speeds.csv", mode='a', newline='') as speed_file:
+                    speed_writer = csv.writer(speed_file)
+                    linear_speed = info["linear_speed"]
+                    speed_writer.writerow([linear_speed])
             
             # Call get_metrics(), so we will have the total time of the iteration
             # and the final distance to the target
@@ -160,7 +163,7 @@ def main(args):
             max_achieved_list.append(max_achieved)
             
             # Write a new row with the metrics in the csv file
-            writer.writerow([init_target_distance, final_target_distance, time_reach_target, reward_target, 
+            metrics_writer.writerow([init_target_distance, final_target_distance, time_reach_target, reward_target, 
                             timesteps_count, terminated, truncated, collision_flag])
 
     logging.info(f"Testing metrics has been saved in {experiment_csv_path}")
@@ -203,7 +206,7 @@ def main(args):
     
 
     ### Close the CoppeliaSim instance
-    rl_copp.stop_coppelia_sim()
+    rl_copp.stop_coppelia_sim(test_mode=True)
 
 
 if __name__ == "__main__":

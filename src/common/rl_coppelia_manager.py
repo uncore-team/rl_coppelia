@@ -101,6 +101,9 @@ class RLCoppeliaManager():
         # based ion the mean reward obtained during training.
         self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
 
+        # Initialize environment for evaluating the trained model during the training process
+        self.env_test = None
+
 
     def create_env(self, test_mode = False):
         """
@@ -128,7 +131,8 @@ class RLCoppeliaManager():
                                 env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port+50})
             
         logging.info(f"Environment for training created: {self.env}. Comms port: {self.free_comms_port}")  
-        logging.info(f"Environment for testing created: {self.env_test}. Comms port: {self.free_comms_port+50}")
+        if self.env_test is not None:
+            logging.info(f"Environment for testing created: {self.env_test}. Comms port: {self.free_comms_port+50}")
         
             
         

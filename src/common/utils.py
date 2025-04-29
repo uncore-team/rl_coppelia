@@ -832,7 +832,7 @@ def get_algorithm_for_model(model_name, csv_path):
     """
     # Just keep the name until the '_best' part
     if "_best" in model_name:
-        model_name.split("_best")[0]
+        model_name = model_name.split("_best")[0]
 
     with open(csv_path, 'r', newline='') as csvfile:
         reader = csv.DictReader(csvfile)
