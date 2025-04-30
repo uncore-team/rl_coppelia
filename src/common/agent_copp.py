@@ -39,46 +39,35 @@ def sysCall_init():
     global sim, agent, verbose, sim_initialized, robot_name, params_env, comms_port
     sim = require('sim')    # type: ignore
 
-    # Solo se inicializa la primera vez
-    if not sim_initialized:
-        comm_side = "agent"
-        robot_name = "turtleBot"
-        model_name = None
-        comms_port = 49054
-        base_path = ""
-        params_env = {}
-        verbose = 1
+    # Variables to get from agent_copp.py script
+    comm_side = "agent"
+    robot_name = "turtleBot"
+    model_name = None
+    comms_port = 49054
+    base_path = ""
+    params_env = {}
+    verbose = 1
 
-        # Generar rutas de logs y tf
-        paths = utils.get_robot_paths(base_path, robot_name, just_agent_logs=True)
-        print(paths)
-        file_id = utils.get_file_index(model_name, paths["tf_logs"], robot_name)
-        print(file_id)
-        utils.logging_config(paths["script_logs"], comm_side, robot_name, file_id, log_level=logging.INFO, verbose=verbose)
-        print("after logging config")
+    # Generate needed routes for logs and tf
+    paths = utils.get_robot_paths(base_path, robot_name, just_agent_logs=True)
+    file_id = utils.get_file_index(model_name, paths["tf_logs"], robot_name)
+    utils.logging_config(paths["script_logs"], comm_side, robot_name, file_id, log_level=logging.INFO, verbose=verbose)
 
-        logging.info(" ----- START EXPERIMENT ----- ")
+    logging.info(" ----- START EXPERIMENT ----- ")
+    sim_initialized = True
 
-        # Crear agente
+
+def sysCall_thread():
+    global sim, agent, robot_name, params_env, comms_port, sim_initialized
+
+    if sim_initialized:
+        # Create agent
         if robot_name == "turtleBot":
             agent = TurtleBotAgent(sim, params_env, comms_port=comms_port)
         elif robot_name == "burgerBot":
             agent = BurgerBotAgent(sim, params_env, comms_port=comms_port)
             agent.robot_baselink = agent.robot
-        print("after initialize agent")
-        sim_initialized = True
-
-
-def sysCall_thread():
-    global sim, agent, robot_name, params_env, comms_port
-
-    # Crear agente
-    if robot_name == "turtleBot":
-        agent = TurtleBotAgent(sim, params_env, comms_port=comms_port)
-    elif robot_name == "burgerBot":
-        agent = BurgerBotAgent(sim, params_env, comms_port=comms_port)
-        agent.robot_baselink = agent.robot
-    print("after initialize agent")
+        logging.info("Agent initialized")
 
 
 def sysCall_sensing():
@@ -88,18 +77,21 @@ def sysCall_sensing():
     global sim, agent, verbose, sim_initialized
 
     simTime = sim.getSimulationTime()
-    print("Tiempo simulado :", simTime)
+    print("SIM Time:", simTime)
     realTime = sim.getSystemTime()
-    print("Tiempo real :", realTime)
+    print("REAL Time:", realTime)
 
     if agent and not agent.finish_rec:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
+        logging.info("Init agent step")
         action = agent.agent_step()
+        logging.info("Finish agent step")
         # If an action is received, execute it
         if action is not None:
             # With this check we avoid calling cmd_vel script repeteadly for the same action
             if agent.execute_cmd_vel:
                 if len(action)>0:
+                    logging.info("Execute action")
                     agent.sim.callScriptFunction('cmd_vel', agent.handle_robot_scripts, action["linear"], action["angular"])
             if verbose == 3:
                 if len(action)>0:

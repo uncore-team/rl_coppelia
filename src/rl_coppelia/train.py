@@ -201,7 +201,6 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
             x, y = ts2xy(load_results(self.log_dir), "timesteps")
             if len(x) > 0:
                 # Mean training reward over the last 50 episodes
-                print(x)
                 mean_reward = np.mean(y[-50:])
                 if self.verbose > 0:
                     logging.info(

@@ -143,37 +143,38 @@ class CoppeliaAgent:
         Reset the simulator: position the robot and target, and reset the counters.
         If there are obstacles, remove them and create new ones.
         """
-        logging.info("RST environment")
         
         # Set speed to 0. It's important to do this before setting the position and orientation
         # of the robot, to avoid bugs with Coppelia simulation
         self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
-        self.sim.callScriptFunction('draw_path', self.handle_robot_scripts, 0,0, self.colorID)
+        # self.sim.callScriptFunction('draw_path', self.handle_robot_scripts, 0,0, self.colorID)
 
         # Reset colorID counter
         self.colorID = 1
         
         # Reset positions and orientation
-        random_ori = random.uniform(-math.pi, math.pi)
-        # try:
-        self.sim.setObjectPosition(self.robot_baselink, [0, 0, 0.06969],-1)
-        self.sim.setObjectOrientation(self.robot_baselink, [0,0,random_ori],-1)
-        # except:
-        # self.sim.setObjectPosition(self.robot, -1, [0, 0, 0.080])
-        # self.sim.setObjectOrientation(self.robot, [0,0,math.pi],-1)
+        current_position = self.sim.getObjectPosition(self.robot_baselink, -1)
+        if current_position != [0, 0, 0.06969]:
+            random_ori = random.uniform(-math.pi, math.pi)
+            self.sim.setObjectPosition(self.robot_baselink, [0, 0, 0.06969],-1)
+            self.sim.setObjectOrientation(self.robot_baselink, [0,0,random_ori],-1)
 
         # Randomize target position
-        delta_x = random.uniform(-2, 2)
-        delta_y = random.uniform(-2, 2)
-        self.sim.setObjectPosition(self.target, [delta_x, delta_y, 0], -1)
+        current_target_position = self.sim.getObjectPosition(self.target, -1)
+        if current_target_position != [0, 0, 0]:
+            delta_x = random.uniform(-2, 2)
+            delta_y = random.uniform(-2, 2)
+            self.sim.setObjectPosition(self.target, [delta_x, delta_y, 0], -1)
 
         if self.generator is not None:
             # Remove old obstacles
             last_obstacles=self.sim.getObjectsInTree(self.generator,self.sim.handle_all,1) 
-            self.sim.removeObjects(last_obstacles)
+            if len(last_obstacles) > 0:
+                self.sim.removeObjects(last_obstacles)
 
             # Generate new obstacles
             self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
+        logging.info("Environment RST done")
 
 
     def agent_step(self):
@@ -251,6 +252,7 @@ class CoppeliaAgent:
                     self._waitingforrlcommands = False # from now on, we are waiting to execute the action
                     self.execute_cmd_vel = True
                     self._commstoRL.stepSendLastActDur(self.lat)
+                    logging.info("LAT already sent")
             
                 # RESET received
                 elif rl_instruction[0] == AgentSide.WhatToDo.RESET_SEND_OBS:
