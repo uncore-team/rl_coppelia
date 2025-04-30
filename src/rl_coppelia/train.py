@@ -7,7 +7,7 @@ import os
 import shutil
 
 import numpy as np
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+# os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # If you don't want logs from Tensorflow to be displayed
 import sys
 import time
 import stable_baselines3

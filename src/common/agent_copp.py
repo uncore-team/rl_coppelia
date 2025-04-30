@@ -74,7 +74,7 @@ def sysCall_sensing():
     """
     Main loop to continuously handle instructions and actions.
     """  
-    global sim, agent, verbose, sim_initialized
+    global sim, agent, verbose
 
     simTime = sim.getSimulationTime()
     print("SIM Time:", simTime)
