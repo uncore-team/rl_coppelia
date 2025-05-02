@@ -194,7 +194,7 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
         self.best_mean_reward = -np.inf
 
     def _on_step(self) -> bool:
-        if self.n_calls>50000 and self.n_calls % self.check_freq == 0:
+        if self.n_calls>10000 and self.n_calls % self.check_freq == 0:
             logging.info("Evaluating model")
 
             # Retrieve training reward
@@ -263,7 +263,7 @@ class CustomEvalCallback(EvalCallback):
         self.steps_since_eval += 1
 
         # Perform evaluation every eval_freq steps
-        if (self.num_timesteps > 50000):
+        if (self.num_timesteps > 10000):
             if (self.eval_freq > 0 and self.n_calls % self.eval_freq == 0) or self.steps_since_eval >= self.eval_freq:
                 infos = self.locals.get("infos", [])
                 terminated = False
@@ -408,7 +408,8 @@ def main(args):
             env = rl_copp.env,
             n_steps = rl_copp.params_train["n_training_steps"], 
             verbose=True, 
-            tensorboard_log=train_log_path
+            tensorboard_log=train_log_path,
+            device="cuda"
             )   
 
     else:
@@ -416,7 +417,8 @@ def main(args):
             policy = rl_copp.params_train["policy"], 
             env = rl_copp.env, 
             verbose=True, 
-            tensorboard_log=train_log_path
+            tensorboard_log=train_log_path,
+            device="cuda"
             )   
 
     # Make a copy of the configuration file for saving the parameters that will be used for this training
