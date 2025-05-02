@@ -1,5 +1,36 @@
 import argparse
+import os
+import argcomplete
+from argcomplete.completers import FilesCompleter
 from rl_coppelia import auto_testing, auto_training, plot, sat_training, train, test, save, tf_start
+
+
+def model_name_completer(prefix, parsed_args, **kwargs):
+    base_robots_path = os.path.join("rl_coppelia", "robots")
+    matches = []
+
+    if parsed_args.robot_name:
+        # Buscar en la carpeta específica del robot
+        model_dir = os.path.join(base_robots_path, parsed_args.robot_name, "models")
+        if os.path.isdir(model_dir):
+            matches.extend([
+                os.path.join(parsed_args.robot_name, "models", f)
+                for f in os.listdir(model_dir)
+                if f.startswith(prefix)
+            ])
+    else:
+        # Buscar en todas las carpetas de robots
+        for robot_folder in os.listdir(base_robots_path):
+            model_dir = os.path.join(base_robots_path, robot_folder, "models")
+            if os.path.isdir(model_dir):
+                matches.extend([
+                    os.path.join(robot_folder, "models", f)
+                    for f in os.listdir(model_dir)
+                    if f.startswith(prefix)
+                ])
+    return matches
+
+
 
 def main():
     parser = argparse.ArgumentParser(prog="rl_coppelia", description="Training and testing CLI")
@@ -14,7 +45,7 @@ def main():
     train_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
 
     test_parser = subparsers.add_parser("test", help="Test a trained RL algorithm for robot movement in CoppeliaSim")
-    test_parser.add_argument("--model_name", type=str, help="If the inference/testing mode is enabled, a trained model is required (it must be located under 'models' folder)", required=True)
+    test_parser.add_argument("--model_name", type=str, help="If the inference/testing mode is enabled, a trained model is required (it must be located under 'models' folder)", required=True).completer = model_name_completer
     test_parser.add_argument("--robot_name", type=str, help="Name for the robot. Default will be burgerBot.", required=False)
     test_parser.add_argument("--scene_path", type=str, help="Path to the CoppeliaSim scene file.", required=False)
     test_parser.add_argument("--dis_parallel_mode", action="store_true", help="Disables the parallel training or testing.", required=False)
@@ -64,7 +95,7 @@ def main():
     plot_parser.add_argument("--plot_types", type=str, nargs='+', help="List of types of plots that the user wants to create.", default=["spider", "convergence-time", "convergence-steps", "compare-rewards", "compare-episodes_length"], required=False)
     plot_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
 
-
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
     if args.command == "train":

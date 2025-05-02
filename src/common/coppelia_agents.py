@@ -231,10 +231,6 @@ class CoppeliaAgent:
                 # STEP received
                 if rl_instruction[0] == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
                     logging.info("Received: REC_ACTION_SEND_OBS")
-                    if self.reset_flag:
-                        self.episode_start_time = self.sim.getSimulationTime()
-                        self._lastactiont0 = 0.0
-                        self.reset_flag = False
 
                     # Receive an action
                     action = rl_instruction[1]
@@ -289,8 +285,9 @@ class CoppeliaAgent:
 
                     action = None
                     
-                    # Set reset flag to True, so the simulation time is reset
-                    self.reset_flag = True
+                    # Reset timing variables after resetting the scene
+                    self._lastactiont0 = 0.0
+                    self.episode_start_time = self.sim.getSimulationTime()
                     
                 # FINISH received --> the loop ends (train or inference has finished)
                 elif rl_instruction[0] == AgentSide.WhatToDo.FINISH:
