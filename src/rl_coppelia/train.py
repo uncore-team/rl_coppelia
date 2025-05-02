@@ -216,7 +216,7 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
                     if self.verbose > 0:
                         logging.info("Saving new best model at {} timesteps".format(x[-1]))
                         logging.info("Saving new best model to {}.zip".format(self.save_path))
-                    self.model.save(self.save_path)
+                    self.model.save(f"{self.save_path}_{x[-1]}")
 
         return True
 
@@ -408,8 +408,7 @@ def main(args):
             env = rl_copp.env,
             n_steps = rl_copp.params_train["n_training_steps"], 
             verbose=True, 
-            tensorboard_log=train_log_path,
-            device="cuda"
+            tensorboard_log=train_log_path
             )   
 
     else:
@@ -417,8 +416,7 @@ def main(args):
             policy = rl_copp.params_train["policy"], 
             env = rl_copp.env, 
             verbose=True, 
-            tensorboard_log=train_log_path,
-            device="cuda"
+            tensorboard_log=train_log_path
             )   
 
     # Make a copy of the configuration file for saving the parameters that will be used for this training

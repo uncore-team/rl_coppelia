@@ -147,7 +147,7 @@ class CoppeliaAgent:
         # Set speed to 0. It's important to do this before setting the position and orientation
         # of the robot, to avoid bugs with Coppelia simulation
         self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
-        # self.sim.callScriptFunction('draw_path', self.handle_robot_scripts, 0,0, self.colorID)
+        self.sim.callScriptFunction('draw_path', self.handle_robot_scripts, 0,0, self.colorID)
 
         # Reset colorID counter
         self.colorID = 1

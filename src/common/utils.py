@@ -168,7 +168,10 @@ def get_file_index(args, tf_path, robot_name):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         index = f"{model_id}_{timestamp}"
     else:
-        model_id = args.model_name.rsplit("_")[2]
+        basename = os.path.basename(args.model_name)
+        match = re.search(r'model_(\d+)', basename)
+        model_id = match.group(1)
+        # model_id = args.model_name.split("model_")[1].split("_")[0]
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         index = f"{model_id}_{timestamp}"
 
@@ -362,10 +365,14 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
         # Dictionary with variables to update
         if not hasattr(args, "model_name"):
             args.model_name = None
+            model_name = None
+        else: 
+            model_name = os.path.basename(args.model_name)
+
 
         replacements = {
             "robot_name": args.robot_name,
-            "model_name": args.model_name,
+            "model_name": model_name,
             "base_path": base_path,
             "comms_port": comms_port,
             "verbose": args.verbose,

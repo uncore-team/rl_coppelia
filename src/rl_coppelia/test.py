@@ -75,7 +75,10 @@ def main(args):
     # Assure that the algorithm used for testing a model is the same than the one used for training it
     model_name = os.path.splitext(os.path.basename(rl_copp.args.model_name))[0] # Get the model name from the model file path.
     train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
-    rl_copp.params_test["sb3_algorithm"] = utils.get_algorithm_for_model(model_name, train_records_csv_name)
+    try:
+        rl_copp.params_test["sb3_algorithm"] = utils.get_algorithm_for_model(model_name, train_records_csv_name)
+    except:
+        rl_copp.params_test["sb3_algorithm"] = rl_copp.params_train["sb3_algorithm"]
 
     # Get the training algorithm from the parameters file
     ModelClass = getattr(stable_baselines3, rl_copp.params_test["sb3_algorithm"])

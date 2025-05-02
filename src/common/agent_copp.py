@@ -83,9 +83,7 @@ def sysCall_sensing():
 
     if agent and not agent.finish_rec:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
-        logging.info("Init agent step")
         action = agent.agent_step()
-        logging.info("Finish agent step")
         # If an action is received, execute it
         if action is not None:
             # With this check we avoid calling cmd_vel script repeteadly for the same action
