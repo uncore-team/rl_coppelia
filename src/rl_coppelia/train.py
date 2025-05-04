@@ -338,6 +338,19 @@ class CustomEvalCallback(EvalCallback):
         return True
 
 
+class CustomMetricsCallback(BaseCallback):
+    def __init__(self, rl_copp, verbose=0):
+        super().__init__(verbose)
+        self.rl_copp = rl_copp 
+
+    def _on_step(self) -> bool:
+        # Registrar en TensorBoard
+        self.logger.record("custom/episode_count", self.rl_copp.n_ep)
+        self.logger.record("custom/sim_time", self.rl_copp.ato)
+
+        return True
+
+
 
 def main(args):
     """

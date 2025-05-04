@@ -216,7 +216,7 @@ class CoppeliaAgent:
                 logging.info(f"Obs send STEP: { {key: round(value, 3) for key, value in observation.items()} }")
 
                 # Send observation to RL
-                self._commstoRL.stepSendObs(observation, self.crash_flag, self.sim.getSimulationTime()) # RL was waiting for this; no reward is actually needed here
+                self._commstoRL.stepSendObs(observation, self.sim.getSimulationTime(), self.crash_flag) # RL was waiting for this; no reward is actually needed here
                 self.crash_flag = False  # Reset the flag for next iterations
                 self._waitingforrlcommands = True  
             

@@ -124,6 +124,7 @@ class CoppeliaEnv(gym.Env):
         logging.info(f"Send act to agent: { {key: round(value, 3) for key, value in self.action_dic.items()} }.")
         self.lat, self.observation, self.crash_flag, _ato = self._commstoagent.stepSendActGetObs(self.action_dic, timeout = 20.0)
         logging.info(f"Obs rec STEP: { {key: round(value, 3) for key, value in self.observation.items()} }")
+        logging.info(f"REC: crash flag: {self.crash_flag}, ato: {_ato}")
 
         # Update counters
         self.count=self.count+1 
