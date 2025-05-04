@@ -105,6 +105,7 @@ class CoppeliaAgent:
         self.finish_rec = False
         self.episode_start_time = 0.0
         self.reset_flag = False
+        self.crash_flag = False
         
     
     def get_observation(self):
@@ -215,9 +216,23 @@ class CoppeliaAgent:
                 logging.info(f"Obs send STEP: { {key: round(value, 3) for key, value in observation.items()} }")
 
                 # Send observation to RL
-                self._commstoRL.stepSendObs(observation, None) # RL was waiting for this; no reward is actually needed here
-                self._waitingforrlcommands = True
-                
+                self._commstoRL.stepSendObs(observation, self.crash_flag, self.sim.getSimulationTime()) # RL was waiting for this; no reward is actually needed here
+                self.crash_flag = False  # Reset the flag for next iterations
+                self._waitingforrlcommands = True  
+            
+            # If it's waiting and action is not finished yet, then it will check the laser observations, so the robot will 
+            # be aware of collisions evn if it's blind. With this, we avoid the next problem: with large time steps like 5 
+            # seconds, the robot can have a collision and then it slides around the obstacle, so when the 5 seconds action 
+            # finishes, the robot will be slightly further from the robot, and the collision won't be detected anymore. This
+            # is not the desired performance: if there was a collision, then we need to know it.
+            else:
+                if self.laser is not None:
+                    laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
+                    logging.info(f"Laser values during movement: {laser_obs}")
+                    if any(value < self.params_env["max_crash_dist"] for value in laser_obs):
+                        logging.info("Crash during action execution, episode will finish once the action completes")
+                        self.crash_flag = True
+
             action = self._lastaction
             
         # Execution state --> The action has finished, so it tries to read a new command from RL
@@ -281,7 +296,7 @@ class CoppeliaAgent:
                     logging.info(f"Obs send RESET: { {key: round(value, 3) for key, value in observation.items()} }")
                     
                     # Send the observation to the RLSide
-                    self._commstoRL.resetSendObs(obs=observation)
+                    self._commstoRL.resetSendObs(observation, self.sim.getSimulationTime())
 
                     action = None
                     

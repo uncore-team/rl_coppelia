@@ -83,6 +83,7 @@ class CoppeliaEnv(gym.Env):
         self.reward = 0
         self.action_dic = {}
         self.tol_lat = 0.3
+        self.crash_flag = False
 
 
     def step(self, action):
@@ -121,7 +122,7 @@ class CoppeliaEnv(gym.Env):
 
         # Send action to agent and receive an observation.
         logging.info(f"Send act to agent: { {key: round(value, 3) for key, value in self.action_dic.items()} }.")
-        self.lat, self.observation, _reward, _ato = self._commstoagent.stepSendActGetObs(self.action_dic, timeout = 20.0)
+        self.lat, self.observation, self.crash_flag, _ato = self._commstoagent.stepSendActGetObs(self.action_dic, timeout = 20.0)
         logging.info(f"Obs rec STEP: { {key: round(value, 3) for key, value in self.observation.items()} }")
 
         # Update counters
@@ -173,6 +174,7 @@ class CoppeliaEnv(gym.Env):
         self.truncated = False 
         self.count=0
         self.time_elapsed=0
+        self.crash_flag = False
 
         logging.info(f"Obs rec RESET: { {key: round(value, 2) for key, value in self.observation.items()} }")
         
@@ -224,6 +226,12 @@ class CoppeliaEnv(gym.Env):
         """
         laser_obs = list(self.observation.values())[-4:]
         distance = self.observation["distance"]
+
+        if self.crash_flag:
+            logging.info("Crashed detected during the movement")
+            self.collision_flag = True
+            self.terminated=True
+            return self.params_env["crash_penalty"]
 
         if self.params_env["finish_episode_flag"]:
             if self.action_dic["finish_flag"]<0.5:
