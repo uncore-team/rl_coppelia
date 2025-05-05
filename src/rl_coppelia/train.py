@@ -344,9 +344,20 @@ class CustomMetricsCallback(BaseCallback):
         self.rl_copp = rl_copp 
 
     def _on_step(self) -> bool:
-        # Registrar en TensorBoard
-        self.logger.record("custom/episode_count", self.rl_copp.n_ep)
-        self.logger.record("custom/sim_time", self.rl_copp.ato)
+        # Log in TensorBoard
+        writer = self.logger.writer
+
+        # Get mean reward from tensorboard
+        ep_rew_mean = self.logger.name_to_value["rollout/ep_rew_mean"]
+
+        writer.add_scalar("custom/reward_vs_episodes", ep_rew_mean, self.rl_copp.n_ep)
+        writer.add_scalar("custom/reward_vs_simtime", ep_rew_mean, self.rl_copp.ato)
+        writer.add_scalar("custom/sim_time", self.rl_copp.ato, self.num_timesteps)
+        writer.add_scalar("custom/episodes", self.rl_copp.n_ep, self.num_timesteps)
+
+
+        # self.logger.record("custom/episode_count", self.rl_copp.n_ep)
+        # self.logger.record("custom/sim_time", self.rl_copp.ato)
 
         return True
 
@@ -406,6 +417,9 @@ def main(args):
         rl_manager=rl_copp 
     )
 
+    # Callback for logging custom metrics in Tensorboard
+    metrics_callback = CustomMetricsCallback(rl_copp)
+
     # Get the training algorithm from the parameters file
     try:
         ModelClass = getattr(stable_baselines3, rl_copp.params_train["sb3_algorithm"])
@@ -449,14 +463,14 @@ def main(args):
         if rl_copp.args.verbose ==0:
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
-                callback=[checkpoint_callback, stop_callback, eval_train_callback, eval_test_callback], 
+                callback=[checkpoint_callback, stop_callback, eval_train_callback, eval_test_callback, metrics_callback], 
                 # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs"
                 )
         else:
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
-                callback=[checkpoint_callback, stop_callback, eval_train_callback, eval_test_callback], 
+                callback=[checkpoint_callback, stop_callback, eval_train_callback, eval_test_callback, metrics_callback], 
                 # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs",
                 progress_bar = True

@@ -364,6 +364,7 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
 
         # Dictionary with variables to update
         if not hasattr(args, "model_name"):
+            print("here")
             args.model_name = None
             model_name = None
         else: 
@@ -416,7 +417,7 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
 
     except Exception as e:
         logging.error(f"Something happened while trying to update the content of the script inside Coppelia's scene: {e}")
-        sys.exit()
+        # sys.exit()
 
 
 def is_port_in_use(port):
