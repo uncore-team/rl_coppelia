@@ -93,7 +93,8 @@ def _parse_tensorboard_logs(log_dir,
                            metrics = ["train/loss", "train/actor_loss", "train/critic_loss", "train/entropy_loss", 
                                       "train/value_loss", "train/approx_kl", "train/clip_fraction", "train/explained_variance",
                                       "train/ent_coef", "train/ent_coef_loss", "train/learning_rate",
-                                      "rollout/ep_len_mean", "rollout/ep_rew_mean"]):
+                                      "rollout/ep_len_mean", "rollout/ep_rew_mean", "custom/sim_time", "custom/episodes",
+                                      "custom/agent_time"]):
     """
     Private method that reads TensorBoard logs from a given directory and saves selected metrics into a CSV file.
     
@@ -193,15 +194,29 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
         self.save_path = os.path.join(save_path, f"{model_name}_best_train_rw")
         self.best_mean_reward = -np.inf
 
+        # Pattern to locate old best model files in the save directory
+        self.pattern = os.path.join(save_path, "*_best_train_rw_*.zip")
+
     def _on_step(self) -> bool:
-        if self.n_calls>10000 and self.n_calls % self.check_freq == 0:
+        if self.n_calls>500 and self.n_calls % self.check_freq == 0:  # default: 10K
             logging.info("Evaluating model")
 
             # Retrieve training reward
             x, y = ts2xy(load_results(self.log_dir), "timesteps")
             if len(x) > 0:
+                y_float = []
                 # Mean training reward over the last 50 episodes
-                mean_reward = np.mean(y[-50:])
+                for val in y:
+                    try:
+                        y_float.append(float(val))
+                    except ValueError:
+                        logging.error(f"Wrong value removed: {val}")
+                
+                if y_float:
+                    mean_reward = np.mean(y_float[-50:])
+                else:
+                    mean_reward = -99
+
                 if self.verbose > 0:
                     logging.info(
                         "Best mean reward: {:.2f} - Last mean reward per episode: {:.2f}".format(
@@ -212,11 +227,19 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
                 # New best model, you could save the agent here
                 if mean_reward > self.best_mean_reward:
                     self.best_mean_reward = mean_reward
+
+                    # Remove any previous best models matching the pattern
+                    for file_path in glob.glob(self.pattern):
+                        try:
+                            os.remove(file_path)
+                            logging.info(f"Removed previous best (train) model: {file_path}")
+                        except OSError as e:
+                            logging.error(f"Error: It was not possible to remove the file {file_path}: {e}")
+
                     # Saving best model
                     if self.verbose > 0:
-                        logging.info("Saving new best model at {} timesteps".format(x[-1]))
-                        logging.info("Saving new best model to {}.zip".format(self.save_path))
-                    self.model.save(f"{self.save_path}_{x[-1]}")
+                        logging.info(f"Saving new best model to {self.save_path}_{self.num_timesteps}")
+                    self.model.save(f"{self.save_path}_{self.num_timesteps}")
 
         return True
 
@@ -263,7 +286,7 @@ class CustomEvalCallback(EvalCallback):
         self.steps_since_eval += 1
 
         # Perform evaluation every eval_freq steps
-        if (self.num_timesteps > 10000):
+        if (self.num_timesteps > 600): # default: 10K
             if (self.eval_freq > 0 and self.n_calls % self.eval_freq == 0) or self.steps_since_eval >= self.eval_freq:
                 infos = self.locals.get("infos", [])
                 terminated = False
@@ -314,7 +337,7 @@ class CustomEvalCallback(EvalCallback):
                     for file_path in glob.glob(self.pattern):
                         try:
                             os.remove(file_path)
-                            logging.info(f"Removed previous best model: {file_path}")
+                            logging.info(f"Removed previous best (eval) model: {file_path}")
                         except OSError as e:
                             logging.error(f"Error: It was not possible to remove the file {file_path}: {e}")
 
@@ -335,29 +358,53 @@ class CustomEvalCallback(EvalCallback):
                 # Reset step counter since last evaluation
                 self.steps_since_eval = 0
 
+                # Log eval data
+                self.logger.dump(self.num_timesteps)
+
         return True
 
 
+def get_base_env(vec_env):
+    env = vec_env
+    if hasattr(env, 'envs'):  # DummyVecEnv or SubprocVecEnv
+        env = env.envs[0]     # Access to the first environment
+    while hasattr(env, 'venv'):  # Unwrap from SB3
+        env = env.venv
+    while hasattr(env, 'env'):  # Unwrap from gym
+        env = env.env
+    return env
+
+
 class CustomMetricsCallback(BaseCallback):
-    def __init__(self, rl_copp, verbose=0):
+    def __init__(self, rl_copp, eval_freq=4, verbose=0):
         super().__init__(verbose)
         self.rl_copp = rl_copp 
+        self.eval_freq = eval_freq
+        self.last_logged_episode = 0
+        self.episode_count = 0
 
     def _on_step(self) -> bool:
         # Log in TensorBoard
-        writer = self.logger.writer
+        
+        # Get base env
+        base_env = get_base_env(self.rl_copp.env)
 
-        # Get mean reward from tensorboard
-        ep_rew_mean = self.logger.name_to_value["rollout/ep_rew_mean"]
+        # Get current episode number
+        new_episode_count = base_env.n_ep
 
-        writer.add_scalar("custom/reward_vs_episodes", ep_rew_mean, self.rl_copp.n_ep)
-        writer.add_scalar("custom/reward_vs_simtime", ep_rew_mean, self.rl_copp.ato)
-        writer.add_scalar("custom/sim_time", self.rl_copp.ato, self.num_timesteps)
-        writer.add_scalar("custom/episodes", self.rl_copp.n_ep, self.num_timesteps)
+        # If the episode count has increased, increment it
+        if self.episode_count != new_episode_count:
+            self.episode_count = new_episode_count
 
 
-        # self.logger.record("custom/episode_count", self.rl_copp.n_ep)
-        # self.logger.record("custom/sim_time", self.rl_copp.ato)
+        if self.episode_count != self.last_logged_episode and self.episode_count % self.eval_freq == 0:
+            self.logger.record("custom/sim_time", base_env.ato, self.num_timesteps)
+            self.logger.record("custom/agent_time", base_env.total_time_elapsed, self.num_timesteps)
+            self.logger.record("custom/episodes", base_env.n_ep, self.num_timesteps)
+            self.logger.dump(self.num_timesteps)
+
+            # Update the last logged episode to avoid redundant logging
+            self.last_logged_episode = self.episode_count
 
         return True
 
@@ -402,7 +449,7 @@ def main(args):
 
     # Callback for saving the best model based on the training reward every x timesteps
     eval_train_callback = SaveOnBestTrainingRewardCallback(
-        check_freq=1000, 
+        check_freq=250,    # default: 1000
         save_path=to_save_model_path, 
         log_dir=rl_copp.log_monitor, 
         verbose=1)
@@ -411,7 +458,7 @@ def main(args):
     eval_test_callback = CustomEvalCallback(
         rl_copp.env_test,
         best_model_save_path=to_save_model_path,
-        eval_freq=1500,
+        eval_freq=250, # default: 1500
         deterministic=True,
         render=False,
         rl_manager=rl_copp 

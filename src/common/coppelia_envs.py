@@ -75,7 +75,9 @@ class CoppeliaEnv(gym.Env):
         # Process control variables
         self.count=0
         self.time_elapsed=0
+        self.total_time_elapsed = 0
         self.n_ep=0
+        self.ato = 0
         self.terminated = False
         self.truncated = False
         self.collision_flag = False
@@ -84,6 +86,8 @@ class CoppeliaEnv(gym.Env):
         self.action_dic = {}
         self.tol_lat = 0.3
         self.crash_flag = False
+        self.initial_ato=0
+        self.reset_flag = False
 
 
     def step(self, action):
@@ -102,7 +106,12 @@ class CoppeliaEnv(gym.Env):
         """
 
         logging.info("STEP Call")
-        
+
+        # Get initial simulation time when the first step occurs. We cannot do this inside the reset, because between the reset
+        if self.reset_flag:
+            self.reset_flag = False
+            self.initial_ato = self.ato
+
         # Make sure that action is a numpy array of 1D, because when testing it can be 2D
         action = action.flatten()   
 
@@ -122,13 +131,13 @@ class CoppeliaEnv(gym.Env):
 
         # Send action to agent and receive an observation.
         logging.info(f"Send act to agent: { {key: round(value, 3) for key, value in self.action_dic.items()} }.")
-        self.lat, self.observation, self.crash_flag, _ato = self._commstoagent.stepSendActGetObs(self.action_dic, timeout = 20.0)
+        self.lat, self.observation, self.crash_flag, self.ato = self._commstoagent.stepSendActGetObs(self.action_dic, timeout = 20.0)
         logging.info(f"Obs rec STEP: { {key: round(value, 3) for key, value in self.observation.items()} }")
-        logging.info(f"REC: crash flag: {self.crash_flag}, ato: {_ato}")
+        logging.debug(f"REC: crash flag: {self.crash_flag}, ato: {self.ato}")
 
         # Update counters
         self.count=self.count+1 
-        self.time_elapsed=self.time_elapsed+self.lat
+        self.time_elapsed=self.ato-self.initial_ato
         self.truncated = False
 
         # Calculate reward
@@ -140,6 +149,7 @@ class CoppeliaEnv(gym.Env):
         # Update episode
         if self.reward !=0:
             logging.debug(f"Episode {self.n_ep} is finished")
+            logging.info(f"Time elapsed (sim time): {round(self.time_elapsed, 3)}")
             self.n_ep=self.n_ep+1
         
         # Observation conversion for consistency
@@ -168,14 +178,16 @@ class CoppeliaEnv(gym.Env):
         logging.info("RESET Call")
 
         # Get the initial observation after resetting the environment
-        self.observation, _ato = self._commstoagent.resetGetObs(timeout = 20.0)
+        self.observation, self.ato = self._commstoagent.resetGetObs(timeout = 20.0)
 
         # Reset counters and termination flags
         self.terminated = False
         self.truncated = False 
         self.count=0
+        self.total_time_elapsed = self.total_time_elapsed + self.time_elapsed
         self.time_elapsed=0
         self.crash_flag = False
+        self.reset_flag = True
 
         logging.info(f"Obs rec RESET: { {key: round(value, 2) for key, value in self.observation.items()} }")
         
@@ -243,7 +255,11 @@ class CoppeliaEnv(gym.Env):
                 else:
                     return 0
 
-        if np.min(laser_obs)<self.params_env["max_crash_dist"]:
+        if (
+            laser_obs[0] < self.params_env["max_crash_dist_critical"] or
+            laser_obs[3] < self.params_env["max_crash_dist_critical"] or
+            any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
+        ):
             logging.info("Crashed")
             self.collision_flag = True
             self.terminated=True

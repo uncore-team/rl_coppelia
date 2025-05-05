@@ -74,6 +74,9 @@ class CoppeliaAgent:
         self.sim = sim
         self.params_env = params_env
 
+        self.initial_simTime = 0
+        self.initial_realTime = 0
+
         # retries = 0
         # MAX_RETRIES = 5
         
@@ -106,6 +109,7 @@ class CoppeliaAgent:
         self.episode_start_time = 0.0
         self.reset_flag = False
         self.crash_flag = False
+        self.training_started = False
         
     
     def get_observation(self):
@@ -216,7 +220,8 @@ class CoppeliaAgent:
                 logging.info(f"Obs send STEP: { {key: round(value, 3) for key, value in observation.items()} }")
 
                 # Send observation to RL
-                self._commstoRL.stepSendObs(observation, self.sim.getSimulationTime(), self.crash_flag) # RL was waiting for this; no reward is actually needed here
+                simTime = self.sim.getSimulationTime() - self.initial_simTime
+                self._commstoRL.stepSendObs(observation, simTime, self.crash_flag) # RL was waiting for this; no reward is actually needed here
                 self.crash_flag = False  # Reset the flag for next iterations
                 self._waitingforrlcommands = True  
             
@@ -228,8 +233,12 @@ class CoppeliaAgent:
             else:
                 if self.laser is not None:
                     laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
-                    logging.info(f"Laser values during movement: {laser_obs}")
-                    if any(value < self.params_env["max_crash_dist"] for value in laser_obs):
+                    logging.debug(f"Laser values during movement: {laser_obs}")
+                    if (
+                        laser_obs[0] < self.params_env["max_crash_dist_critical"] or
+                        laser_obs[3] < self.params_env["max_crash_dist_critical"] or
+                        any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
+                    ) and not self.crash_flag:
                         logging.info("Crash during action execution, episode will finish once the action completes")
                         self.crash_flag = True
 
@@ -242,6 +251,7 @@ class CoppeliaAgent:
             rl_instruction = self._commstoRL.readWhatToDo()
             
             if rl_instruction is not None: # otherwise the RL has not sent any new command
+                self.training_started = True    # Flag set to True whenever the training starts
             
                 # STEP received
                 if rl_instruction[0] == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
@@ -256,6 +266,14 @@ class CoppeliaAgent:
                         self._rltimestep = action["action_time"]
 
                     # Get actual time of the last action
+                    # if self.episode_start_time == 0:
+                    #     self.episode_start_time = self.initial_simTime
+                    if self.reset_flag:
+                        # Reset timing variables after resetting the scene
+                        self._lastactiont0 = 0.0
+                        self.episode_start_time = self.sim.getSimulationTime()
+                        self.reset_flag = False
+                    
                     self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time
                     self.lat = self.current_sim_offset_time-self._lastactiont0
                     self._lastactiont0 = self.current_sim_offset_time
@@ -264,6 +282,7 @@ class CoppeliaAgent:
                     self.execute_cmd_vel = True
                     self._commstoRL.stepSendLastActDur(self.lat)
                     logging.info("LAT already sent")
+                    
             
                 # RESET received
                 elif rl_instruction[0] == AgentSide.WhatToDo.RESET_SEND_OBS:
@@ -295,14 +314,16 @@ class CoppeliaAgent:
 
                     logging.info(f"Obs send RESET: { {key: round(value, 3) for key, value in observation.items()} }")
                     
-                    # Send the observation to the RLSide
-                    self._commstoRL.resetSendObs(observation, self.sim.getSimulationTime())
+                    # Send the observation and the agent time (simulation time) to the RLSide
+                    simTime = self.sim.getSimulationTime() - self.initial_simTime
+                    self._commstoRL.resetSendObs(observation, simTime)
 
                     action = None
                     
-                    # Reset timing variables after resetting the scene
-                    self._lastactiont0 = 0.0
-                    self.episode_start_time = self.sim.getSimulationTime()
+                    # # Reset timing variables after resetting the scene
+                    # self._lastactiont0 = 0.0
+                    # self.episode_start_time = self.sim.getSimulationTime()
+                    self.reset_flag = True
                     
                 # FINISH received --> the loop ends (train or inference has finished)
                 elif rl_instruction[0] == AgentSide.WhatToDo.FINISH:

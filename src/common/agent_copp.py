@@ -75,11 +75,7 @@ def sysCall_sensing():
     Main loop to continuously handle instructions and actions.
     """  
     global sim, agent, verbose
-
-    simTime = sim.getSimulationTime()
-    print("SIM Time:", simTime)
-    realTime = sim.getSystemTime()
-    print("REAL Time:", realTime)
+    initial_realTime = 0
 
     if agent and not agent.finish_rec:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
@@ -105,4 +101,15 @@ def sysCall_sensing():
         sim.callScriptFunction('draw_path', agent.handle_robot_scripts, 0,0, agent.colorID)
 
         logging.info(" ----- END OF EXPERIMENT ----- ")
+        agent.finish_rec = False
+
+    if agent and not agent.training_started:
+        agent.initial_realTime = sim.getSystemTime()
+        agent.initial_simTime = sim.getSimulationTime()
+    
+    elif agent and agent.training_started:
+        simTime = sim.getSimulationTime() - agent.initial_simTime
+        print("SIM Time:", simTime)
+        realTime = sim.getSystemTime() - agent.initial_realTime
+        print("REAL Time:", realTime)
     

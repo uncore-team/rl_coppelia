@@ -364,11 +364,14 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
 
         # Dictionary with variables to update
         if not hasattr(args, "model_name"):
-            print("here")
+            
             args.model_name = None
             model_name = None
         else: 
-            model_name = os.path.basename(args.model_name)
+            try:
+                model_name = os.path.basename(args.model_name)
+            except:
+                model_name = None
 
 
         replacements = {
