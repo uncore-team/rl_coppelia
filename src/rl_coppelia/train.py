@@ -94,7 +94,7 @@ def _parse_tensorboard_logs(log_dir,
                                       "train/value_loss", "train/approx_kl", "train/clip_fraction", "train/explained_variance",
                                       "train/ent_coef", "train/ent_coef_loss", "train/learning_rate",
                                       "rollout/ep_len_mean", "rollout/ep_rew_mean", "custom/sim_time", "custom/episodes",
-                                      "custom/agent_time"]):
+                                    ]):
     """
     Private method that reads TensorBoard logs from a given directory and saves selected metrics into a CSV file.
     
@@ -399,7 +399,7 @@ class CustomMetricsCallback(BaseCallback):
 
         if self.episode_count != self.last_logged_episode and self.episode_count % self.eval_freq == 0:
             self.logger.record("custom/sim_time", base_env.ato, self.num_timesteps)
-            self.logger.record("custom/agent_time", base_env.total_time_elapsed, self.num_timesteps)
+            # self.logger.record("custom/agent_time", base_env.total_time_elapsed, self.num_timesteps)
             self.logger.record("custom/episodes", base_env.n_ep, self.num_timesteps)
             self.logger.dump(self.num_timesteps)
 
