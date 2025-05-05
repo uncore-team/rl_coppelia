@@ -109,7 +109,7 @@ def sysCall_sensing():
     
     elif agent and agent.training_started:
         simTime = sim.getSimulationTime() - agent.initial_simTime
-        print("SIM Time:", simTime)
+        logging.debug("SIM Time:", simTime)
         realTime = sim.getSystemTime() - agent.initial_realTime
-        print("REAL Time:", realTime)
+        logging.debug("REAL Time:", realTime)
     
