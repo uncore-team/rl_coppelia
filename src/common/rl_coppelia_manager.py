@@ -101,11 +101,8 @@ class RLCoppeliaManager():
         # based ion the mean reward obtained during training.
         self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
 
-        # Initialize environment for evaluating the trained model during the training process
-        self.env_test = None
 
-
-    def create_env(self, test_mode = False):
+    def create_env(self):
         """
         This function creates a custom environment using the CoppeliaEnv child classes (located in coppelia_envs.py script)
         
@@ -119,22 +116,14 @@ class RLCoppeliaManager():
         if self.args.robot_name == "burgerBot":
             self.env = make_vec_env(BurgerBotEnv, n_envs=1, monitor_dir=self.log_monitor,
                             env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
-            self.env_test = make_vec_env(BurgerBotEnv, n_envs=1, monitor_dir=self.log_monitor,
-                            env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port+50})
-            
+
             
         elif self.args.robot_name == "turtleBot":
             self.env = make_vec_env(TurtleBotEnv, n_envs=1, monitor_dir=self.log_monitor,
                             env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
-            if not test_mode:
-                self.env_test = make_vec_env(TurtleBotEnv, n_envs=1, monitor_dir=self.log_monitor,
-                                env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port+50})
             
         logging.info(f"Environment for training created: {self.env}. Comms port: {self.free_comms_port}")  
-        if self.env_test is not None:
-            logging.info(f"Environment for testing created: {self.env_test}. Comms port: {self.free_comms_port+50}")
         
-            
         
     def start_coppelia_sim(self, test_mode = False):
         """
@@ -144,9 +133,6 @@ class RLCoppeliaManager():
         Two different instances are needed, so one will be used for training and the other for evaluating during the EvalCallback
         """
         self.current_sim = utils.start_coppelia_and_simulation(self.base_path, self.args, self.params_env, self.free_comms_port)
-        if not test_mode:
-            self.current_test_sim = utils.start_coppelia_and_simulation(self.base_path, self.args, self.params_env, self.free_comms_port+50)
-        
 
 
     def stop_coppelia_sim(self, test_mode = False):
@@ -154,7 +140,3 @@ class RLCoppeliaManager():
         Check if Coppelia simulations are running and, if so, stops every instance.
         """
         utils.stop_coppelia_simulation(self.current_sim)
-        if not test_mode:
-            utils.stop_coppelia_simulation(self.current_test_sim)
-        
-

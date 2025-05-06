@@ -52,10 +52,10 @@ def main(args):
     rl_copp = RLCoppeliaManager(args)
 
     ### Start CoppeliaSim instance
-    rl_copp.start_coppelia_sim(test_mode=True)
+    rl_copp.start_coppelia_sim()
 
     ### Create the environment
-    rl_copp.create_env(test_mode=True)
+    rl_copp.create_env()
 
     ### Test the model
 
@@ -209,7 +209,7 @@ def main(args):
     
 
     ### Close the CoppeliaSim instance
-    rl_copp.stop_coppelia_sim(test_mode=True)
+    rl_copp.stop_coppelia_sim()
 
 
 if __name__ == "__main__":

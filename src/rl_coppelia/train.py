@@ -286,7 +286,7 @@ class CustomEvalCallback(EvalCallback):
         self.steps_since_eval += 1
 
         # Perform evaluation every eval_freq steps
-        if (self.num_timesteps > 600): # default: 10K
+        if (self.num_timesteps > 400): # default: 10K
             if (self.eval_freq > 0 and self.n_calls % self.eval_freq == 0) or self.steps_since_eval >= self.eval_freq:
                 infos = self.locals.get("infos", [])
                 terminated = False
@@ -310,8 +310,9 @@ class CustomEvalCallback(EvalCallback):
                 else:
                     logging.info("Episode is finished, starting the evaluation.")
 
-                # Set evaluation environment
-                self.eval_env = self.rl_manager.env_test
+                # Set evaluation environment: we use the tr5aining env, as we randomize all the elements of the scene for each episode, so there is
+                # no need for using different envs
+                self.eval_env = self.rl_manager.env
 
                 # Evaluate policy over n_eval_episodes
                 episode_rewards, _ = evaluate_policy(
@@ -319,7 +320,7 @@ class CustomEvalCallback(EvalCallback):
                     self.eval_env,
                     n_eval_episodes=self.n_eval_episodes,
                     render=self.render,
-                    deterministic=self.deterministic,
+                    deterministic=True,
                     return_episode_rewards=True,
                     warn=False,
                 )
@@ -455,14 +456,14 @@ def main(args):
         verbose=1)
 
     # Callback for evaluating and saving the best model based on the testing reward every x timesteps
-    eval_test_callback = CustomEvalCallback(
-        rl_copp.env_test,
-        best_model_save_path=to_save_model_path,
-        eval_freq=250, # default: 1500
-        deterministic=True,
-        render=False,
-        rl_manager=rl_copp 
-    )
+    # eval_test_callback = CustomEvalCallback(
+    #     rl_copp.env,
+    #     best_model_save_path=to_save_model_path,
+    #     eval_freq=250, # default: 1500
+    #     deterministic=True,
+    #     render=False,
+    #     rl_manager=rl_copp 
+    # )
 
     # Callback for logging custom metrics in Tensorboard
     metrics_callback = CustomMetricsCallback(rl_copp)
@@ -510,14 +511,14 @@ def main(args):
         if rl_copp.args.verbose ==0:
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
-                callback=[checkpoint_callback, stop_callback, eval_train_callback, eval_test_callback, metrics_callback], 
+                callback=[checkpoint_callback, stop_callback, eval_train_callback, metrics_callback], 
                 # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs"
                 )
         else:
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
-                callback=[checkpoint_callback, stop_callback, eval_train_callback, eval_test_callback, metrics_callback], 
+                callback=[checkpoint_callback, stop_callback, eval_train_callback, metrics_callback], 
                 # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs",
                 progress_bar = True
@@ -570,7 +571,6 @@ def main(args):
     
     # Send a FINISH command to the agent
     rl_copp.env.envs[0].unwrapped._commstoagent.stepExpFinished()   # Unwrapped is needed so we can access the attributes of our wrapped env 
-    rl_copp.env_test.envs[0].unwrapped._commstoagent.stepExpFinished() 
 
     logging.info("Training completed")
 
