@@ -21,6 +21,7 @@ for loading parameters and saving the model and results. This class is the core 
 learning tasks using CoppeliaSim as the simulation environment.
 """
 
+import inspect
 import logging
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -31,6 +32,7 @@ from common.coppelia_envs import BurgerBotEnv, TurtleBotEnv
 from stable_baselines3.common.env_util import make_vec_env
 
 class RLCoppeliaManager():
+    
     def __init__(self, args):
         """
         Manages the interactions with the CoppeliaSim simulation environment for robot training.
@@ -55,7 +57,7 @@ class RLCoppeliaManager():
             args (Namespace): Command-line arguments passed to the script.
         """
         super(RLCoppeliaManager, self).__init__()
-
+        self.calling_script = self._get_calling_script()
         self.args = args
 
         self.base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -69,7 +71,10 @@ class RLCoppeliaManager():
         self.paths = utils.get_robot_paths(self.base_path, self.robot_name)
 
         # Get the next index for all the files that will be saved during the execution, so we can assign it as an ID to the execution
-        self.file_id = utils.get_file_index (args, self.paths["tf_logs"], self.robot_name)
+        if self.calling_script != "retrain.py":
+            self.file_id = utils.get_file_index (args, self.paths["tf_logs"], self.robot_name)
+        else:
+            self.file_id = utils.extract_model_id (self.args.model_name)
 
         # Initialize loggin config
         if hasattr(args, "robot_name"):     # For training or testing
@@ -100,6 +105,18 @@ class RLCoppeliaManager():
         # Temporary folder for storing a tensorboard monitor file during training. This is needed for saving a model 
         # based ion the mean reward obtained during training.
         self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
+
+
+    def _get_calling_script(self):
+        """
+        Inspects the call stack to find the first script that is not 'rl_coppelia_manager.py'.
+        Returns the base filename (e.g., 'train.py', 'retrain.py').
+        """
+        for frame in inspect.stack():
+            filename = frame.filename
+            if filename.endswith('.py') and not filename.endswith('rl_coppelia_manager.py'): 
+                return os.path.basename(filename)
+        return None
 
 
     def create_env(self):

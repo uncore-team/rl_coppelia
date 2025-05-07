@@ -1,93 +1,182 @@
 import logging
 import os
-from stable_baselines3 import SAC
-import utils
-from coppelia_envs import BurgerBotEnv, TurtleBotEnv
-from stable_baselines3.common.vec_env import DummyVecEnv
+import shutil
+import time
+import traceback
+import stable_baselines3
+from common import utils
 from stable_baselines3.common.callbacks import CheckpointCallback
+from common.rl_coppelia_manager import RLCoppeliaManager
 
 
+def main(args):
+    """
+    Saves the model, callbacks, training metrics, test results, and parameters used in a zip file.
+    The zip file will be stored in a 'results' folder within the base path.
 
-model_name = "/home/adrian/Documents/rl_coppelia/robots/turtleBot/models/turtleBot_model_2.zip"
-# Cargar el modelo ya guardado
-model = SAC.load(model_name)
-print(f"RETRAIN MODEL {model_name}")
+    It just needs the following inputs:
+        - model_name (str): The name of the model (should be '<robot_name>_model_ID').
+        - new_name (str): New name to save the model.
+    """
+    rl_copp = RLCoppeliaManager(args)
 
-# Define comm_side
-comm_side = "rl"
+    ### Start CoppeliaSim instance
+    rl_copp.start_coppelia_sim()
 
-# Get root directory
-base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-print(base_path)
+    ### Create the environment
+    rl_copp.create_env()
 
-# Parse user arguments
-args, warning_flags = utils.parse_args()
+    ### Retrain the model
 
-# Generate paths 
-paths = utils.get_robot_paths(base_path, args.robot_name)
+    # Extract the needed paths for retraining
+    models_path = rl_copp.paths["models"]
+    training_metrics_path = rl_copp.paths["training_metrics"]
+    train_log_path = rl_copp.paths["tf_logs"]
+    callbacks_path = rl_copp.paths["callbacks"]
+    train_log_file_path = os.path.join(train_log_path,f"{rl_copp.args.robot_name}_tflogs_{rl_copp.file_id}")
 
-# Define log paths
-train_log_path = paths["tf_logs"]
-logs_path = paths["script_logs"]
+    # Get whole path of the model
+    model_path_to_load = os.path.join(models_path, rl_copp.args.model_name)
 
-# Get the next index for all the files that will be saved during the execution, so we can assign it as an ID to the execution
-file_id = utils.get_file_index (train_log_path, args.robot_name)
+    # Get the model name from the model file path.
+    model_name = os.path.splitext(os.path.basename(rl_copp.args.model_name))[0]
+    model_name = utils.get_base_model_name(model_name)
+    
 
-# Initialization
-utils.logging_config(logs_path, comm_side, args.robot_name, file_id, log_level=logging.INFO)
+    # Get the algorithm used for the previous training of the model
+    train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv 
+    try:
+        retrain_algorithm = utils.get_algorithm_for_model(model_name, train_records_csv_name)
+    except: # SAC by default
+        retrain_algorithm = "SAC"
 
-# Show possible warnings obtained during the parsing arguments function.
-utils.show_warning_logs(warning_flags)
+    logging.info(f"Algorithm to be used: {retrain_algorithm}")
 
-# Get params file path in case that we are in testing mode, as we need to use the same one that was used for training the model that we want to test.
-if (args.testing_mode):
-    args.params_file = utils.get_params_file(paths,args)
+    # Get the training algorithm from the parameters file
+    ModelClass = getattr(stable_baselines3, retrain_algorithm)
+    
+    # Load the model file
+    model = ModelClass.load(model_path_to_load, env=rl_copp.env, tensorboard_log=train_log_path)
 
-# Load the parameters defined by the user in params_file ('params_file.json' by default).
-params_env, params_train, params_test = utils.load_params(args.params_file)
+    # Set lat timestep number from last training
+    # train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the timesteps count
+    # model.num_timesteps = utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Step")
+    # logging.info(f"The timesteps count of the last training of the model {model_name} is {model.num_timesteps} steps.")
+    
+    # model.set_env(env)
 
-# Update the port that will be used for communications between agent and environment
-comms_port = 49054
-if args.parallel_training:
-    comms_port = utils.find_next_free_port(comms_port)
+    # Get the folder which will contain the final model
+    to_save_model_path = os.path.dirname(model_path_to_load)    # From models/turtleBot_model_307/turtleBot_model_307_last --> models/turtleBot_model_307/
 
-# Start CoppeliaSim software, load scene and start the simulation
-# Also, the code inside the scene will be automatically updated with the code of 'agent_coppelia_script.py'.
-current_sim = utils.start_coppelia_and_simulation(base_path, args, params_env, comms_port)
+    # Callback function to save the model every x timesteps
+    to_save_callbacks_path, _ = utils.get_next_model_name(callbacks_path, rl_copp.args.robot_name, rl_copp.file_id, callback_mode=True)
+    checkpoint_callback = CheckpointCallback(save_freq=rl_copp.params_train['callback_frequency'], save_path=to_save_callbacks_path, name_prefix=rl_copp.args.robot_name)
 
+    logging.info(f"Model path to load: {model_path_to_load}")
+    logging.info(f"Model base name: {model_name}")
+    logging.info(f"Experiment ID: {rl_copp.file_id}")
+    logging.info(f"Robot nmame: {rl_copp.args.robot_name}")
+    logging.info(f"to_save_model_path: {to_save_model_path}")
+    logging.info(f"to_save_callbacks_path: {to_save_callbacks_path}")
+    logging.info(f"Retraining mode. Final trained model will be saved in {models_path}")
+    
+    # Callback function for stopping the learning process if a specific key is pressed
+    stop_callback = utils.StopTrainingOnKeypress(key="F") 
 
-base_env = TurtleBotEnv(params_env, comms_port=comms_port)
+    # Callback for saving the best model based on the training reward every x timesteps
+    eval_train_callback = utils.SaveOnBestTrainingRewardCallback(
+        check_freq=1000,    # default: 1000
+        save_path=to_save_model_path, 
+        log_dir=rl_copp.log_monitor, 
+        verbose=1)
 
-# Vectorize the environment
-env = DummyVecEnv([lambda: base_env])
+    # Callback for evaluating and saving the best model based on the testing reward every x timesteps
+    # eval_test_callback = utils.CustomEvalCallback(
+    #     rl_copp.env,
+    #     best_model_save_path=to_save_model_path,
+    #     eval_freq=250, # default: 1500
+    #     deterministic=True,
+    #     render=False,
+    #     rl_manager=rl_copp 
+    # )
 
-model.set_env(env)
+    # Callback for logging custom metrics in Tensorboard
+    metrics_callback = utils.CustomMetricsCallback(rl_copp)
 
-# Continuar el entrenamiento
-model.learn(total_timesteps=10000)  # Ajusta el número de timesteps según necesites
+    # Save a timestamp of the beggining of the training
+    start_time = time.time()
 
+    # Start the training
+    try:
+        if rl_copp.args.verbose ==0:
+            model.learn(
+                total_timesteps=rl_copp.args.retrain_steps,
+                reset_num_timesteps=False,
+                callback=[checkpoint_callback, stop_callback, eval_train_callback, metrics_callback], 
+                tb_log_name=f"{rl_copp.args.robot_name}_tflogs"
+                )
+        else:
+            model.learn(
+                total_timesteps=rl_copp.args.retrain_steps,
+                reset_num_timesteps=False,
+                callback=[checkpoint_callback, stop_callback, eval_train_callback, metrics_callback], 
+                tb_log_name=f"{rl_copp.args.robot_name}_tflogs",
+                progress_bar = True
+                )
+    except Exception as e:
+        traceback.print_exc()
+        logging.critical(f"There was an error during the learning process. Exception: {e}")
 
-models_path = paths["models"]
-callbacks_path = paths["callbacks"]
-train_log_path = paths["tf_logs"]
-training_metrics_path = paths["training_metrics"]
-parameters_used_path = paths["parameters_used"]
-train_log_file_path = os.path.join(train_log_path,f"{args.robot_name}_tflogs_{file_id}")
+    # Save a timestamp of the ending of the training
+    end_time = time.time()
 
-# TODO Check that for some reason, it starts sending and receiving resets and steps before next log ?? 
-logging.info(f"Training mode. Final trained model will be saved in {models_path}")
+    # Save the final trained model
+    
+    logging.info(f"PATH TO SAVE MODEL: {to_save_model_path}")
+    model.save(os.path.join(to_save_model_path, f"{model_name}_last"))
 
-# Callback function to save the model every x timesteps
-to_save_callbacks_path, _ = utils.get_next_model_name(callbacks_path, args.robot_name, file_id, callback_mode=True)
-checkpoint_callback = CheckpointCallback(save_freq=params_train['callback_frequency'], save_path=to_save_callbacks_path, name_prefix=args.robot_name)
+    # Parse metrics from tensorboard log and save them in a csv file. Also, we get the metrics of the last row of that csv file
+    _, experiment_csv_path = utils.get_output_csv(model_name, training_metrics_path)
+    logging.info(f"PATH TO SAVE CSV TRAINIG: {experiment_csv_path}")
+    try:
+        _, last_metric_row = utils.parse_tensorboard_logs(train_log_file_path, output_csv=experiment_csv_path)
+    except:
+        last_metric_row = {}
+        logging.error("There was an exception while trying to get data from tensorboard log.")
+        # TODO MAnage exception
 
-# Start the training
-model.learn(
-    total_timesteps=params_train['total_timesteps'],
-    callback=checkpoint_callback, 
-    log_interval=1, # This is needed to assure that a tf.events file is generated even if thr training lasts few timesteps.
-    tb_log_name=f"{args.robot_name}_tflogs"
-    )
+    # Name of the records csv to store the final values of the training experiment.
+    records_csv_name = os.path.join(training_metrics_path,"train_records.csv")
 
-# Guardar el modelo actualizado si lo deseas
-model.save("ruta/al/modelo_continuado.zip")
+    # Get time to converge using the data from the training csv
+    try:
+        convergence_time, _, _, _ = utils.get_convergence_point (experiment_csv_path, " Time", convergence_threshold=0.05)
+    except Exception as e:
+        logging.error(f"No convergence time was found. Exception: {e}")
+        convergence_time = 0.0
+
+    # Construct the dictionary with some data to store in the records file
+    data_to_store ={
+        "Algorithm" : rl_copp.params_train["sb3_algorithm"],
+        "Policy" : rl_copp.params_train["policy"],
+        "Action time (s)" : rl_copp.params_env["fixed_actime"],
+        "Time to converge (h)" : convergence_time,
+        **last_metric_row
+    }
+
+    # Update the train record.
+    utils.update_records_file (records_csv_name, model_name, start_time, end_time, data_to_store)
+    
+    # Send a FINISH command to the agent
+    rl_copp.env.envs[0].unwrapped._commstoagent.stepExpFinished()   # Unwrapped is needed so we can access the attributes of our wrapped env 
+
+    logging.info("Training completed")
+
+    # Remove monitor folder
+    logging.info(f"rl_copp.log_monitor: {rl_copp.log_monitor}")
+    if os.path.exists(rl_copp.log_monitor):
+        logging.info("monitor removed")
+        shutil.rmtree(rl_copp.log_monitor)
+
+    ### Close the CoppeliaSim instance
+    rl_copp.stop_coppelia_sim()
