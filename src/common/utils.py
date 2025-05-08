@@ -115,6 +115,61 @@ def logging_config(logs_dir, side_name, robot_name, experiment_id, log_level = l
     )
 
 
+
+# ------------------------------------------
+# ------- Functions for communication ------
+# ------------------------------------------
+
+
+def is_port_in_use(port):
+    """
+    Verify if a port is being used or in LISTEN state.
+    """
+    for conn in psutil.net_connections(kind="inet"):
+        if conn.laddr.port == port and conn.status in ("LISTEN", "ESTABLISHED"):
+            return True  # The port is busy
+    return False  # The port is free
+
+
+def find_next_free_port(start_port = 49054):
+    """
+    Finds the next available port starting from the given port.
+
+    This function checks whether a port and the next consecutive port are available for use. 
+    If both ports are available, it returns the first available port. If not, it increments 
+    the port by 2 and continues the search. If no available ports are found within a reasonable 
+    range, the function will log an error and exit.
+
+    Args:
+        start_port (int): The starting port number to search from. Default is 49054.
+
+    Returns:
+        int: The next available port.
+
+    Raises:
+        SystemExit: If no available ports are found after checking a range of 50 ports.
+
+    Notes:
+        The function checks pairs of ports, as Coppelia uses two consecutive ports for communication 
+        (by default, `zmqRemoteApi.rpcPort` and `zmqRemoteApi.cntPort`).
+    """
+    next_port = start_port
+    while True:
+        if not is_port_in_use(next_port) and not is_port_in_use(next_port + 1):
+            logging.info(f"Next avaliable port to be used: {next_port}")
+            return next_port 
+        next_port += 2  # If it's busy, let's try with the next pair of ports
+        if next_port - start_port > 50:
+            logging.error(f"No ports avaliable for communication. Last port that was attempted to connect was {next_port}")
+            sys.exit()
+
+
+
+# -------------------------------------------------------------
+# ------ Functions for managing files, names and folders ------
+# -------------------------------------------------------------
+
+
 def get_last_model(models_path):
     """
     Gets the last modified model (so it should be the last trained model) inside the models folder
@@ -302,6 +357,40 @@ def get_robot_paths(base_dir, robot_name, just_agent_logs = False):
     return paths
 
 
+def get_next_retrain_model_name(models_dir, base_model_name):
+    """
+    Finds the latest retrain version of a given base model in the models directory,
+    and returns the name for the next retrain version by incrementing the index.
+
+    Args:
+        models_dir (str): Path to the directory containing model files.
+        base_model_name (str): Base name of the model without extension 
+                               (e.g. "turtleBot_model_306_last").
+
+    Returns:
+        str: Next model file name without extension 
+             (e.g. "turtleBot_model_306_last_retrain2").
+    """
+    pattern = re.compile(rf"^{re.escape(base_model_name)}_retrain(\d+)$")
+    max_retrain = 0
+
+    for filename in os.listdir(models_dir):
+        name, _ = os.path.splitext(filename)
+        match = pattern.match(name)
+        if match:
+            retrain_idx = int(match.group(1))
+            if retrain_idx > max_retrain:
+                max_retrain = retrain_idx
+
+    next_index = max_retrain + 1
+    return f"{base_model_name}_retrain{next_index}"
+
+
+
+# ---------------------------------------
+# ------ Functions for CoppeliaSim ------
+# ---------------------------------------
+
 def find_coppelia_path():
     """
     Attempts to locate the CoppeliaSim installation directory automatically.
@@ -434,7 +523,6 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
             except:
                 model_name = None
 
-
         replacements = {
             "robot_name": args.robot_name,
             "model_name": model_name,
@@ -483,49 +571,6 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
         logging.error(f"Something happened while trying to update the content of the script inside Coppelia's scene: {e}")
         # sys.exit()
 
-
-def is_port_in_use(port):
-    """
-    Verify if a port is being used or in LISTEN state.
-    """
-    for conn in psutil.net_connections(kind="inet"):
-        if conn.laddr.port == port and conn.status in ("LISTEN", "ESTABLISHED"):
-            return True  # The port is busy
-    return False  # The port is free
-
-
-def find_next_free_port(start_port = 49054):
-    """
-    Finds the next available port starting from the given port.
-
-    This function checks whether a port and the next consecutive port are available for use. 
-    If both ports are available, it returns the first available port. If not, it increments 
-    the port by 2 and continues the search. If no available ports are found within a reasonable 
-    range, the function will log an error and exit.
-
-    Args:
-        start_port (int): The starting port number to search from. Default is 49054.
-
-    Returns:
-        int: The next available port.
-
-    Raises:
-        SystemExit: If no available ports are found after checking a range of 50 ports.
-
-    Notes:
-        The function checks pairs of ports, as Coppelia uses two consecutive ports for communication 
-        (by default, `zmqRemoteApi.rpcPort` and `zmqRemoteApi.cntPort`).
-    """
-    next_port = start_port
-    while True:
-        if not is_port_in_use(next_port) and not is_port_in_use(next_port + 1):
-            logging.info(f"Next avaliable port to be used: {next_port}")
-            return next_port 
-        next_port += 2  # If it's busy, let's try with the next pair of ports
-        if next_port - start_port > 50:
-            logging.error(f"No ports avaliable for communication. Last port that was attempted to connect was {next_port}")
-            sys.exit()
-   
 
 def create_discs_under_target(sim, params_env):
     """
@@ -792,14 +837,15 @@ def load_params(file_path):
 def get_output_csv(model_name, metrics_path, train_flag=True):
     """
     Get the path to to csv file that will be generated for storing the training/inference metrics. The name of the file
-    will be unique, as it makes use of the timestamp.
+    will be unique, as it makes use of the timestamp. In case of inference, it will generate also the path of the csv 
+    to store the speeds of the robot during the testing process.
 
     Args:
         model_name (str): Name of the model file, as it will be used for identifying the csv file.
         metrics_path (str): Path to store the csv files with the obtained metrics.
         train_flag (bool): True if the script has been executed in training mode, False in case of running a test. True by default.
 
-    Return:
+    Return: #TODO complete the return
         output_csv_path (str): Path to the new csv file.
     """
     # Get current timestamp so the metrics.csv file will have an unique name
@@ -808,10 +854,14 @@ def get_output_csv(model_name, metrics_path, train_flag=True):
     # Get name and return the path to the csv file
     if train_flag:
         output_csv_name = f"{model_name}_train_{timestamp}.csv"
+        output_csv_path = os.path.join(metrics_path, output_csv_name)
+        return output_csv_name, output_csv_path
     else:
-        output_csv_name = f"{model_name}_test_{timestamp}.csv"
-    output_csv_path = os.path.join(metrics_path, output_csv_name)
-    return output_csv_name, output_csv_path
+        output_csv_name_1 = f"{model_name}_test_{timestamp}.csv"
+        output_csv_name_2 = f"{model_name}_speeds_{timestamp}.csv"
+        output_csv_path_1 = os.path.join(metrics_path, output_csv_name_1)
+        output_csv_path_2 = os.path.join(metrics_path, output_csv_name_2)
+        return output_csv_name_1, output_csv_name_2, output_csv_path_1, output_csv_path_2
 
 
 def update_records_file (file_path, exp_name, start_time, end_time, other_metrics):
@@ -1568,12 +1618,15 @@ def get_base_env(vec_env):
 
 
 class CustomMetricsCallback(BaseCallback):
-    def __init__(self, rl_copp, eval_freq=4, verbose=0):
+    def __init__(self, rl_copp, episodes_offset=0, sim_time_offset=0, eval_freq=4, verbose=0):
         super().__init__(verbose)
         self.rl_copp = rl_copp 
         self.eval_freq = eval_freq
         self.last_logged_episode = 0
         self.episode_count = 0
+        self.episodes_offset = episodes_offset
+        self.sim_time_offset = sim_time_offset
+
 
     def _on_step(self) -> bool:
         # Log in TensorBoard
@@ -1588,11 +1641,13 @@ class CustomMetricsCallback(BaseCallback):
         if self.episode_count != new_episode_count:
             self.episode_count = new_episode_count
 
+        current_episode = base_env.n_ep+float(self.episodes_offset)
+        current_sim_time = base_env.ato+float(self.sim_time_offset)
 
         if self.episode_count != self.last_logged_episode and self.episode_count % self.eval_freq == 0:
-            self.logger.record("custom/sim_time", base_env.ato, self.num_timesteps)
+            self.logger.record("custom/sim_time", current_sim_time, self.num_timesteps)
             # self.logger.record("custom/agent_time", base_env.total_time_elapsed, self.num_timesteps)
-            self.logger.record("custom/episodes", base_env.n_ep, self.num_timesteps)
+            self.logger.record("custom/episodes", current_episode, self.num_timesteps)
             self.logger.dump(self.num_timesteps)
 
             # Update the last logged episode to avoid redundant logging

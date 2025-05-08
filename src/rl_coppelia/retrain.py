@@ -40,7 +40,7 @@ def main(args):
 
     # Get the model name from the model file path.
     model_name = os.path.splitext(os.path.basename(rl_copp.args.model_name))[0]
-    model_name = utils.get_base_model_name(model_name)
+    base_model_name = utils.get_base_model_name(model_name)
     
 
     # Get the algorithm used for the previous training of the model
@@ -50,20 +50,26 @@ def main(args):
     except: # SAC by default
         retrain_algorithm = "SAC"
 
-    logging.info(f"Algorithm to be used: {retrain_algorithm}")
+    last_episode = utils.get_data_from_training_csv(base_model_name, train_records_csv_name, "custom/episodes")
+    last_sim_time = utils.get_data_from_training_csv(base_model_name, train_records_csv_name, "custom/sim_time")
+    
 
     # Get the training algorithm from the parameters file
     ModelClass = getattr(stable_baselines3, retrain_algorithm)
     
     # Load the model file
-    model = ModelClass.load(model_path_to_load, env=rl_copp.env, tensorboard_log=train_log_path)
+    model = ModelClass.load(
+        model_path_to_load, 
+        env=rl_copp.env
+        # tensorboard_log=train_log_file_path
+        )
 
     # Set lat timestep number from last training
     # train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the timesteps count
     # model.num_timesteps = utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Step")
     # logging.info(f"The timesteps count of the last training of the model {model_name} is {model.num_timesteps} steps.")
     
-    # model.set_env(env)
+    model.set_env(rl_copp.env)
 
     # Get the folder which will contain the final model
     to_save_model_path = os.path.dirname(model_path_to_load)    # From models/turtleBot_model_307/turtleBot_model_307_last --> models/turtleBot_model_307/
@@ -73,11 +79,15 @@ def main(args):
     checkpoint_callback = CheckpointCallback(save_freq=rl_copp.params_train['callback_frequency'], save_path=to_save_callbacks_path, name_prefix=rl_copp.args.robot_name)
 
     logging.info(f"Model path to load: {model_path_to_load}")
-    logging.info(f"Model base name: {model_name}")
+    logging.info(f"Model base name: {base_model_name}")
     logging.info(f"Experiment ID: {rl_copp.file_id}")
     logging.info(f"Robot nmame: {rl_copp.args.robot_name}")
     logging.info(f"to_save_model_path: {to_save_model_path}")
     logging.info(f"to_save_callbacks_path: {to_save_callbacks_path}")
+    logging.info(f"Algorithm to be used: {retrain_algorithm}")
+    logging.info(f"Last episode: {last_episode}")
+    logging.info(f"Last sim time: {last_sim_time}")
+    logging.info(f"Tensorboard path: {train_log_file_path}")
     logging.info(f"Retraining mode. Final trained model will be saved in {models_path}")
     
     # Callback function for stopping the learning process if a specific key is pressed
@@ -101,7 +111,7 @@ def main(args):
     # )
 
     # Callback for logging custom metrics in Tensorboard
-    metrics_callback = utils.CustomMetricsCallback(rl_copp)
+    metrics_callback = utils.CustomMetricsCallback(rl_copp, last_episode, last_sim_time)
 
     # Save a timestamp of the beggining of the training
     start_time = time.time()
@@ -130,14 +140,14 @@ def main(args):
     # Save a timestamp of the ending of the training
     end_time = time.time()
 
-    # Save the final trained model
-    
-    logging.info(f"PATH TO SAVE MODEL: {to_save_model_path}")
-    model.save(os.path.join(to_save_model_path, f"{model_name}_last"))
+    # Save the final trained model    
+    model_name_to_save = utils.get_next_retrain_model_name(models_path,model_name)
+    model.save(os.path.join(to_save_model_path, model_name_to_save))
+    logging.info(f"Model {model_name_to_save} is saved within {to_save_model_path}")
 
     # Parse metrics from tensorboard log and save them in a csv file. Also, we get the metrics of the last row of that csv file
     _, experiment_csv_path = utils.get_output_csv(model_name, training_metrics_path)
-    logging.info(f"PATH TO SAVE CSV TRAINIG: {experiment_csv_path}")
+    logging.info(f"Path to save csv training: {experiment_csv_path}")
     try:
         _, last_metric_row = utils.parse_tensorboard_logs(train_log_file_path, output_csv=experiment_csv_path)
     except:
@@ -173,10 +183,12 @@ def main(args):
     logging.info("Training completed")
 
     # Remove monitor folder
-    logging.info(f"rl_copp.log_monitor: {rl_copp.log_monitor}")
+    
     if os.path.exists(rl_copp.log_monitor):
-        logging.info("monitor removed")
         shutil.rmtree(rl_copp.log_monitor)
+        logging.info(f"Monitor file {rl_copp.log_monitor} removed successfully")
+    else:
+        logging.error(f"Monitor not found: {rl_copp.log_monitor}")
 
     ### Close the CoppeliaSim instance
     rl_copp.stop_coppelia_sim()

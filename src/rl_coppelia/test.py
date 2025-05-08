@@ -87,7 +87,7 @@ def main(args):
     model = ModelClass.load(rl_copp.args.model_name, rl_copp.env)
     
     # Get output csv path
-    experiment_csv_name, experiment_csv_path = utils.get_output_csv(model_name,testing_metrics_path, train_flag=False)
+    experiment_csv_name, _, experiment_csv_path, speeds_csv_path = utils.get_output_csv(model_name, testing_metrics_path, train_flag=False)
 
     # Save a timestamp of the beggining of the testing
     start_time = time.time()
@@ -107,6 +107,8 @@ def main(args):
     else:
         n_iter = rl_copp.params_test['testing_iterations']
     logging.info(f"Running tests for {n_iter} iterations.")
+
+    speed_headers = ["Linear speed", "Angular speed"]
 
 
     # Open a csv file to store the metrics
@@ -144,10 +146,18 @@ def main(args):
             while not (terminated or truncated):
                 action, _states = model.predict(observation, deterministic = True)
                 observation, _, terminated, truncated, info = rl_copp.env.envs[0].step(action)
-                with open("linear_speeds.csv", mode='a', newline='') as speed_file:
+
+                try:
+                    with open(speeds_csv_path, mode="r") as f:
+                        pass
+                except FileNotFoundError:
+                    with open(speeds_csv_path, mode="w", newline='') as f:
+                        speed_writer = csv.writer(f)
+                        speed_writer.writerow(speed_headers)  # Write the headers
+
+                with open(speeds_csv_path, mode='a', newline='') as speed_file:
                     speed_writer = csv.writer(speed_file)
-                    linear_speed = info["linear_speed"]
-                    speed_writer.writerow([linear_speed])
+                    speed_writer.writerow([info["linear_speed"], info["angular_speed"]])
             
             # Call get_metrics(), so we will have the total time of the iteration
             # and the final distance to the target

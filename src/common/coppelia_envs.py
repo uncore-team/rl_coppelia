@@ -156,7 +156,12 @@ class CoppeliaEnv(gym.Env):
         self.observation = np.array(list(self.observation.values()), dtype=np.float32)
 
         # Add additional information (optional)
-        self.info = {"terminated": self.terminated, "truncated": self.truncated, "linear_speed":self.action_dic["linear"]}
+        self.info = {
+            "terminated": self.terminated, 
+            "truncated": self.truncated, 
+            "linear_speed":self.action_dic["linear"],
+            "angular_speed":self.action_dic["angular"]
+            }
 
         return self.observation, self.reward, self.terminated, self.truncated, self.info
     
