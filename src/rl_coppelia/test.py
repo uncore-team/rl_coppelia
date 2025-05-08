@@ -203,7 +203,7 @@ def main(args):
         "Percentage truncated": percentage_not_finished,    # So we don't use the truncated flag for calculating them, but the 'max_achieved' and 'collision' 
                                                                 # flags, which are triggered when the maximum distance or time are achieved, and when there is 
                                                                 # a collision, respectively
-        "Number of collisions": percentage_collisions
+        "Number of collisions": sum(collision_list)
     }
 
     # Name of the records csv to store the final values of the testing experiment.

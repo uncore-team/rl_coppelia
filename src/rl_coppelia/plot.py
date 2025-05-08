@@ -130,8 +130,8 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
     
 
     # Calculate the convergence time
-    convergence_point, reward_fit, x_axis_values, reward, reward_at_convergence = utils.get_convergence_point (files[0], x_axis, convergence_threshold=0.01)
-    print(reward_at_convergence)
+    convergence_point, reward_fit, x_axis_values, reward, reward_at_convergence = utils.get_convergence_point (files[0], x_axis, convergence_threshold=0.02)
+    logging.info(f"Reward at convergence point: {reward_at_convergence}")
 
     # Plot results
     plt.figure(figsize=(8, 5))
