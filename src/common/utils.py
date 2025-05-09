@@ -1978,16 +1978,22 @@ def get_convergence_point(file_path, x_axis, convergence_threshold = 0.02):
     df = pd.read_csv(file_path)
 
     # Obtener eje x y su versión normalizada
-    if x_axis == "Time":
+    if x_axis == "WallTime":
         df['Step timestamp'] = pd.to_datetime(df['Step timestamp'], format='%Y-%m-%d_%H-%M-%S')
         start_time = df['Step timestamp'].iloc[0]
         df['Relative time'] = (df['Step timestamp'] - start_time).dt.total_seconds() / 3600
         x_raw = df['Relative time'].values
-    elif x_axis == "Step":
+    elif x_axis == "Steps":
         x_raw = df['Step'].values
-        x_raw = x_raw - x_raw[0]  # hace que empiece en 0
+        x_raw = x_raw - x_raw[0]  # so it starts at 0
+    elif x_axis == "SimTime":
+        x_raw = df['custom/sim_time'].values
+        x_raw = (x_raw - x_raw[0]) / 3600   # convert to hours
+    elif x_axis == "Episodes":
+        x_raw = df['custom/episodes'].values
+        x_raw = x_raw - x_raw[0]  
     else:
-        raise ValueError("x_axis must be 'Time' or 'Step'")
+        raise ValueError("x_axis must be 'WallTime', 'Step', 'SimTime', or 'Episodes'")
 
     # Eje x normalizado
     x_norm = (x_raw - np.min(x_raw)) / (np.max(x_raw) - np.min(x_raw))

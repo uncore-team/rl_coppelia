@@ -118,11 +118,13 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
 
 def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Convergence Analysis"):
     """
-    Plots the reward-time graph and shows the time at which the reward stabilizes (converges) based on a first-order fit.
+    Plots a graph with the reward vs Wall time, steps, episodes or simulatino time, and shows the point at which the reward stabilizes
+    (converges) based on a first-order fit.
 
     Args:
     - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
     - title (str): The title of the chart.
+    - x_axis (str): Name of the x_axis.
     """
     # CSV File path to get data from
     file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*.csv"
@@ -137,18 +139,30 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
     plt.figure(figsize=(8, 5))
     # plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
     # plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
-    if x_axis == "Time":
+    if x_axis == "WallTime":
         plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
         plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
-        plt.xlabel('Time (hours)')
-        plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Time: {convergence_point:.2f}h')
-        title = title + ' vs Time'
-    elif x_axis == "Step":
+        plt.xlabel('Wall time (hours)')
+        plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Wall Time: {convergence_point:.2f}h')
+        title = title + ' vs Wall Time'
+    elif x_axis == "Steps":
         plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
         plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
-        plt.xlabel('Step')
+        plt.xlabel('Steps')
         plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Steps: {convergence_point:.2f}')
-        title = title +  ' vs Step'
+        title = title +  ' vs Steps'
+    elif x_axis == "SimTime":
+        plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
+        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
+        plt.xlabel('Simulation time (hours)')
+        plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Sim Time: {convergence_point:.2f}h')
+        title = title + ' vs Sim Time'
+    elif x_axis == "Episodes":
+        plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
+        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
+        plt.xlabel('Episodes')
+        plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Episodes: {convergence_point:.2f}')
+        title = title +  ' vs Episodes'
     plt.ylabel('Reward')
     plt.legend()
     plt.title(title + ": Model " + str(rl_copp_obj.args.model_ids[model_index]))
@@ -223,17 +237,37 @@ def main(args):
             logging.info(f"Plotting spider graph for comparing the models {args.model_ids}")
             plot_spider(rl_copp)
 
-    if "convergence-time" in args.plot_types:
+    if "convergence-walltime" in args.plot_types:
         plot_type_correct = True
         for model in range(len(args.model_ids)):
-            logging.info(f"Plotting convergence-vs-time graph for model {args.model_ids[model]}")
-            plot_convergence(rl_copp, model, "Time")
+            logging.info(f"Plotting convergence-vs-wall-time graph for model {args.model_ids[model]}")
+            plot_convergence(rl_copp, model, "WallTime")
     
     if "convergence-steps" in args.plot_types:
         plot_type_correct = True
         for model in range(len(args.model_ids)):
             logging.info(f"Plotting convergence-vs-steps graph for model {args.model_ids[model]}")
-            plot_convergence(rl_copp, model, "Step")
+            plot_convergence(rl_copp, model, "Steps")
+
+    if "convergence-simtime" in args.plot_types:
+        plot_type_correct = True
+        for model in range(len(args.model_ids)):
+            logging.info(f"Plotting convergence-vs-simtime graph for model {args.model_ids[model]}")
+            plot_convergence(rl_copp, model, "SimTime")
+
+    if "convergence-episodes" in args.plot_types:
+        plot_type_correct = True
+        for model in range(len(args.model_ids)):
+            logging.info(f"Plotting convergence-vs-episodes graph for model {args.model_ids[model]}")
+            plot_convergence(rl_copp, model, "Episodes")
+
+    if "convergence-all" in args.plot_types:
+        plot_type_correct = True
+        for model in range(len(args.model_ids)):
+            logging.info(f"Plotting all the convergence graphs for model {args.model_ids[model]}")
+            convergence_modes = ["WallTime", "Steps", "SimTime", "Episodes"]
+            for i in range(len(convergence_modes)):
+                plot_convergence(rl_copp, model, convergence_modes[i])
 
     if "compare-rewards" in args.plot_types:
         plot_type_correct = True
