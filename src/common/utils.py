@@ -994,6 +994,8 @@ def get_data_from_training_csv(model_name, csv_path, column_header):
         first_col = reader.fieldnames[0]
         for row in reader:
             if row[first_col] == model_name:
+                print("dsjdjsid")
+                print(row.get(column_header))
                 return row.get(column_header)
 
         logging.error(f"Error while getting data from csv")
