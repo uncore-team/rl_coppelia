@@ -1698,9 +1698,7 @@ def get_data_for_spider(csv_path, args, column_names):
     df_filtered = df[df.iloc[:, 0].notna()]
     # Process each ID in the args.model_ids list
     for id in args.model_ids:
-        # Search rows in the first column which finish with the provided ID
-        print(f'{args.robot_name}_model_{id}')
-        
+        # Search rows in the first column which finish with the provided ID      
 
         filter = df_filtered.iloc[:, 0].apply(lambda x: x.startswith(f'{args.robot_name}_model_{id}'))
         filtered_rows = df_filtered[filter]

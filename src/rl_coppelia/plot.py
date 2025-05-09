@@ -41,15 +41,21 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     """
 
     # Categories for plotting
+    # categories = [
+    #     "Convergence Sim Time",
+    #     "Actor Performance",
+    #     "Critic Performance",
+    #     # "Train Episode Efficiency",
+    #     # "Train Reward",
+    #     "Test Reward",
+    #     "Test Episode Efficiency",
+    #     "Test Episode Completion Rate",  
+    # ]
     categories = [
-        "Convergence Time",
-        "Actor Performance",
-        "Critic Performance",
-        # "Train Episode Efficiency",
-        # "Train Reward",
-        "Test Reward",
-        "Test Episode Efficiency",
-        "Test Episode Completion Rate",  
+        "Convergence Sim Time",
+        "Mean Reward",
+        "Episode Efficiency",
+        "Episode Completion Rate",  
     ]
 
     # Get metrics from testing
@@ -63,14 +69,21 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
 
     # Get metrics from training
     training_csv_path = os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "training_metrics", "train_records.csv")
+    # train_column_names = [
+    #     "Action time (s)",
+    #     "Time to converge (h)",
+    #     "train/actor_loss",
+    #     "train/critic_loss",
+    #     # "rollout/ep_len_mean",
+    #     # "rollout/ep_rew_mean"
+    # ]
+
     train_column_names = [
         "Action time (s)",
         "Time to converge (h)",
-        "train/actor_loss",
-        "train/critic_loss",
-        # "rollout/ep_len_mean",
-        # "rollout/ep_rew_mean"
     ]
+
+
     train_data = utils.get_data_for_spider(training_csv_path, rl_copp_obj.args, train_column_names)
 
     # Concatenate the train and test DataFrames along the columns axis
@@ -135,6 +148,10 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
     convergence_point, reward_fit, x_axis_values, reward, reward_at_convergence = utils.get_convergence_point (files[0], x_axis, convergence_threshold=0.02)
     logging.info(f"Reward at convergence point: {reward_at_convergence}")
 
+    # TODO: Get action time from training csv for showing it in the graph
+    # rl_copp.params_test["sb3_algorithm"] = utils.get_algorithm_for_model(model_name, train_records_csv_name)
+    # get_data_from_training_csv
+
     # Plot results
     plt.figure(figsize=(8, 5))
     # plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
@@ -188,6 +205,10 @@ def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
         
         # Read the CSV file
         df = pd.read_csv(files[0])
+
+        # Limit max steps <= 200000 #TODO: remove this and do it automatically, by using the experiment with less steps as a limit
+        mask = df['Step'] <= 200000
+        df = df[mask]
         
         # Extract steps and rewards
         steps = df['Step'].values
