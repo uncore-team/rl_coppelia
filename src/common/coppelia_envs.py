@@ -83,6 +83,7 @@ class CoppeliaEnv(gym.Env):
         self.collision_flag = False
         self.max_achieved = False
         self.reward = 0
+        self.target_zone = 0
         self.action_dic = {}
         self.tol_lat = 0.3
         self.crash_flag = False
@@ -160,7 +161,8 @@ class CoppeliaEnv(gym.Env):
             "terminated": self.terminated, 
             "truncated": self.truncated, 
             "linear_speed":self.action_dic["linear"],
-            "angular_speed":self.action_dic["angular"]
+            "angular_speed":self.action_dic["angular"],
+            
             }
 
         return self.observation, self.reward, self.terminated, self.truncated, self.info
@@ -249,12 +251,14 @@ class CoppeliaEnv(gym.Env):
             logging.info("Crashed detected during the movement")
             self.collision_flag = True
             self.terminated=True
+            self.target_zone = 0
             return self.params_env["crash_penalty"]
 
         if self.params_env["finish_episode_flag"]:
             if self.action_dic["finish_flag"]<0.5:
                 logging.info("Agent self truncated.")
                 self.truncated = True
+                self.target_zone = 0
                 if distance>self.params_env["dist_thresh_finish_flag"]:
                     return self.params_env["finish_flag_penalty"]
                 else:
@@ -264,34 +268,40 @@ class CoppeliaEnv(gym.Env):
             laser_obs[0] < self.params_env["max_crash_dist_critical"] or
             laser_obs[3] < self.params_env["max_crash_dist_critical"] or
             any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
-        ):
+            ):
             logging.info("Crashed")
             self.collision_flag = True
             self.terminated=True
+            self.target_zone = 0
             return self.params_env["crash_penalty"]
         
         else:
             self.collision_flag = False
 
         if distance < self.params_env["reward_dist_3"]:
+            self.target_zone = 3
             self.terminated = True
             return self._compute_adjusted_reward(self.params_env["reward_3"])
         elif distance < self.params_env["reward_dist_2"]:
+            self.target_zone = 2
             self.terminated = True
             return self._compute_adjusted_reward(self.params_env["reward_2"])
         elif distance < self.params_env["reward_dist_1"]:
+            self.target_zone = 1
             self.terminated = True
             return self._compute_adjusted_reward(self.params_env["reward_1"])
         elif distance > self.params_env["max_dist"] or self.time_elapsed > self.params_env["max_time"]:
             self.terminated = True
             logging.info("Max dist or max time achieved")
             self.max_achieved = True
+            self.target_zone = 0
             return self.params_env["overlimit_penalty"]
         else:
             self.terminated = False
             self.truncated = False
             self.max_achieved = False
             self.collision_flag = False
+            self.target_zone = 0
             return 0
         
 

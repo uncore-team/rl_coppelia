@@ -410,31 +410,36 @@ def plot_histogram (rl_copp_obj, model_index, mode, n_bins = 21, title = "Histog
     Plots a histogram for showing the value expressed in the 'mode' variable.
 
     Args:
-    - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
-    - 
-    - title (str): The title of the chart.
+    - rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
+    - model_index (int): Index of the model to analyze from the args list.
+    - mode (str): Type of data to plot - "speeds" or "target_zones".
+    - n_bins (int): Number of bins for the histogram.
+    - title (str): The title prefix for the chart.
     """
-    # CSV File path to get data from
-    # Capture the desired files through a pattern
-    file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_speeds_*.csv"
-    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+    
 
     # Get the training csv path for later getting the action times from there
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
     train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
 
-    # Read CSV
-    df = pd.read_csv(files[0])
+    hist_data = []
 
     if mode == "speeds":
-        # Get values from csv
+        # CSV File path to get data from
+        # Capture the desired files through a pattern
+        file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_speeds_*.csv"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+        # Read CSV
+        df = pd.read_csv(files[0])
         data_keys = ['Angular speed', 'Linear speed']
         data_keys_units = ["rad/s", "m/s"]
-        hist_data = [df[data_keys[0]], df[data_keys[1]]]
         bin_min = [-0.5, 0.1]
         bin_max = [0.5, 0.5]
     else:
         logging.error(f"Specified graphs mode doesn't exist: {mode}")
+
+    for key in data_keys:
+        hist_data.append(df[key])
 
     for i in range(len(data_keys)):
         logging.info(f"{data_keys[i]} stats:")
@@ -443,6 +448,7 @@ def plot_histogram (rl_copp_obj, model_index, mode, n_bins = 21, title = "Histog
         logging.info(f"Standard deviation: {hist_data[i].std():.4f}")
         logging.info(f"Min: {hist_data[i].min():.4f}")
         logging.info(f"Max: {hist_data[i].max():.4f}")
+
         model_name = rl_copp_obj.args.robot_name + "_model_" + str(rl_copp_obj.args.model_ids[model_index])
         timestep = (utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
 
@@ -470,14 +476,92 @@ def plot_histogram (rl_copp_obj, model_index, mode, n_bins = 21, title = "Histog
         plt.show()
 
 
+def plot_bars(rl_copp_obj, model_index, mode, title="Target Zone Distribution: "):
+    """
+    Crea un histograma para las target zones con valores discretos (1, 2, 3) en el eje X.
+    
+    Args:
+        rl_copp_obj: Objeto que contiene la información de rutas y argumentos
+        model_index: Índice del modelo a analizar
+        title: Título para el gráfico
+    """
+    # Obtener la ruta del archivo CSV
+    file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_test_*.csv"
+    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+    
+    # Leer el CSV
+    df = pd.read_csv(files[0])
+    
+    # Verificar que exista la columna
+    if mode == "target_zones":
+        data_keys = ['Target zone']
+        
+        possible_values = [1, 2, 3]
+        labels = ['Target zone 1', 'Target zone 2', 'Target zone 3']
+
+    for key in data_keys:
+        data = []
+        data = (df[key])
+    
+        # Count all the samples
+        counts = data.value_counts().reindex(possible_values, fill_value=0)
+        total_episodes = len(data)
+
+        # Calculate percentages
+        percentages = (counts / total_episodes) * 100
+        
+        # Stats
+        logging.info(f"{key} stats:")
+        logging.info(f"Total episodes: {total_episodes}")
+        for j in possible_values:
+            count = counts.get(j, 0)
+            percentage = percentages.get(j, 0)
+            logging.info(f"Zone {j}: {count} episodes ({percentage:.2f}%)")
+        
+        # Obtener el valor de timestep para el título
+        train_records_csv_name = os.path.join(rl_copp_obj.paths["training_metrics"], "train_records.csv")
+        model_name = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}"
+        timestep = utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")
+        
+        # Create the figure
+        plt.figure(figsize=(10, 6))
+        
+        # Configure bars for discrete values
+        x = np.array(possible_values)
+        
+        
+        # Create bars graph
+        bars = plt.bar(labels, counts, color=['skyblue', 'lightgreen', 'salmon'], 
+                    edgecolor='black', alpha=0.7)
+        
+        # Add labels
+        for bar, count, percentage in zip(bars, counts, percentages):
+            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                    f'{count}\n({percentage:.1f}%)', ha='center', va='bottom')
+        
+        # Configure axis and title
+        plt.title(f"{title}Model {timestep}s", fontsize=14)
+        plt.xlabel('Target Zone', fontsize=12)
+        plt.ylabel('Frequence (number of episodes)', fontsize=12)
+        plt.grid(axis='y', alpha=0.3)
+        
+        # Ajustar los límites del eje Y para dejar espacio para las etiquetas
+        max_count = counts.max()
+        plt.ylim(0, max_count * 1.15)  # 15% de espacio adicional
+        
+        # Mostrar el histograma
+        plt.tight_layout()
+        plt.show()
+
+
 def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribution by Intervals"):
     """
-    Creates a grouped bar chart where each group represents a velocity interval,
-    and within each group there's one bar per model.
+    Creates a grouped bar chart for representing the frequency of an especific variable of a model.
     
     Args:
     - rl_copp_obj: RLCoppeliaManager instance
-    - num_intervals (int): Number of intervals to divide the speed range (-0.5 to 0.5)
+    - mode (str): "speeds" or "target_zones"
+    - num_intervals (int): Number of intervals to divide the represented range.
     - title (str): Title for the plot
     """
 
@@ -488,6 +572,11 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
         min_value = [-0.5, 0.1]
         max_value = [0.5, 0.5]
 
+    elif mode == "target_zones":
+        data_keys = ['Target zone']
+        data_keys_units = [""]
+        categories = [1, 2, 3]
+
     # Get the training csv path for later getting the action times from there
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
     train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
@@ -496,41 +585,61 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
     # Plot a graph per key data
     for id_data in range(len(data_keys)):
 
-        interval_size = (max_value[id_data] - min_value[id_data]) / num_intervals
-        intervals = [(min_value[id_data] + i * interval_size, min_value[id_data] + (i + 1) * interval_size) 
-                    for i in range(num_intervals)]
-        
-        # Prepare data structure for frequencies
-        # model_names = [f"Model {idx}" for idx in rl_copp_obj.args.model_ids]
-        interval_labels = [f"[{a:.2f}, {b:.2f}]" for a, b in intervals]
+        if mode== "speeds": # continuos intervals case
+
+            interval_size = (max_value[id_data] - min_value[id_data]) / num_intervals
+            intervals = [(min_value[id_data] + i * interval_size, min_value[id_data] + (i + 1) * interval_size) 
+                        for i in range(num_intervals)]
+            
+            # Prepare data structure for frequencies
+            interval_labels = [f"[{a:.2f}, {b:.2f}]" for a, b in intervals]
+            num_groups = len(intervals)
+
+        elif mode == "target_zones":    # discrete intervals case
+            interval_labels = [str(cat) for cat in categories]
+            num_groups = len(categories)
     
         # Matrix to store frequencies: rows=models, columns=intervals
-        frequencies = np.zeros((len(rl_copp_obj.args.model_ids), len(intervals)))
+        frequencies = np.zeros((len(rl_copp_obj.args.model_ids), num_groups))
 
         # Load data and calculate frequencies for each model and interval
         for i, model_idx in enumerate(rl_copp_obj.args.model_ids):
-            file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_speeds_*.csv"
+
+            # Construct the file pattern for each case
+            if mode == "speeds":    # turtleBot_model_308_last_speeds_2025-05-10_12-00-32.csv
+                file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_speeds_*.csv"
+                
+            elif mode == "target_zones":    # turtleBot_model_308_last_test_2025-05-10_12-00-32.csv
+                file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_test_*.csv"
+
+            # Search for the files with that pattern inside testing_metrics directory
             files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, 
                                         "testing_metrics", file_pattern))
             
+            # If there are no files
             if not files:
-                print(f"No files found for model {model_idx}")
+                logging.error(f"Error: no files found for model {model_idx}")
                 continue
             
             # Read csv file
             df = pd.read_csv(files[0])
             
-            if mode == "speeds":
-                # Get values from csv
-                hist_data = [df[data_keys[0]], df[data_keys[1]]]
-    
+            # Save data from the desired column
+            data = []
+            data = (df[data_keys[id_data]])    
            
-            for j, (interval_start, interval_end) in enumerate(intervals):
-                mask = (hist_data[id_data] >= interval_start) & (hist_data[id_data] < interval_end)
-                frequencies[i, j] = np.sum(mask)
+            # Calculate the frequency for each case
+            if mode== "speeds":
+                for j, (interval_start, interval_end) in enumerate(intervals):
+                    mask = (data >= interval_start) & (data < interval_end)
+                    frequencies[i, j] = np.sum(mask)
+            elif mode == "target_zones":
+                for j, category in enumerate(categories):
+                    mask = (data == category)
+                    frequencies[i, j] = np.sum(mask)
             
             # Normalize to percentage if desired
-            frequencies[i, :] = frequencies[i, :] / len(hist_data[id_data]) * 100
+            frequencies[i, :] = frequencies[i, :] / len(data) * 100
 
             # Get timestep of the selected model
             model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_idx)
@@ -541,7 +650,7 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
         
         # Set width of bars and positions
         bar_width = 0.8 / len(rl_copp_obj.args.model_ids)
-        r = np.arange(len(intervals))
+        r = np.arange(num_groups)
         
         # Plot bars for each model
         for i in range(len(timestep)):
@@ -553,7 +662,7 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
         plt.xlabel(f"{data_keys[id_data]} Intervals {data_keys_units[id_data]}", fontsize=12)
         plt.ylabel('Percentage of Samples (%)', fontsize=12)
         plt.title(data_keys[id_data] + title, fontsize=14)
-        plt.xticks(r, interval_labels, rotation=45, ha='right')
+        plt.xticks(r, interval_labels, rotation=45 if mode == "speeds" else 0, ha='right')  # rotate labels for speed (many intervals)
         plt.legend()
         
         # Add grid for readability
@@ -641,11 +750,20 @@ def main(args):
 
     if "grouped_bar_speeds" in args.plot_types:
         plot_type_correct = True
-        if len(args.model_ids) <= 1:    
-            logging.error(f"Please, introduce more than one model ID for comparing different histograms. Models specified: {args.model_ids}")
-        else:
-            logging.info(f"Plotting histogram for angular speeds for models {args.model_ids}")
-            plot_grouped_bar_chart(rl_copp, mode="speeds")
+        logging.info(f"Plotting grouped bar chart for angular and linear speeds for models {args.model_ids}")
+        plot_grouped_bar_chart(rl_copp, mode="speeds")
+    
+    if "grouped_bar_targets" in args.plot_types:
+        plot_type_correct = True
+        logging.info(f"Plotting grouped bar chart representing the frequency of each target zone for models {args.model_ids}")
+        plot_grouped_bar_chart(rl_copp, mode="target_zones")
+
+    if "bar_target_zones" in args.plot_types:
+        plot_type_correct = True
+        for model in range(len(args.model_ids)):
+            logging.info(f"Plotting histogram for target zones for model {args.model_ids[model]}")
+            plot_bars(rl_copp, model, mode="target_zones")
+    
     
     if not plot_type_correct:
         logging.error(f"Please check plot types: {args.plot_types}")

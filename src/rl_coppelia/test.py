@@ -39,7 +39,7 @@ def _get_metrics_test(env):
         
     """
     env.reached_target_distance=env.unwrapped.observation[0]
-    return env.initial_target_distance,env.reached_target_distance,env.time_elapsed,env.reward, env.count, env.collision_flag, env.max_achieved
+    return env.initial_target_distance,env.reached_target_distance,env.time_elapsed,env.reward, env.count, env.collision_flag, env.max_achieved, env.target_zone
 
 
 def main(args):
@@ -100,6 +100,7 @@ def main(args):
     # truncated_list = []
     collision_list = []
     max_achieved_list = []
+    target_zone_list = []
 
     # Get the number of iterations
     if rl_copp.args.iterations is not None:
@@ -119,10 +120,12 @@ def main(args):
             'Reached distance (m)', 
             'Time (s)', 
             'Reward', 
+            'Target zone',
             'TimeSteps count', 
             'Terminated', 
             'Truncated', 
-            'Crashes'
+            'Crashes',
+            'Max limits achieved'
         ]
         metrics_writer.writerow(headers)
         
@@ -161,10 +164,13 @@ def main(args):
             
             # Call get_metrics(), so we will have the total time of the iteration
             # and the final distance to the target
-            init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved  = _get_metrics_test(rl_copp.env.envs[0].unwrapped)
+            init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved, target_zone  = _get_metrics_test(rl_copp.env.envs[0].unwrapped)
             
             if terminated:
-                logging.info("Episode terminated")
+                if reward_target >0:
+                    logging.info(f"Episode terminated with reward {reward_target} inside target zone {target_zone}")
+                else:
+                    logging.info(f"Episode terminated unsuccessfully with reward {reward_target}")
 
             # Save the metrics in the lists for using them later
             rewards_list.append(reward_target)
@@ -174,10 +180,11 @@ def main(args):
             # truncated_list.append(truncated)
             collision_list.append(collision_flag)
             max_achieved_list.append(max_achieved)
+            target_zone_list.append(target_zone)
             
             # Write a new row with the metrics in the csv file
             metrics_writer.writerow([init_target_distance, final_target_distance, time_reach_target, reward_target, 
-                            timesteps_count, terminated, truncated, collision_flag])
+                            target_zone, timesteps_count, terminated, truncated, collision_flag, max_achieved])
 
     logging.info(f"Testing metrics has been saved in {experiment_csv_path}")
 
@@ -193,6 +200,10 @@ def main(args):
     percentage_max_achieved = (sum(max_achieved_list) / len(max_achieved_list)) * 100 if max_achieved_list else 0
     percentage_collisions = (sum(collision_list) / len(collision_list)) * 100 if collision_list else 0
     percentage_not_finished = percentage_max_achieved + percentage_collisions
+    percentage_target_zone_1 = (target_zone_list.count(1) / len(target_zone_list)) * 100
+    percentage_target_zone_2 = (target_zone_list.count(2) / len(target_zone_list)) * 100
+    percentage_target_zone_3 = (target_zone_list.count(3) / len(target_zone_list)) * 100
+    
     data_to_store ={
         "Algorithm" : rl_copp.params_test["sb3_algorithm"],
         "Avg reward": avg_reward,
@@ -203,7 +214,10 @@ def main(args):
         "Percentage truncated": percentage_not_finished,    # So we don't use the truncated flag for calculating them, but the 'max_achieved' and 'collision' 
                                                                 # flags, which are triggered when the maximum distance or time are achieved, and when there is 
                                                                 # a collision, respectively
-        "Number of collisions": sum(collision_list)
+        "Number of collisions": sum(collision_list),
+        "Target zone 1 (%)": percentage_target_zone_1,
+        "Target zone 2 (%)": percentage_target_zone_2,
+        "Target zone 3 (%)": percentage_target_zone_3
     }
 
     # Name of the records csv to store the final values of the testing experiment.
