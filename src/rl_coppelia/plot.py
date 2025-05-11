@@ -284,6 +284,42 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     plt.show()
 
 
+
+def plot_convergence_analysis(rl_copp_obj, model_index, x_axis, convergence_threshold=0.02):
+    """
+    Grafica el análisis de convergencia con ambos métodos para comparación
+    """
+    # CSV File path to get data from
+    file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*.csv"
+    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "training_metrics", file_pattern))
+    
+    # Obtener resultados con ambos métodos
+    conv_point1, reward_fit1, x_raw, reward, reward_conv1 = utils.get_convergence_point(
+        files[0], x_axis, convergence_threshold
+    )
+    
+    # Crear la figura
+    plt.figure(figsize=(12, 8))
+    
+    # Datos originales
+    plt.scatter(x_raw, reward, s=10, alpha=0.5, label='Datos originales')
+    
+    # Ajuste con filtrado de transitorio
+    plt.plot(x_raw, reward_fit1, 'r-', linewidth=2, label='Modelo exponencial')
+    plt.axvline(conv_point1, color='r', linestyle='--', alpha=0.7, 
+                label=f'Convergencia: {conv_point1:.2f}')
+    
+    
+    # Etiquetas y leyenda
+    plt.xlabel(f'{x_axis}')
+    plt.ylabel('Recompensa promedio por episodio')
+    plt.title(f'Análisis de convergencia ({x_axis})')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
+    
+
+
 def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Convergence Analysis"):
     """
     Plots a graph with the reward vs Wall time, steps, episodes or simulatino time, and shows the point at which the reward stabilizes
@@ -316,25 +352,25 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
     # plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
     if x_axis == "WallTime":
         plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
-        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
+        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
         plt.xlabel('Wall time (hours)')
         plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Wall Time: {convergence_point:.2f}h')
         title = title + ' vs Wall Time'
     elif x_axis == "Steps":
         plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
-        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
+        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
         plt.xlabel('Steps')
         plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Steps: {convergence_point:.2f}')
         title = title +  ' vs Steps'
     elif x_axis == "SimTime":
         plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
-        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
+        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
         plt.xlabel('Simulation time (hours)')
         plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Sim Time: {convergence_point:.2f}h')
         title = title + ' vs Sim Time'
     elif x_axis == "Episodes":
         plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
-        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
+        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
         plt.xlabel('Episodes')
         plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Episodes: {convergence_point:.2f}')
         title = title +  ' vs Episodes'
