@@ -5,6 +5,10 @@ import time
 import stable_baselines3
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
+from stable_baselines3.common.utils import set_random_seed
+from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.monitor import Monitor
+from tqdm.auto import tqdm
 
 
 def _init_metrics_test(env):
@@ -128,18 +132,19 @@ def main(args):
             'Max limits achieved'
         ]
         metrics_writer.writerow(headers)
-        
+
         # Run test x iterations
-        for i in range(n_iter):  
-            logging.info(f"Iteration: {i}")
+        # Wrap your range with tqdm to create a progress bar
+        for i in tqdm(range(n_iter), desc="Testing Episodes", unit="episode"):
+            # The tqdm progress bar will automatically update
             
             # Get the observation from the BS3 environment
-            observation, _ = rl_copp.env.envs[0].reset()
-
+            observation, *_ = rl_copp.env.envs[0].reset()
+            
             # Call init_metrics() for getting the initial time of the iteration
             # and the initial distance to the target
             _init_metrics_test(rl_copp.env.envs[0].unwrapped)
-
+            
             # Reset variables to start the iteration
             terminated = False
             truncated = False
@@ -147,9 +152,9 @@ def main(args):
             # While the simulation doesn't achieve a reward or fail drastically,
             # it will continue trying to get the best reward using the trained model.
             while not (terminated or truncated):
-                action, _states = model.predict(observation, deterministic = True)
+                action, _states = model.predict(observation, deterministic=True)
                 observation, _, terminated, truncated, info = rl_copp.env.envs[0].step(action)
-
+                
                 try:
                     with open(speeds_csv_path, mode="r") as f:
                         pass
@@ -157,21 +162,21 @@ def main(args):
                     with open(speeds_csv_path, mode="w", newline='') as f:
                         speed_writer = csv.writer(f)
                         speed_writer.writerow(speed_headers)  # Write the headers
-
+                
                 with open(speeds_csv_path, mode='a', newline='') as speed_file:
                     speed_writer = csv.writer(speed_file)
                     speed_writer.writerow([info["linear_speed"], info["angular_speed"]])
             
             # Call get_metrics(), so we will have the total time of the iteration
             # and the final distance to the target
-            init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved, target_zone  = _get_metrics_test(rl_copp.env.envs[0].unwrapped)
+            init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved, target_zone = _get_metrics_test(rl_copp.env.envs[0].unwrapped)
             
             if terminated:
-                if reward_target >0:
+                if reward_target > 0:
                     logging.info(f"Episode terminated with reward {reward_target} inside target zone {target_zone}")
                 else:
                     logging.info(f"Episode terminated unsuccessfully with reward {reward_target}")
-
+            
             # Save the metrics in the lists for using them later
             rewards_list.append(reward_target)
             time_reach_targets_list.append(time_reach_target)
@@ -183,8 +188,67 @@ def main(args):
             target_zone_list.append(target_zone)
             
             # Write a new row with the metrics in the csv file
-            metrics_writer.writerow([init_target_distance, final_target_distance, time_reach_target, reward_target, 
-                            target_zone, timesteps_count, terminated, truncated, collision_flag, max_achieved])
+            metrics_writer.writerow([init_target_distance, final_target_distance, time_reach_target, reward_target,
+                                    target_zone, timesteps_count, terminated, truncated, collision_flag, max_achieved])
+            
+
+        
+        # # Run test x iterations
+        # for i in range(n_iter):  
+        #     logging.info(f"Iteration: {i}")
+            
+        #     # Get the observation from the BS3 environment
+        #     observation, _ = rl_copp.env.envs[0].reset()
+
+        #     # Call init_metrics() for getting the initial time of the iteration
+        #     # and the initial distance to the target
+        #     _init_metrics_test(rl_copp.env.envs[0].unwrapped)
+
+        #     # Reset variables to start the iteration
+        #     terminated = False
+        #     truncated = False
+            
+        #     # While the simulation doesn't achieve a reward or fail drastically,
+        #     # it will continue trying to get the best reward using the trained model.
+        #     while not (terminated or truncated):
+        #         action, _states = model.predict(observation, deterministic = True)
+        #         observation, _, terminated, truncated, info = rl_copp.env.envs[0].step(action)
+
+        #         try:
+        #             with open(speeds_csv_path, mode="r") as f:
+        #                 pass
+        #         except FileNotFoundError:
+        #             with open(speeds_csv_path, mode="w", newline='') as f:
+        #                 speed_writer = csv.writer(f)
+        #                 speed_writer.writerow(speed_headers)  # Write the headers
+
+        #         with open(speeds_csv_path, mode='a', newline='') as speed_file:
+        #             speed_writer = csv.writer(speed_file)
+        #             speed_writer.writerow([info["linear_speed"], info["angular_speed"]])
+            
+        #     # Call get_metrics(), so we will have the total time of the iteration
+        #     # and the final distance to the target
+        #     init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved, target_zone  = _get_metrics_test(rl_copp.env.envs[0].unwrapped)
+            
+        #     if terminated:
+        #         if reward_target >0:
+        #             logging.info(f"Episode terminated with reward {reward_target} inside target zone {target_zone}")
+        #         else:
+        #             logging.info(f"Episode terminated unsuccessfully with reward {reward_target}")
+
+        #     # Save the metrics in the lists for using them later
+        #     rewards_list.append(reward_target)
+        #     time_reach_targets_list.append(time_reach_target)
+        #     timesteps_counts_list.append(timesteps_count)
+        #     terminated_list.append(terminated)
+        #     # truncated_list.append(truncated)
+        #     collision_list.append(collision_flag)
+        #     max_achieved_list.append(max_achieved)
+        #     target_zone_list.append(target_zone)
+            
+        #     # Write a new row with the metrics in the csv file
+        #     metrics_writer.writerow([init_target_distance, final_target_distance, time_reach_target, reward_target, 
+        #                     target_zone, timesteps_count, terminated, truncated, collision_flag, max_achieved])
 
     logging.info(f"Testing metrics has been saved in {experiment_csv_path}")
 
