@@ -2,7 +2,7 @@ import argparse
 import os
 import argcomplete
 from argcomplete.completers import FilesCompleter
-from rl_coppelia import auto_testing, auto_training, plot, sat_training, train, test, save, tf_start, retrain
+from rl_coppelia import auto_testing, auto_training, plot, sat_training, test_scene, train, test, save, tf_start, retrain
 
 
 def model_name_completer(prefix, parsed_args, **kwargs):
@@ -54,6 +54,17 @@ def main():
     test_parser.add_argument("--iterations", type=int, help="Number of iterations for the test. If set, it will override the parameter from the parameters' json file.",required=False)
     test_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
 
+    test_scene_parser = subparsers.add_parser("test_scene", help="Test a trained RL algorithm for robot movement in CoppeliaSim for just one iteration, using a preconfigured scene")
+    test_scene_parser.add_argument("--model_name", type=str, help="Name of the trained model is required (it must be located under 'models' folder)", required=True).completer = model_name_completer
+    test_scene_parser.add_argument("--scene_config_path", type=str, help="Full path of the csv with a scene configuration.", required=True)
+    test_scene_parser.add_argument("--robot_name", type=str, help="Name for the robot. Default will be burgerBot.", required=False)
+    test_scene_parser.add_argument("--scene_path", type=str, help="Path to the CoppeliaSim scene file.", required=False)
+    test_scene_parser.add_argument("--dis_parallel_mode", action="store_true", help="Disables the parallel training or testing.", required=False)
+    test_scene_parser.add_argument("--no_gui", action="store_true", help="Disables Coppelia GUI, it will just show the terminal", required=False)
+    test_scene_parser.add_argument("--params_file", type=str, help="Path to the configuration file.",required=False)
+    test_scene_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
+
+
     auto_training_parser = subparsers.add_parser("auto_training", help="Auto training of several models using different parameters pre-configured by using different configuration files.")
     auto_training_parser.add_argument("--session_name", type=str, help="Name for the session's folder.", required=True)
     auto_training_parser.add_argument("--robot_name", type=str, help="Name for the robot.", required=True)
@@ -92,6 +103,8 @@ def main():
     plot_parser = subparsers.add_parser("plot", help="Creates a set of plots for getting the results of a trained model or for comparing some models.")
     plot_parser.add_argument("--robot_name", type=str, help="Name for the robot.", required=True)
     plot_parser.add_argument("--model_ids", type=int, nargs='+', help="List with numerical IDs of the different models to be plotted.", required=True)
+    plot_parser.add_argument("--scene_config_path", type=str, help="Full path of the csv with a scene configuration. Required only for 'plot_scene_trajs' plot type", required=False)
+    plot_parser.add_argument("--traj_csv_path", type=str, help="Full path of the csv with a trajectory. Required only for 'plot_scene_trajs' plot type", required=False)
     plot_parser.add_argument("--plot_types", type=str, nargs='+', help="List of types of plots that the user wants to create.", 
                              default=["spider", "convergence-time", "convergence-steps", "compare-rewards", "compare-episodes_length", 
                                       "histogram_speeds", "histogram_speed_comparison", "hist_target_zones", "bar_target_zones"], required=False)
@@ -128,6 +141,8 @@ def main():
         plot.main(args)
     elif args.command == "retrain":
         retrain.main(args)
+    elif args.command == "test_scene":
+        test_scene.main(args)
     else:
         parser.print_help()
 

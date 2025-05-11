@@ -1,13 +1,18 @@
+import csv
 import logging
 import math
+import os
 import random
+import sys
+
+import pandas as pd
 
 from spindecoupler import AgentSide # type: ignore
 from socketcomms.comms import BaseCommPoint # type: ignore
 
 
 class CoppeliaAgent:
-    def __init__(self, sim, params_env, comms_port = 49054) -> None:
+    def __init__(self, sim, params_env, paths, file_id, comms_port = 49054) -> None:
         """
         Custom agent for CoppeliaSim simulations of different robots.
         
@@ -77,6 +82,9 @@ class CoppeliaAgent:
         self.initial_simTime = 0
         self.initial_realTime = 0
 
+        self.paths = paths
+        self.first_reset = False
+
         # retries = 0
         # MAX_RETRIES = 5
         
@@ -110,6 +118,21 @@ class CoppeliaAgent:
         self.reset_flag = False
         self.crash_flag = False
         self.training_started = False
+
+        # Needed for saving scenes
+        self.save_scene = True
+        self.scene_configs_path = self.paths["scene_configs"]
+        self.experiment_id = file_id
+        self.episode_idx = 0
+        self.trajectory = []
+
+        # For saving trajectory
+        self.save_traj = True
+
+        # For loading a scene
+        self.load_scene_path = ""
+        self.id_obstacle = 0
+        # self.load_scene = True
         
     
     def get_observation(self):
@@ -143,11 +166,37 @@ class CoppeliaAgent:
             return distance, angle
     
 
+    def generate_obs_from_csv(self, row):
+        logging.info(f"Generating obstacles from csv file")
+        height_obstacles = 0.4
+        size_obstacles = 0.25
+
+        x, y = row["x"], row["y"]
+        logging.info(f"Placing obstacle at x: {x} and y: {y}")
+        obs = self.sim.createPrimitiveShape(5, [size_obstacles, size_obstacles, height_obstacles])
+        self.sim.setObjectPosition(obs, self.sim.handle_world, [x, y, height_obstacles / 2])
+        self.sim.setObjectAlias(obs, f"Obstacle_csv_{self.id_obstacle}")
+        self.sim.setObjectParent(obs, self.generator, True)
+        self.sim.setObjectSpecialProperty(obs, self.sim.objectspecialproperty_collidable |
+                                        self.sim.objectspecialproperty_measurable |
+                                        self.sim.objectspecialproperty_detectable)
+        self.sim.setObjectInt32Param(obs, self.sim.shapeintparam_respondable, 1)
+        self.sim.setObjectInt32Param(obs, self.sim.shapeintparam_static, 0)
+        self.sim.setShapeMass(obs, 1000)
+        self.sim.resetDynamicObject(obs)
+        
+
+        return
+
+
+
     def reset_simulator(self):
         """
         Reset the simulator: position the robot and target, and reset the counters.
         If there are obstacles, remove them and create new ones.
         """
+        # Set first reset flag to True
+        self.first_reset = True
         
         # Set speed to 0. It's important to do this before setting the position and orientation
         # of the robot, to avoid bugs with Coppelia simulation
@@ -156,30 +205,116 @@ class CoppeliaAgent:
 
         # Reset colorID counter
         self.colorID = 1
+
+        # Save trajectory at the beggining of the reset (last episode traj)
+        if self.save_traj:
+            if self.trajectory != []:
+                traj_output_path = os.path.join(self.scene_configs_path, f"trajectory_{self.experiment_id}_{self.episode_idx}.csv")
+                with open(traj_output_path, mode='w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=["x", "y"])
+                    writer.writeheader()
+                    writer.writerows(self.trajectory)
+                self.trajectory = []
+            
+                logging.info(f"Trajectory saved in CSV: {traj_output_path}")
+
+                self.episode_idx = self.episode_idx + 1
+
+        # Save current scene configuration for further analysis
+        if self.save_scene:
+            
+            # Crear lista donde guardaremos los datos
+            scene_elements = []
+
+            # Obtener y guardar posición del robot
+            robot_pos = self.sim.getObjectPosition(self.robot_baselink, -1)
+            robot_ori = self.sim.getObjectOrientation(self.robot_baselink, -1)
+            scene_elements.append(["robot", robot_pos[0], robot_pos[1], robot_ori[2]]) 
+
+            # Obtener y guardar posición del target
+            target_pos = self.sim.getObjectPosition(self.target, -1)
+            scene_elements.append(["target", target_pos[0], target_pos[1]])
+
+            # Obtener obstáculos (asumiendo que están bajo self.generator)
+            obstacles = self.sim.getObjectsInTree(self.generator, self.sim.handle_all, 1)
+            for obs_handle in obstacles:
+                obs_pos = self.sim.getObjectPosition(obs_handle, -1)
+                scene_elements.append(["obstacle", obs_pos[0], obs_pos[1]])
+
+            # Ruta para guardar el CSV (en la carpeta de la escena)
+            csv_path = os.path.join(
+                self.scene_configs_path,
+                f"scene_{self.experiment_id}_{self.episode_idx}.csv"
+            )
+
+            # Guardar el archivo CSV
+            with open(csv_path, mode="w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["type", "x", "y", "theta"])
+                writer.writerows(scene_elements)
+
+            logging.info(f"Scene saved in CSV: {csv_path}")
+            
         
-        # Reset positions and orientation
-        current_position = self.sim.getObjectPosition(self.robot_baselink, -1)
-        if current_position != [0, 0, 0.06969]:
-            random_ori = random.uniform(-math.pi, math.pi)
-            self.sim.setObjectPosition(self.robot_baselink, [0, 0, 0.06969],-1)
-            self.sim.setObjectOrientation(self.robot_baselink, [0,0,random_ori],-1)
 
-        # Randomize target position
-        current_target_position = self.sim.getObjectPosition(self.target, -1)
-        if current_target_position != [0, 0, 0]:
-            delta_x = random.uniform(-2, 2)
-            delta_y = random.uniform(-2, 2)
-            self.sim.setObjectPosition(self.target, [delta_x, delta_y, 0], -1)
-
+        # Always remove old obstacles before creating news
         if self.generator is not None:
             # Remove old obstacles
             last_obstacles=self.sim.getObjectsInTree(self.generator,self.sim.handle_all,1) 
             if len(last_obstacles) > 0:
                 self.sim.removeObjects(last_obstacles)
+        
+        # Just place the scene objects at random positions and call 'generate_obs'
+        if self.load_scene_path == "" or self.load_scene_path is None:
+            # Reset positions and orientation
+            current_position = self.sim.getObjectPosition(self.robot_baselink, -1)
+            if current_position != [0, 0, 0.06969]:
+                random_ori = random.uniform(-math.pi, math.pi)
+                self.sim.setObjectPosition(self.robot_baselink, [0, 0, 0.06969],-1)
+                self.sim.setObjectOrientation(self.robot_baselink, [0,0,random_ori],-1)
 
-            # Generate new obstacles
-            self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
-        logging.info("Environment RST done")
+            # Randomize target position
+            current_target_position = self.sim.getObjectPosition(self.target, -1)
+            if current_target_position != [0, 0, 0]:
+                delta_x = random.uniform(-2, 2)
+                delta_y = random.uniform(-2, 2)
+                self.sim.setObjectPosition(self.target, [delta_x, delta_y, 0], -1)
+
+            if self.generator is not None:
+                # Generate new obstacles
+                self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
+            logging.info("Environment RST done")
+
+        # Load the preconfigured scene
+        else:
+            self.id_obstacle = 0
+            # CSV path
+            csv_path = os.path.join(self.paths["scene_configs"], self.load_scene_path)  
+            if not os.path.exists(csv_path):
+                logging.error(f"[ERROR] CSV scene file not found: {csv_path}")
+                sys.exit()
+
+            df = pd.read_csv(csv_path)
+
+            for _, row in df.iterrows():
+                x, y = row['x'], row['y']
+                z = 0.06969 if row['type'] == "robot" else 0.0
+
+                if row['type'] == 'robot':
+                    self.sim.setObjectPosition(self.robot_baselink, -1, [x, y, z])
+                    theta = float(row['theta']) if 'theta' in row and not pd.isna(row['theta']) else 0
+                    self.sim.setObjectOrientation(self.robot_baselink, -1, [0, 0, theta])
+
+                elif row['type'] == 'target':
+                    self.sim.setObjectPosition(self.target, -1, [x, y, 0])
+
+                elif row['type'] == 'obstacle':
+                    self.id_obstacle = self.id_obstacle + 1
+                    self.generate_obs_from_csv(row)
+
+            logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
+
+        
 
 
     def agent_step(self):
@@ -340,7 +475,7 @@ class CoppeliaAgent:
 
 
 class BurgerBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_env, comms_port=49054):
+    def __init__(self, sim, params_env, paths, file_id, comms_port=49054):
         """
         Custom agent for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
@@ -354,7 +489,7 @@ class BurgerBotAgent(CoppeliaAgent):
             target (CoppeliaObject): Target object in CoppeliaSim scene.
             handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
         """
-        super(BurgerBotAgent, self).__init__(sim, params_env, comms_port)
+        super(BurgerBotAgent, self).__init__(sim, params_env, paths, file_id, comms_port)
 
         self.robot = sim.getObject("/Burger")
         self.target = sim.getObject("/Target")
@@ -364,7 +499,7 @@ class BurgerBotAgent(CoppeliaAgent):
 
 
 class TurtleBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_env, comms_port=49054):
+    def __init__(self, sim, params_env, paths, file_id, comms_port=49054):
         """
         Custom agent for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
@@ -383,7 +518,7 @@ class TurtleBotAgent(CoppeliaAgent):
             handle_obstaclegenerators_script (CoppeliaObject): Handle for using the script which generates the obstacles in CoppeliaSim scene.
             handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
         """
-        super(TurtleBotAgent, self).__init__(sim, params_env, comms_port)
+        super(TurtleBotAgent, self).__init__(sim, params_env, paths, file_id, comms_port)
 
         self.robot=sim.getObject('/Turtlebot2')
         self.robot_baselink=sim.getObject('/Turtlebot2/base_link_respondable')

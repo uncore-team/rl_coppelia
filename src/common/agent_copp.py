@@ -36,7 +36,7 @@ def sysCall_init():
     """
     Initialize the simulation.
     """
-    global sim, agent, verbose, sim_initialized, robot_name, params_env, comms_port
+    global sim, agent, verbose, sim_initialized, robot_name, params_env, comms_port, paths, file_id, scene_config_path
     sim = require('sim')    # type: ignore
 
     # Variables to get from agent_copp.py script
@@ -47,9 +47,10 @@ def sysCall_init():
     base_path = ""
     params_env = {}
     verbose = 1
+    scene_config_path = ""
 
     # Generate needed routes for logs and tf
-    paths = utils.get_robot_paths(base_path, robot_name, just_agent_logs=True)
+    paths = utils.get_robot_paths(base_path, robot_name, agent_logs=True)
     file_id = utils.get_file_index(model_name, paths["tf_logs"], robot_name)
     utils.logging_config(paths["script_logs"], comm_side, robot_name, file_id, log_level=logging.INFO, verbose=verbose)
 
@@ -58,16 +59,19 @@ def sysCall_init():
 
 
 def sysCall_thread():
-    global sim, agent, robot_name, params_env, comms_port, sim_initialized
+    global sim, agent, robot_name, params_env, comms_port, sim_initialized, paths, file_id, scene_config_path
 
     if sim_initialized:
         # Create agent
         if robot_name == "turtleBot":
-            agent = TurtleBotAgent(sim, params_env, comms_port=comms_port)
+            agent = TurtleBotAgent(sim, params_env, paths, file_id, comms_port=comms_port)
         elif robot_name == "burgerBot":
-            agent = BurgerBotAgent(sim, params_env, comms_port=comms_port)
+            agent = BurgerBotAgent(sim, params_env, paths, file_id, comms_port=comms_port)
             agent.robot_baselink = agent.robot
         logging.info("Agent initialized")
+
+        agent.load_scene_path = scene_config_path
+
 
 
 def sysCall_sensing():
@@ -80,6 +84,7 @@ def sysCall_sensing():
     if agent and not agent.finish_rec:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
         action = agent.agent_step()
+
         # If an action is received, execute it
         if action is not None:
             # With this check we avoid calling cmd_vel script repeteadly for the same action
@@ -93,6 +98,12 @@ def sysCall_sensing():
                     if agent._waitingforrlcommands:
                         agent.colorID +=1
             agent.execute_cmd_vel = False
+        
+        # Save current robot position for later saving it csv file
+        if agent.first_reset and agent.save_traj:
+            position = agent.sim.getObjectPosition(agent.robot_baselink, -1)
+            agent.trajectory.append({"x": position[0], "y": position[1]})
+            logging.debug(f"x pos: {position[0]}; y pos: {position[1]}")
 
     # FINISH command --> Finish the experiment
     if agent and agent.finish_rec:

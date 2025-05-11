@@ -321,35 +321,36 @@ def extract_model_id(path):
     return None
 
 
-def get_robot_paths(base_dir, robot_name, just_agent_logs = False):
+def get_robot_paths(base_dir, robot_name, agent_logs = False):
     """
     Generate the paths for working with a robot, and create the needed folders if they don't exist
 
     Args:
         base_dir (str): base path where the subfolders will be craeted
         robot_name (str): name of the robot.
-        just_agent_logs (bool, optional): Only for generating the paths needed for the agent.
+        agent_logs (bool, optional): For generating the script logs path needed for the agent.
 
     Returns:
         paths (dict): Dictionary with the given paths.
     """
-    if not just_agent_logs:
-        paths = {
-            "models": os.path.join(base_dir, "robots", robot_name, "models"),
-            "callbacks": os.path.join(base_dir, "robots",robot_name, "callbacks"),
-            "tf_logs": os.path.join(base_dir, "robots",robot_name, "tf_logs"),
-            "script_logs": os.path.join(base_dir, "robots",robot_name, "script_logs", "rl_logs"),
-            "testing_metrics": os.path.join(base_dir, "robots",robot_name, "testing_metrics"),
-            "training_metrics": os.path.join(base_dir, "robots",robot_name, "training_metrics"),
-            "parameters_used": os.path.join(base_dir, "robots",robot_name, "parameters_used"),
-            "configs": os.path.join(base_dir, "configs")
-        }
+    
+    if not agent_logs:
+        script_logs_name = "rl_logs"
     else:
-        paths = {
-            "tf_logs": os.path.join(base_dir, "robots",robot_name, "tf_logs"),
-            "script_logs": os.path.join(base_dir, "robots",robot_name, "script_logs", "agent_logs")
-        }
-
+        script_logs_name = "agent_logs"
+        
+    paths = {
+        "models": os.path.join(base_dir, "robots", robot_name, "models"),
+        "callbacks": os.path.join(base_dir, "robots",robot_name, "callbacks"),
+        "tf_logs": os.path.join(base_dir, "robots",robot_name, "tf_logs"),
+        "script_logs": os.path.join(base_dir, "robots",robot_name, "script_logs", script_logs_name),
+        "testing_metrics": os.path.join(base_dir, "robots",robot_name, "testing_metrics"),
+        "training_metrics": os.path.join(base_dir, "robots",robot_name, "training_metrics"),
+        "parameters_used": os.path.join(base_dir, "robots",robot_name, "parameters_used"),
+        "scene_configs": os.path.join(base_dir, "robots",robot_name, "scene_configs"),
+        "configs": os.path.join(base_dir, "configs")
+    }
+    
     # Create the folders if they don't exist
     for path in paths.values():
         os.makedirs(path, exist_ok=True)
@@ -523,12 +524,19 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
             except:
                 model_name = None
 
+        if not hasattr(args, "scene_config_path"):
+            scene_config_path = None
+        else:
+            scene_config_path = args.scene_config_path
+        
+
         replacements = {
             "robot_name": args.robot_name,
             "model_name": model_name,
             "base_path": base_path,
             "comms_port": comms_port,
             "verbose": args.verbose,
+            "scene_config_path": scene_config_path,
             "testvar": comms_port+1,
         }
 

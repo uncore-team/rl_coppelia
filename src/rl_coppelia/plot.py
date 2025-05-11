@@ -21,6 +21,7 @@ Features:
 
 import glob
 import logging
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -711,6 +712,73 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
         timestep = []
         
 
+def plot_scene_trajs(rl_copp_obj, csv_path, traj_csv_path):
+    df = pd.read_csv(csv_path)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_xlim(2.5, -2.5)
+    ax.set_ylim(2.5, -2.5)
+    ax.set_aspect('equal')
+    ax.set_title("CoppeliaSim Scene Representation")
+
+    # Dibujar cuadrícula de 0.5 m
+    for i in np.arange(-2.5, 3, 0.5):
+        ax.axhline(i, color='lightgray', linewidth=0.5, zorder=0)
+        ax.axvline(i, color='lightgray', linewidth=0.5, zorder=0)
+
+    # Dibujar elementos
+    for _, row in df.iterrows():
+        x, y = row['x'], row['y']
+        if row['type'] == 'robot':
+            circle = plt.Circle((x, y), 0.35 / 2, color='blue', label='Robot', zorder=2)
+            ax.add_patch(circle)
+
+            # Dibujar orientación (si existe la columna 'theta')
+            if 'theta' in row:
+                theta = row['theta']
+
+                # Arrow option
+                # dx = 0.2 * np.cos(theta)
+                # dy = 0.2 * np.sin(theta)
+                # ax.arrow(x, y, dx, dy, head_width=0.05, head_length=0.07, fc='white', ec='black', zorder=3)
+
+                # Triangle option:
+                # Coordenadas del triángulo
+                front_length = 0.15
+                side_offset = 0.08
+
+                # Punto frontal
+                front = (x + front_length * np.cos(theta), y + front_length * np.sin(theta))
+                # Puntos laterales
+                left = (x + side_offset * np.cos(theta + 2.5), y + side_offset * np.sin(theta + 2.5))
+                right = (x + side_offset * np.cos(theta - 2.5), y + side_offset * np.sin(theta - 2.5))
+
+                triangle = plt.Polygon([front, left, right], color='white', zorder=3)
+                ax.add_patch(triangle)
+
+        elif row['type'] == 'obstacle':
+            circle = plt.Circle((x, y), 0.25 / 2, color='gray', label='Obstacle')
+            ax.add_patch(circle)
+        elif row['type'] == 'target':
+            # Dibujar la diana con 3 círculos concéntricos
+            target_rings = [(0.5 / 2, 'blue'), (0.25 / 2, 'red'), (0.03 / 2, 'yellow')]
+            for radius, color in target_rings:
+                circle = plt.Circle((x, y), radius, color=color, fill=True, alpha=0.6)
+                ax.add_patch(circle)
+
+
+    traj_df = pd.read_csv(traj_csv_path)
+    ax.plot(traj_df['x'], traj_df['y'], color='green', linewidth=2, label='Trajectory')
+
+    # Eliminar duplicados en la leyenda
+    handles, labels = ax.get_legend_handles_labels()
+    unique = dict(zip(labels, handles))
+    ax.legend(unique.values(), unique.keys(), loc='upper right')
+
+    plt.grid(True)
+    plt.show()
+
+
 def main(args):
     """
     Executes multiple testing runs. This method allows the user to test multiple models just by indicating
@@ -799,6 +867,15 @@ def main(args):
         for model in range(len(args.model_ids)):
             logging.info(f"Plotting histogram for target zones for model {args.model_ids[model]}")
             plot_bars(rl_copp, model, mode="target_zones")
+
+    if "plot_scene_trajs" in args.plot_types:
+        plot_type_correct = True
+        logging.info(f"Plotting a scene image with the trajectories followed by next models: {args.model_ids}")
+        if args.scene_config_path is None:
+            logging.error("Scene config path was not provided, program will exit as it cannot continue.")
+            sys.exit()
+        logging.info(f"Scene config path: {args.scene_config_path}. Traj path: {args.traj_csv_path}")
+        plot_scene_trajs(rl_copp, args.scene_config_path, args.traj_csv_path)
     
     
     if not plot_type_correct:
