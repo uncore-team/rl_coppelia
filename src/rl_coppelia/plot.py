@@ -712,9 +712,15 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
         timestep = []
         
 
-def plot_scene_trajs(rl_copp_obj, csv_path, traj_csv_path):
+def plot_scene_trajs(rl_copp_obj, folder_path):
 
-    df = pd.read_csv(csv_path)
+    # Search scene files
+    scene_files = glob.glob(os.path.join(folder_path, "scene_*.csv"))
+    if len(scene_files) != 1:
+        raise ValueError(f"Expected one scene CSV, found {len(scene_files)}")
+    
+    scene_path = scene_files[0]
+    df = pd.read_csv(scene_path)
 
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_xlim(2.5, -2.5)
@@ -722,12 +728,12 @@ def plot_scene_trajs(rl_copp_obj, csv_path, traj_csv_path):
     ax.set_aspect('equal')
     ax.set_title("CoppeliaSim Scene Representation")
 
-    # Dibujar cuadrícula de 0.5 m
+    # Draw 0.5 m grid
     for i in np.arange(-2.5, 3, 0.5):
         ax.axhline(i, color='lightgray', linewidth=0.5, zorder=0)
         ax.axvline(i, color='lightgray', linewidth=0.5, zorder=0)
 
-    # Dibujar elementos
+    # Draw all the elements of the scene
     for _, row in df.iterrows():
         x, y = row['x'], row['y']
         if row['type'] == 'robot':
@@ -768,9 +774,25 @@ def plot_scene_trajs(rl_copp_obj, csv_path, traj_csv_path):
                 ax.add_patch(circle)
 
 
-    traj_df = pd.read_csv(traj_csv_path)
-    ax.plot(traj_df['x'], traj_df['y'], color='green', linewidth=2, label='Trajectory')
+    traj_files = glob.glob(os.path.join(folder_path, "trajectory_*.csv"))
+    colors = plt.cm.get_cmap("tab10", len(traj_files))  # Colores únicos
 
+    for i, traj_file in enumerate(sorted(traj_files)):
+        traj_df = pd.read_csv(traj_file)
+
+        # Get model id from trajectory name
+        model_id = os.path.splitext(os.path.basename(traj_file))[0].split('_')[-1]
+
+        # Get action time for that model
+        # Get the training csv path for later getting the action times from there
+        training_metrics_path = rl_copp_obj.paths["training_metrics"]
+        train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
+        model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
+        timestep = (utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+
+        # Plot trajectory with action time indicated inside label
+        ax.plot(traj_df['x'], traj_df['y'], color=colors(i), linewidth=2, label=f'Model {timestep}s', zorder=1)
+    
     # Eliminar duplicados en la leyenda
     handles, labels = ax.get_legend_handles_labels()
     unique = dict(zip(labels, handles))
@@ -872,13 +894,12 @@ def main(args):
     if "plot_scene_trajs" in args.plot_types:
         plot_type_correct = True
         logging.info(f"Plotting a scene image with the trajectories followed by next models: {args.model_ids}")
-        if (args.experiment_id or args.episode_id) is None:
+        if (args.scene_to_load_folder) is None:
             logging.error("Scene config path was not provided, program will exit as it cannot continue.")
             sys.exit()
-        scene_config_path = os.path.join(rl_copp.paths["scene_configs"], args.experiment_id, "scene_episode", f"scene_{args.episode_id}.csv")
-        traj_csv_path = os.path.join(rl_copp.paths["scene_configs"], args.experiment_id, "traj_episode", f"trajectory_{args.episode_id}.csv")
-        logging.info(f"Scene config for expweriment id path: {scene_config_path}. Traj path: {traj_csv_path}")
-        plot_scene_trajs(rl_copp, scene_config_path, traj_csv_path)
+        scene_folder = os.path.join(rl_copp.paths["scene_configs"], args.scene_to_load_folder)
+        logging.info(f"Scene config folder to be loaded: {scene_folder}")
+        plot_scene_trajs(rl_copp, scene_folder)
     
     
     if not plot_type_correct:

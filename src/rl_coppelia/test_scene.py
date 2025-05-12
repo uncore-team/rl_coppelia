@@ -57,7 +57,7 @@ def main(args):
 
     # Set the number of iterations
     n_iter = 1
-    logging.info(f"Running tests for only {n_iter} iteration for the preconfigured scene {rl_copp.args.scene_config_path}.")
+    logging.info(f"Running tests for only {n_iter} iteration for the preconfigured scene {rl_copp.args.experiment_to_load}/scene_episode/scene_{rl_copp.args.episode_to_load}.csv.")
 
     # speed_headers = ["Linear speed", "Angular speed"]
 

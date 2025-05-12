@@ -142,7 +142,8 @@ class CoppeliaAgent:
         
 
         # For loading a scene
-        self.load_scene_path = ""
+        self.experiment_to_load = ""
+        self.episode_to_load = ""
         self.id_obstacle = 0
         # self.load_scene = True
         
@@ -238,7 +239,7 @@ class CoppeliaAgent:
                 self.sim.removeObjects(last_obstacles)
         
         # Just place the scene objects at random positions and call 'generate_obs'
-        if self.load_scene_path == "" or self.load_scene_path is None:
+        if self.experiment_to_load == "" or self.experiment_to_load is None:
             # Reset positions and orientation
             current_position = self.sim.getObjectPosition(self.robot_baselink, -1)
             if current_position != [0, 0, 0.06969]:
@@ -262,7 +263,7 @@ class CoppeliaAgent:
         else:
             self.id_obstacle = 0
             # CSV path
-            csv_path = os.path.join(self.paths["scene_configs"], self.load_scene_path)  
+            csv_path = os.path.join(self.paths["scene_configs"], self.experiment_to_load, "scene_episode", f"scene_{self.episode_to_load}.csv")  
             if not os.path.exists(csv_path):
                 logging.error(f"[ERROR] CSV scene file not found: {csv_path}")
                 sys.exit()

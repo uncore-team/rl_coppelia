@@ -524,10 +524,15 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
             except:
                 model_name = None
 
-        if not hasattr(args, "scene_config_path"):
-            scene_config_path = None
+        if not hasattr(args, "experiment_to_load"):
+            experiment_to_load = None
         else:
-            scene_config_path = args.scene_config_path
+            experiment_to_load = args.experiment_to_load
+
+        if not hasattr(args, "episode_to_load"):
+            episode_to_load = None
+        else:
+            episode_to_load = args.episode_to_load
 
         if not hasattr(args, "save_scene"):
             save_scene = None
@@ -552,7 +557,8 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
             "base_path": base_path,
             "comms_port": comms_port,
             "verbose": args.verbose,
-            "scene_config_path": scene_config_path,
+            "experiment_to_load": experiment_to_load,
+            "episode_to_load": episode_to_load,
             "save_scene": save_scene,
             "save_traj": save_traj,
             "testvar": comms_port+1,
