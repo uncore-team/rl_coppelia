@@ -91,7 +91,7 @@ def main(args):
     model = ModelClass.load(rl_copp.args.model_name, rl_copp.env)
     
     # Get output csv path
-    experiment_csv_name, _, experiment_csv_path, speeds_csv_path = utils.get_output_csv(model_name, testing_metrics_path, train_flag=False)
+    experiment_csv_name, _, experiment_csv_path, otherdata_csv_path = utils.get_output_csv(model_name, testing_metrics_path, train_flag=False)
 
     # Save a timestamp of the beggining of the testing
     start_time = time.time()
@@ -113,25 +113,25 @@ def main(args):
         n_iter = rl_copp.params_test['testing_iterations']
     logging.info(f"Running tests for {n_iter} iterations.")
 
-    speed_headers = ["Linear speed", "Angular speed"]
-
+    # Set headers for the different csv files that will be saved
+    metrics_headers = [
+                'Initial distance (m)', 
+                'Reached distance (m)', 
+                'Time (s)', 
+                'Reward', 
+                'Target zone',
+                'TimeSteps count', 
+                'Terminated', 
+                'Truncated', 
+                'Crashes',
+                'Max limits achieved'
+            ]
+    otherdata_headers = ["Linear speed", "Angular speed", "LAT-Sim (s)", "LAT-Wall (s)"]
 
     # Open a csv file to store the metrics
     with open(experiment_csv_path, mode='w', newline='') as metrics_file:
         metrics_writer = csv.writer(metrics_file)
-        headers = [
-            'Initial distance (m)', 
-            'Reached distance (m)', 
-            'Time (s)', 
-            'Reward', 
-            'Target zone',
-            'TimeSteps count', 
-            'Terminated', 
-            'Truncated', 
-            'Crashes',
-            'Max limits achieved'
-        ]
-        metrics_writer.writerow(headers)
+        metrics_writer.writerow(metrics_headers)
 
         # Run test x iterations
         # Wrap your range with tqdm to create a progress bar
@@ -155,17 +155,19 @@ def main(args):
                 action, _states = model.predict(observation, deterministic=True)
                 observation, _, terminated, truncated, info = rl_copp.env.envs[0].step(action)
                 
+                # Write speeds of the robot and LATs for each testing step
                 try:
-                    with open(speeds_csv_path, mode="r") as f:
+                    with open(otherdata_csv_path, mode="r") as f:
                         pass
                 except FileNotFoundError:
-                    with open(speeds_csv_path, mode="w", newline='') as f:
-                        speed_writer = csv.writer(f)
-                        speed_writer.writerow(speed_headers)  # Write the headers
+                    with open(otherdata_csv_path, mode="w", newline='') as f:
+                        otherdata_writer = csv.writer(f)
+                        otherdata_writer.writerow(otherdata_headers)  # Write the headers
                 
-                with open(speeds_csv_path, mode='a', newline='') as speed_file:
-                    speed_writer = csv.writer(speed_file)
-                    speed_writer.writerow([info["linear_speed"], info["angular_speed"]])
+                with open(otherdata_csv_path, mode='a', newline='') as speed_file:
+                    otherdata_writer = csv.writer(speed_file)
+                    otherdata_writer.writerow([info["linear_speed"], info["angular_speed"], info["lat_sim"], info["lat_wall"]])
+            
             
             # Call get_metrics(), so we will have the total time of the iteration
             # and the final distance to the target

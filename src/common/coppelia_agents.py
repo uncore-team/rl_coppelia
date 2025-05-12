@@ -59,8 +59,13 @@ class CoppeliaAgent:
             raise(ValueError("RL timestep must be > control timestep"))
         self._waitingforrlcommands = True
         self._lastaction = None
-        self._lastactiont0 = 0.0
-        self.lat = 0.0
+        self._lastactiont0_sim = 0.0
+        self._lastactiont0_wall = 0.0
+        self.lat_sim = 0.0
+        self.lat_wall = 0.0
+        self.current_sim_offset_time = 0.0
+        self.current_wall_offset_time = 0.0
+
         self.reward = 0
         self.execute_cmd_vel = False
         self.colorID = 1
@@ -114,7 +119,8 @@ class CoppeliaAgent:
         
         # Process control variables
         self.finish_rec = False
-        self.episode_start_time = 0.0
+        self.episode_start_time_sim = 0.0
+        self.episode_start_time_wall = 0.0
         self.reset_flag = False
         self.crash_flag = False
         self.training_started = False
@@ -339,8 +345,8 @@ class CoppeliaAgent:
 
         # Waiting state --> It waits until the current action is finished
         if not self._waitingforrlcommands: # not waiting new commands from RL, just executing last action
-            self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time
-            if (self.current_sim_offset_time-self._lastactiont0 >= self._rltimestep): # last action finished
+            self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
+            if (self.current_sim_offset_time-self._lastactiont0_sim >= self._rltimestep): # last action finished
             # if (self.sim.getSimulationTime()-self._lastactiont0 >= self._rltimestep):
 
                 logging.info("Act completed.")
@@ -418,17 +424,26 @@ class CoppeliaAgent:
                     #     self.episode_start_time = self.initial_simTime
                     if self.reset_flag:
                         # Reset timing variables after resetting the scene
-                        self._lastactiont0 = 0.0
-                        self.episode_start_time = self.sim.getSimulationTime()
+                        self._lastactiont0_sim = 0.0
+                        self._lastactiont0_wall = 0.0
+                        self.episode_start_time_sim = self.sim.getSimulationTime()
+                        self.episode_start_time_wall = self.sim.getSystemTime()
                         self.reset_flag = False
                     
-                    self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time
-                    self.lat = self.current_sim_offset_time-self._lastactiont0
-                    self._lastactiont0 = self.current_sim_offset_time
-                    logging.info(f"LAT: {round(self.lat,4)}")
+                    self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
+                    self.current_wall_offset_time = self.sim.getSystemTime()-self.episode_start_time_wall
+
+                    self.lat_sim= self.current_sim_offset_time-self._lastactiont0_sim
+                    self.lat_wall= self.current_wall_offset_time-self._lastactiont0_wall
+
+                    self._lastactiont0_sim = self.current_sim_offset_time
+                    self._lastactiont0_wall = self.current_wall_offset_time
+
+                    logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}")
+
                     self._waitingforrlcommands = False # from now on, we are waiting to execute the action
                     self.execute_cmd_vel = True
-                    self._commstoRL.stepSendLastActDur(self.lat)
+                    self._commstoRL.stepSendLastActDur(self.lat_sim, self.lat_wall)
                     logging.info("LAT already sent")
                     
             

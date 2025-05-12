@@ -884,7 +884,7 @@ def get_output_csv(model_name, metrics_path, train_flag=True):
         return output_csv_name, output_csv_path
     else:
         output_csv_name_1 = f"{model_name}_test_{timestamp}.csv"
-        output_csv_name_2 = f"{model_name}_speeds_{timestamp}.csv"
+        output_csv_name_2 = f"{model_name}_otherdata_{timestamp}.csv"
         output_csv_path_1 = os.path.join(metrics_path, output_csv_name_1)
         output_csv_path_2 = os.path.join(metrics_path, output_csv_name_2)
         return output_csv_name_1, output_csv_name_2, output_csv_path_1, output_csv_path_2

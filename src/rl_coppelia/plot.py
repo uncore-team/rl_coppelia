@@ -466,7 +466,7 @@ def plot_histogram (rl_copp_obj, model_index, mode, n_bins = 21, title = "Histog
     if mode == "speeds":
         # CSV File path to get data from
         # Capture the desired files through a pattern
-        file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_speeds_*.csv"
+        file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_otherdata_*.csv"
         files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
         # Read CSV
         df = pd.read_csv(files[0])
@@ -646,7 +646,7 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
 
             # Construct the file pattern for each case
             if mode == "speeds":    # turtleBot_model_308_last_speeds_2025-05-10_12-00-32.csv
-                file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_speeds_*.csv"
+                file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_otherdata_*.csv"
                 
             elif mode == "target_zones":    # turtleBot_model_308_last_test_2025-05-10_12-00-32.csv
                 file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_test_*.csv"
@@ -817,7 +817,6 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
     metrics = ["Time (s)", "Reward", "Target zone", "Crashes"]
     combined_data = []
     model_action_times = []
-    plot_detailed_reward = False
 
     # Get trainings' csv name for searching action times later
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
@@ -909,6 +908,42 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         plt.grid(True)
         plt.tight_layout()
         plt.show()
+
+    
+def plot_lat_curves(rl_copp_obj, model_index):
+    # Get the training csv path for later getting the action times from there
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
+     # Get action time 
+    model_name = rl_copp_obj.args.robot_name + "_model_" + str(rl_copp_obj.args.model_ids[model_index])
+    timestep = (utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+
+    # CSV File path to get data from
+    # Capture the desired files through a pattern
+    file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_otherdata_*.csv"
+    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+
+    # Read CSV
+    df = pd.read_csv(files[0])
+
+    # Filtrate rows where both values are both zero (beginning of an episode)
+    df_filtered = df[(df["LAT-Sim (s)"] > 0.01) | (df["LAT-Wall (s)"] > 0.01)].copy()
+
+    # Restart the index so steps are consecutive
+    df_filtered.reset_index(drop=True, inplace=True)
+
+    # Plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(df_filtered.index, df_filtered["LAT-Sim (s)"], label="LAT-Sim (s)", linewidth=1.5)
+    plt.plot(df_filtered.index, df_filtered["LAT-Wall (s)"], label="LAT-Wall (s)", linewidth=1.5)
+
+    plt.xlabel("Step")
+    plt.ylabel("LAT (s)")
+    plt.title(f"LAT-Sim and LAT-Wall vs. Steps - Model {timestep}s")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 
 def main(args):
@@ -1014,6 +1049,12 @@ def main(args):
         plot_type_correct = True
         logging.info(f"Plotting boxplots for models {args.model_ids}")
         compare_models_boxplots(rl_copp, args.model_ids)
+
+    if "lat_curves" in args.plot_types:
+        plot_type_correct = True
+        for model in range(len(args.model_ids)):
+            logging.info(f"Plotting curves for LAT-sim and LAT-wall for model {args.model_ids[model]}")
+            plot_lat_curves(rl_copp, model)
     
     
     if not plot_type_correct:

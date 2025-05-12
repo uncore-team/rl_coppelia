@@ -71,6 +71,10 @@ class CoppeliaEnv(gym.Env):
 
         # Observation space will be defined by child classes, because each robot has different observation spaces
         self.observation_space = None
+
+        # LAT variables
+        self.lat_sim = 0
+        self.lat_wall = 0
         
         # Process control variables
         self.count=0
@@ -132,7 +136,7 @@ class CoppeliaEnv(gym.Env):
 
         # Send action to agent and receive an observation.
         logging.info(f"Send act to agent: { {key: round(value, 3) for key, value in self.action_dic.items()} }.")
-        self.lat, self.observation, self.crash_flag, self.ato = self._commstoagent.stepSendActGetObs(self.action_dic, timeout = 20.0)
+        self.lat_sim, self.lat_wall, self.observation, self.crash_flag, self.ato = self._commstoagent.stepSendActGetObs(self.action_dic, timeout = 20.0)
         logging.info(f"Obs rec STEP: { {key: round(value, 3) for key, value in self.observation.items()} }")
         logging.debug(f"REC: crash flag: {self.crash_flag}, ato: {self.ato}")
 
@@ -143,9 +147,9 @@ class CoppeliaEnv(gym.Env):
 
         # Calculate reward
         self.reward = self._calculate_reward()
-        logging.info(f"LAT: {round(self.lat,4)}. RW: {self.reward}")
-        if self.lat > (self.params_env["fixed_actime"] + self.tol_lat):
-            logging.warning(f"WARNING: LAT is too big for current action time. Lat = {self.lat}, A_time = {self.params_env['fixed_actime']}")
+        logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}. RW: {round(self.reward,4)}")
+        if self.lat_sim > (self.params_env["fixed_actime"] + self.tol_lat):
+            logging.warning(f"WARNING: LAT is too big for current action time. Lat = {round(self.lat_sim,4)}, A_time = {self.params_env['fixed_actime']}")
 
         # Update episode
         if self.reward !=0:
@@ -162,7 +166,8 @@ class CoppeliaEnv(gym.Env):
             "truncated": self.truncated, 
             "linear_speed":self.action_dic["linear"],
             "angular_speed":self.action_dic["angular"],
-            
+            "lat_sim":self.lat_sim,
+            "lat_wall":self.lat_wall
             }
 
         return self.observation, self.reward, self.terminated, self.truncated, self.info
