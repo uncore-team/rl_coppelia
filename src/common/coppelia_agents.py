@@ -120,14 +120,26 @@ class CoppeliaAgent:
         self.training_started = False
 
         # Needed for saving scenes
-        self.save_scene = True
+        self.save_scene = False
         self.scene_configs_path = self.paths["scene_configs"]
         self.experiment_id = file_id
         self.episode_idx = 0
         self.trajectory = []
+        self.save_scene_csv_folder = os.path.join(
+            self.scene_configs_path,
+            self.experiment_id,
+            "scene_episode"
+        )
+        
 
         # For saving trajectory
-        self.save_traj = True
+        self.save_traj = False
+        self.save_traj_csv_folder = os.path.join(
+            self.scene_configs_path,
+            self.experiment_id,
+            "traj_episode"
+        )
+        
 
         # For loading a scene
         self.load_scene_path = ""
@@ -195,8 +207,7 @@ class CoppeliaAgent:
         Reset the simulator: position the robot and target, and reset the counters.
         If there are obstacles, remove them and create new ones.
         """
-        # Set first reset flag to True
-        self.first_reset = True
+        
         
         # Set speed to 0. It's important to do this before setting the position and orientation
         # of the robot, to avoid bugs with Coppelia simulation
@@ -209,7 +220,7 @@ class CoppeliaAgent:
         # Save trajectory at the beggining of the reset (last episode traj)
         if self.save_traj:
             if self.trajectory != []:
-                traj_output_path = os.path.join(self.scene_configs_path, f"trajectory_{self.experiment_id}_{self.episode_idx}.csv")
+                traj_output_path = os.path.join(self.save_traj_csv_folder, f"trajectory_{self.episode_idx}.csv")
                 with open(traj_output_path, mode='w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=["x", "y"])
                     writer.writeheader()
@@ -218,45 +229,7 @@ class CoppeliaAgent:
             
                 logging.info(f"Trajectory saved in CSV: {traj_output_path}")
 
-                self.episode_idx = self.episode_idx + 1
-
-        # Save current scene configuration for further analysis
-        if self.save_scene:
-            
-            # Crear lista donde guardaremos los datos
-            scene_elements = []
-
-            # Obtener y guardar posición del robot
-            robot_pos = self.sim.getObjectPosition(self.robot_baselink, -1)
-            robot_ori = self.sim.getObjectOrientation(self.robot_baselink, -1)
-            scene_elements.append(["robot", robot_pos[0], robot_pos[1], robot_ori[2]]) 
-
-            # Obtener y guardar posición del target
-            target_pos = self.sim.getObjectPosition(self.target, -1)
-            scene_elements.append(["target", target_pos[0], target_pos[1]])
-
-            # Obtener obstáculos (asumiendo que están bajo self.generator)
-            obstacles = self.sim.getObjectsInTree(self.generator, self.sim.handle_all, 1)
-            for obs_handle in obstacles:
-                obs_pos = self.sim.getObjectPosition(obs_handle, -1)
-                scene_elements.append(["obstacle", obs_pos[0], obs_pos[1]])
-
-            # Ruta para guardar el CSV (en la carpeta de la escena)
-            csv_path = os.path.join(
-                self.scene_configs_path,
-                f"scene_{self.experiment_id}_{self.episode_idx}.csv"
-            )
-
-            # Guardar el archivo CSV
-            with open(csv_path, mode="w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["type", "x", "y", "theta"])
-                writer.writerows(scene_elements)
-
-            logging.info(f"Scene saved in CSV: {csv_path}")
-            
-        
-
+                
         # Always remove old obstacles before creating news
         if self.generator is not None:
             # Remove old obstacles
@@ -314,7 +287,46 @@ class CoppeliaAgent:
 
             logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
 
+
+        # Save current scene configuration for further analysis
+        if self.save_scene:
+            self.episode_idx = self.episode_idx + 1
+            
+            # Crear lista donde guardaremos los datos
+            scene_elements = []
+
+            # Obtener y guardar posición del robot
+            robot_pos = self.sim.getObjectPosition(self.robot_baselink, -1)
+            robot_ori = self.sim.getObjectOrientation(self.robot_baselink, -1)
+            scene_elements.append(["robot", robot_pos[0], robot_pos[1], robot_ori[2]]) 
+
+            # Obtener y guardar posición del target
+            target_pos = self.sim.getObjectPosition(self.target, -1)
+            scene_elements.append(["target", target_pos[0], target_pos[1]])
+
+            # Obtener obstáculos (asumiendo que están bajo self.generator)
+            obstacles = self.sim.getObjectsInTree(self.generator, self.sim.handle_all, 1)
+            for obs_handle in obstacles:
+                obs_pos = self.sim.getObjectPosition(obs_handle, -1)
+                scene_elements.append(["obstacle", obs_pos[0], obs_pos[1]])
+
+            # Ruta para guardar el CSV (en la carpeta de la escena)
+            
+
+            csv_path = os.path.join(self.save_scene_csv_folder, f"scene_{self.episode_idx}.csv")
+                
+            # Guardar el archivo CSV
+            with open(csv_path, mode="w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["type", "x", "y", "theta"])
+                writer.writerows(scene_elements)
+
+            logging.info(f"Scene saved in CSV: {csv_path}")
+
         
+
+        # Set first reset flag to True
+        self.first_reset = True
 
 
     def agent_step(self):

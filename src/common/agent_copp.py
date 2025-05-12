@@ -36,7 +36,7 @@ def sysCall_init():
     """
     Initialize the simulation.
     """
-    global sim, agent, verbose, sim_initialized, robot_name, params_env, comms_port, paths, file_id, scene_config_path
+    global sim, agent, verbose, sim_initialized, robot_name, params_env, comms_port, paths, file_id, scene_config_path, save_scene, save_traj
     sim = require('sim')    # type: ignore
 
     # Variables to get from agent_copp.py script
@@ -48,6 +48,10 @@ def sysCall_init():
     params_env = {}
     verbose = 1
     scene_config_path = ""
+    save_scene = None
+    save_traj = None
+
+    # If agent received a scene_config_path from Python RL side, it means that the user wants to load a scene configuration
 
     # Generate needed routes for logs and tf
     paths = utils.get_robot_paths(base_path, robot_name, agent_logs=True)
@@ -59,7 +63,7 @@ def sysCall_init():
 
 
 def sysCall_thread():
-    global sim, agent, robot_name, params_env, comms_port, sim_initialized, paths, file_id, scene_config_path
+    global sim, agent, robot_name, params_env, comms_port, sim_initialized, paths, file_id, scene_config_path, save_scene, save_traj
 
     if sim_initialized:
         # Create agent
@@ -71,7 +75,22 @@ def sysCall_thread():
         logging.info("Agent initialized")
 
         agent.load_scene_path = scene_config_path
+        agent.save_scene = save_scene
+        if agent.save_scene:
+            os.makedirs(agent.save_scene_csv_folder, exist_ok=True)
+            logging.info(f"Scene configurations will be saved in: {agent.save_scene_csv_folder}.")
 
+        # Check if there is any path at agent.load_scene_path. If that is the case, it doesn't make sense to not save the trajectory,
+        # so agent.save_traj will be overrieded to True
+        if agent.load_scene_path =="" or agent.load_scene_path is None:
+            agent.save_traj = save_traj
+            if agent.save_traj:
+                os.makedirs(agent.save_traj_csv_folder, exist_ok=True)
+                logging.info(f"Trajectories will be saved in: {agent.save_traj_csv_folder}.")
+        else:
+            agent.save_traj = True
+            os.makedirs(agent.save_traj_csv_folder, exist_ok=True)
+            logging.info(f"Scene configuration {agent.load_scene_path} will be loaded and trajectory will be saved in {agent.save_traj_csv_folder}.")
 
 
 def sysCall_sensing():

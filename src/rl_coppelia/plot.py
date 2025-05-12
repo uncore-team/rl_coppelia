@@ -713,6 +713,7 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
         
 
 def plot_scene_trajs(rl_copp_obj, csv_path, traj_csv_path):
+
     df = pd.read_csv(csv_path)
 
     fig, ax = plt.subplots(figsize=(6, 6))
@@ -871,11 +872,13 @@ def main(args):
     if "plot_scene_trajs" in args.plot_types:
         plot_type_correct = True
         logging.info(f"Plotting a scene image with the trajectories followed by next models: {args.model_ids}")
-        if args.scene_config_path is None:
+        if (args.experiment_id or args.episode_id) is None:
             logging.error("Scene config path was not provided, program will exit as it cannot continue.")
             sys.exit()
-        logging.info(f"Scene config path: {args.scene_config_path}. Traj path: {args.traj_csv_path}")
-        plot_scene_trajs(rl_copp, args.scene_config_path, args.traj_csv_path)
+        scene_config_path = os.path.join(rl_copp.paths["scene_configs"], args.experiment_id, "scene_episode", f"scene_{args.episode_id}.csv")
+        traj_csv_path = os.path.join(rl_copp.paths["scene_configs"], args.experiment_id, "traj_episode", f"trajectory_{args.episode_id}.csv")
+        logging.info(f"Scene config for expweriment id path: {scene_config_path}. Traj path: {traj_csv_path}")
+        plot_scene_trajs(rl_copp, scene_config_path, traj_csv_path)
     
     
     if not plot_type_correct:

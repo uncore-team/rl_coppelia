@@ -528,6 +528,22 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
             scene_config_path = None
         else:
             scene_config_path = args.scene_config_path
+
+        if not hasattr(args, "save_scene"):
+            save_scene = None
+            print("if save scene")
+        else:
+            save_scene = args.save_scene
+            print("else save scene")
+            print(save_scene)
+
+        if not hasattr(args, "save_traj"):
+            save_traj = None
+            print("if save traj")
+        else:
+            save_traj = args.save_traj
+            print("else save traj")
+            print(save_traj)
         
 
         replacements = {
@@ -537,6 +553,8 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
             "comms_port": comms_port,
             "verbose": args.verbose,
             "scene_config_path": scene_config_path,
+            "save_scene": save_scene,
+            "save_traj": save_traj,
             "testvar": comms_port+1,
         }
 
