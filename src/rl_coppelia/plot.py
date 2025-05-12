@@ -31,6 +31,7 @@ import pandas as pd
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
+from pandas.api.types import CategoricalDtype
 
 
 
@@ -812,60 +813,99 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         robot_name (str): Nombre del robot (ej: "turtleBot").
         csv_folder (str): Carpeta donde buscar los CSV (por defecto, actual).
     """
+    # Initialize variables
     metrics = ["Time (s)", "Reward", "Target zone", "Crashes"]
-    # data = {metric: [] for metric in metrics}
     combined_data = []
+    model_action_times = []
+    plot_detailed_reward = False
+
+    # Get trainings' csv name for searching action times later
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv") 
 
     for model_id in model_ids:
         file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*_test_*.csv"
         files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
-        print(file_pattern)
-        print(files)
         if not files:
-            print(f"[!] No se encontró archivo para modelo {model_id}")
+            logging.error(f"[!] File not found for model {model_id}")
             continue
+            
+        # Get action time for each model
+        model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
+        timestep = (utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+        model_action_times.append(f"{timestep}s")
 
         for file in files:
             df = pd.read_csv(file)
-            df["Model"] = str(model_id)
+            df["Model"] = str(timestep) + "s"
             combined_data.append(df)
 
     if not combined_data:
-        print("[!] No se encontraron datos.")
+        logging.error("[!] Data not found.")
         return
 
     full_df = pd.concat(combined_data, ignore_index=True)
 
     for metric in metrics:
         if metric not in full_df.columns:
-            print(f"[!] Columna '{metric}' no encontrada en los datos")
+            logging.error(f"[!] Column '{metric}' no found")
             continue
 
+    # Add a metric that doesn't appear on the csv file: reward detail, for plotting those cases with a positive reward, so user can observe reward more detailed
+    metrics.append("Reward detail (>=0)")
+
+    for metric in metrics:
+    
         plt.figure(figsize=(10, 6))
         if metric in ["Time (s)", "Reward"]:
             sns.boxplot(data=full_df, x="Model", y=metric)
+
+        elif metric == "Reward detail (>=0)": 
+            df_reward_detail = full_df[full_df["Reward"] >= 0]
+            sns.boxplot(data=df_reward_detail, x="Model", y="Reward")
+
+
         elif metric == "Target zone":
-            sns.countplot(data=full_df, x=metric, hue="Model")
+            # Filtrate episodes with target zone == 0, as those have suffered an early ending or a collision
+            df_target = full_df[full_df[metric] != 0]
+            
+            # Assure that the models maintein the order
+            model_order = [str(mid) for mid in model_action_times]
+
+            zone_counts = df_target.groupby(["Model", "Target zone"]).size().reset_index(name='count')
+
+            # Obtenemos totales por modelo
+            totals = df_target.groupby("Model").size().reset_index(name='total')
+
+            # Unimos ambos y calculamos el porcentaje
+            zone_percents = pd.merge(zone_counts, totals, on="Model")
+            zone_percents["Zone percentage (%)"] = 100 * zone_percents["count"] / zone_percents["total"]
+
+            sns.barplot(data=zone_percents, x="Target zone", y="Zone percentage (%)", hue="Model", hue_order=model_order)
             plt.legend(title="Model")
+
         elif metric == "Crashes":
-            # Convertir a booleano si no lo es
+            # Ensure that the values of collisions are booleans
             full_df[metric] = full_df[metric].astype(str).str.strip().str.lower().map({
                 "true": True, "1": True, "yes": True,
                 "false": False, "0": False, "no": False
             })
 
-            # Calcular proporción de crashes por modelo
+            # Calculate collsiion percentage
             crash_pct = (
                 full_df.groupby("Model")[metric]
                 .mean()
-                .rename("Crash Rate")
+                .mul(100)
+                .rename("Collision Rate")
                 .reset_index()
             )
 
-            sns.barplot(data=crash_pct, x="Model", y="Crash Rate")
-            plt.ylabel("Proporción de episodios con crash")
+            sns.barplot(data=crash_pct, x="Model", y="Collision Rate")
+            plt.ylabel("Episodes with collision (%)")
         
-        plt.title(f"Comparación de '{metric}' entre modelos")
+        if metric == "Time (s)":
+            metric = "Simulation Time"
+        plt.title(f"{metric} comparison")
         plt.grid(True)
         plt.tight_layout()
         plt.show()
