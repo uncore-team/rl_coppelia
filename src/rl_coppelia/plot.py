@@ -25,6 +25,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import seaborn as sns
 
 import pandas as pd
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -802,6 +803,74 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
     plt.show()
 
 
+def compare_models_boxplots(rl_copp_obj, model_ids):
+    """
+    Compara una variable entre modelos usando un boxplot.
+    
+    Args:
+        model_ids (list): Lista de IDs de modelos (ej: [102, 248]).
+        robot_name (str): Nombre del robot (ej: "turtleBot").
+        csv_folder (str): Carpeta donde buscar los CSV (por defecto, actual).
+    """
+    metrics = ["Time (s)", "Reward", "Target zone", "Crashes"]
+    # data = {metric: [] for metric in metrics}
+    combined_data = []
+
+    for model_id in model_ids:
+        file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*_test_*.csv"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+        print(file_pattern)
+        print(files)
+        if not files:
+            print(f"[!] No se encontró archivo para modelo {model_id}")
+            continue
+
+        for file in files:
+            df = pd.read_csv(file)
+            df["Model"] = str(model_id)
+            combined_data.append(df)
+
+    if not combined_data:
+        print("[!] No se encontraron datos.")
+        return
+
+    full_df = pd.concat(combined_data, ignore_index=True)
+
+    for metric in metrics:
+        if metric not in full_df.columns:
+            print(f"[!] Columna '{metric}' no encontrada en los datos")
+            continue
+
+        plt.figure(figsize=(10, 6))
+        if metric in ["Time (s)", "Reward"]:
+            sns.boxplot(data=full_df, x="Model", y=metric)
+        elif metric == "Target zone":
+            sns.countplot(data=full_df, x=metric, hue="Model")
+            plt.legend(title="Model")
+        elif metric == "Crashes":
+            # Convertir a booleano si no lo es
+            full_df[metric] = full_df[metric].astype(str).str.strip().str.lower().map({
+                "true": True, "1": True, "yes": True,
+                "false": False, "0": False, "no": False
+            })
+
+            # Calcular proporción de crashes por modelo
+            crash_pct = (
+                full_df.groupby("Model")[metric]
+                .mean()
+                .rename("Crash Rate")
+                .reset_index()
+            )
+
+            sns.barplot(data=crash_pct, x="Model", y="Crash Rate")
+            plt.ylabel("Proporción de episodios con crash")
+        
+        plt.title(f"Comparación de '{metric}' entre modelos")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+
 def main(args):
     """
     Executes multiple testing runs. This method allows the user to test multiple models just by indicating
@@ -900,6 +969,11 @@ def main(args):
         scene_folder = os.path.join(rl_copp.paths["scene_configs"], args.scene_to_load_folder)
         logging.info(f"Scene config folder to be loaded: {scene_folder}")
         plot_scene_trajs(rl_copp, scene_folder)
+
+    if "plot_boxplots" in args.plot_types:
+        plot_type_correct = True
+        logging.info(f"Plotting boxplots for models {args.model_ids}")
+        compare_models_boxplots(rl_copp, args.model_ids)
     
     
     if not plot_type_correct:

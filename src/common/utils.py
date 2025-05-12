@@ -536,20 +536,14 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
 
         if not hasattr(args, "save_scene"):
             save_scene = None
-            print("if save scene")
         else:
             save_scene = args.save_scene
-            print("else save scene")
-            print(save_scene)
 
         if not hasattr(args, "save_traj"):
             save_traj = None
-            print("if save traj")
         else:
             save_traj = args.save_traj
-            print("else save traj")
-            print(save_traj)
-        
+
 
         replacements = {
             "robot_name": args.robot_name,

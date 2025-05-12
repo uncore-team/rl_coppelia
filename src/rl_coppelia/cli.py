@@ -106,7 +106,7 @@ def main():
     plot_parser = subparsers.add_parser("plot", help="Creates a set of plots for getting the results of a trained model or for comparing some models.")
     plot_parser.add_argument("--robot_name", type=str, help="Name for the robot.", required=True)
     plot_parser.add_argument("--model_ids", type=int, nargs='+', help="List with numerical IDs of the different models to be plotted.", required=True)
-    plot_parser.add_argument("--scene_to_load_folder", type=str, help="Folder name, located inside 'scene_configs', that contains the scene and trajectories to be loaded", required=True)
+    plot_parser.add_argument("--scene_to_load_folder", type=str, help="Folder name, located inside 'scene_configs', that contains the scene and trajectories to be loaded", required=False)
     plot_parser.add_argument("--plot_types", type=str, nargs='+', help="List of types of plots that the user wants to create.", 
                              default=["spider", "convergence-time", "convergence-steps", "compare-rewards", "compare-episodes_length", 
                                       "histogram_speeds", "histogram_speed_comparison", "hist_target_zones", "bar_target_zones"], required=False)
