@@ -30,6 +30,7 @@ sim = None
 agent = None
 verbose = 1
 sim_initialized = False
+agent_created = False
 
 
 def sysCall_init():
@@ -64,7 +65,7 @@ def sysCall_init():
 
 
 def sysCall_thread():
-    global sim, agent, robot_name, params_env, comms_port, sim_initialized, paths, file_id, experiment_to_load, episode_to_load, save_scene, save_traj
+    global sim, agent, robot_name, params_env, comms_port, sim_initialized, paths, file_id, experiment_to_load, episode_to_load, save_scene, save_traj,agent_created
 
     if sim_initialized:
         # Create agent
@@ -94,15 +95,17 @@ def sysCall_thread():
             os.makedirs(agent.save_traj_csv_folder, exist_ok=True)
             logging.info(f"Scene configuration {agent.experiment_to_load}/scene_episode/scene_{agent.episode_to_load}.csv will be loaded and trajectory will be saved in {agent.save_traj_csv_folder}.")
 
+        agent_created = True
+
 
 def sysCall_sensing():
     """
     Main loop to continuously handle instructions and actions.
     """  
-    global sim, agent, verbose
+    global sim, agent, verbose, agent_created
     initial_realTime = 0
 
-    if agent and not agent.finish_rec:
+    if agent and not agent.finish_rec and agent_created:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
         action = agent.agent_step()
 
@@ -121,7 +124,7 @@ def sysCall_sensing():
             agent.execute_cmd_vel = False
         
         # Save current robot position for later saving it csv file
-        if agent.first_reset and agent.save_traj:
+        if agent.episode_idx >=1 and agent.save_traj:
             position = agent.sim.getObjectPosition(agent.robot_baselink, -1)
             agent.trajectory.append({"x": position[0], "y": position[1]})
             logging.debug(f"x pos: {position[0]}; y pos: {position[1]}")

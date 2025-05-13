@@ -19,6 +19,7 @@ Features:
     - Saves a summary of testing results in a CSV file, along with some plots comparing the obtained metrics.
 """
 
+from collections import defaultdict
 import glob
 import logging
 import sys
@@ -32,6 +33,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
 from pandas.api.types import CategoricalDtype
+from scipy.interpolate import interp1d
+from matplotlib.patches import Ellipse
 
 
 
@@ -742,23 +745,16 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
             circle = plt.Circle((x, y), 0.35 / 2, color='blue', label='Robot', zorder=2)
             ax.add_patch(circle)
 
-            # Dibujar orientación (si existe la columna 'theta')
+            # Indicate orientation
             if 'theta' in row:
                 theta = row['theta']
-
-                # Arrow option
-                # dx = 0.2 * np.cos(theta)
-                # dy = 0.2 * np.sin(theta)
-                # ax.arrow(x, y, dx, dy, head_width=0.05, head_length=0.07, fc='white', ec='black', zorder=3)
-
-                # Triangle option:
-                # Coordenadas del triángulo
+                # Triangle dimensions
                 front_length = 0.15
                 side_offset = 0.08
 
-                # Punto frontal
+                # Front point
                 front = (x + front_length * np.cos(theta), y + front_length * np.sin(theta))
-                # Puntos laterales
+                # Side points
                 left = (x + side_offset * np.cos(theta + 2.5), y + side_offset * np.sin(theta + 2.5))
                 right = (x + side_offset * np.cos(theta - 2.5), y + side_offset * np.sin(theta - 2.5))
 
@@ -774,28 +770,48 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
             for radius, color in target_rings:
                 circle = plt.Circle((x, y), radius, color=color, fill=True, alpha=0.6)
                 ax.add_patch(circle)
-
-
-    traj_files = glob.glob(os.path.join(folder_path, "trajectory_*.csv"))
-    colors = plt.cm.get_cmap("tab10", len(traj_files))  # Colores únicos
-
-    for i, traj_file in enumerate(sorted(traj_files)):
-        traj_df = pd.read_csv(traj_file)
-
-        # Get model id from trajectory name
-        model_id = os.path.splitext(os.path.basename(traj_file))[0].split('_')[-1]
-
-        # Get action time for that model
-        # Get the training csv path for later getting the action times from there
-        training_metrics_path = rl_copp_obj.paths["training_metrics"]
-        train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
-        model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
-        timestep = (utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
-
-        # Plot trajectory with action time indicated inside label
-        ax.plot(traj_df['x'], traj_df['y'], color=colors(i), linewidth=2, label=f'Model {timestep}s', zorder=1)
     
-    # Eliminar duplicados en la leyenda
+    traj_files = glob.glob(os.path.join(folder_path, "trajectory_*.csv"))
+
+    # Group trajectories by model ID
+    model_trajs = defaultdict(list)
+    for file in traj_files:
+        parts = file.split('_')
+        model_id = parts[-1].split('.')[0]
+        model_trajs[model_id].append(os.path.join(folder_path, file))
+
+    colors = plt.cm.get_cmap("tab10")
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path, "train_records.csv")
+
+    model_plot_data = []
+
+    # Interpolate and store data for later ordered plotting
+    for i, (model_id, paths) in enumerate(model_trajs.items()):
+        color = colors((i + 1) % 10)
+
+        model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
+        timestep = float(utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+
+        for path in paths:
+            df = pd.read_csv(path)
+            model_plot_data.append({
+                "timestep": timestep,
+                "color": color,
+                "x": df["x"],
+                "y": df["y"],
+                "label": f"Model {timestep}s"
+            })
+
+    # Sort models by timestep before plotting
+    model_plot_data.sort(key=lambda d: d["timestep"])
+
+    for data in model_plot_data:
+        ax.plot(data["x"], data["y"], color=data["color"],
+                label=data["label"], linewidth=2, zorder=3)
+
+    
+    # Removed duplicated labels
     handles, labels = ax.get_legend_handles_labels()
     unique = dict(zip(labels, handles))
     ax.legend(unique.values(), unique.keys(), loc='upper right')
@@ -914,7 +930,7 @@ def plot_lat_curves(rl_copp_obj, model_index):
     # Get the training csv path for later getting the action times from there
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
     train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
-     # Get action time 
+    # Get action time 
     model_name = rl_copp_obj.args.robot_name + "_model_" + str(rl_copp_obj.args.model_ids[model_index])
     timestep = (utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
 
@@ -927,15 +943,15 @@ def plot_lat_curves(rl_copp_obj, model_index):
     df = pd.read_csv(files[0])
 
     # Filtrate rows where both values are both zero (beginning of an episode)
-    df_filtered = df[(df["LAT-Sim (s)"] > 0.01) | (df["LAT-Wall (s)"] > 0.01)].copy()
+    # df_filtered = df[(df["LAT-Sim (s)"] > 0.01) | (df["LAT-Wall (s)"] > 0.01)].copy()
 
     # Restart the index so steps are consecutive
-    df_filtered.reset_index(drop=True, inplace=True)
+    # df_filtered.reset_index(drop=True, inplace=True)
 
     # Plot
     plt.figure(figsize=(10, 6))
-    plt.plot(df_filtered.index, df_filtered["LAT-Sim (s)"], label="LAT-Sim (s)", linewidth=1.5)
-    plt.plot(df_filtered.index, df_filtered["LAT-Wall (s)"], label="LAT-Wall (s)", linewidth=1.5)
+    plt.plot(df.index, df["LAT-Sim (s)"], label="LAT-Sim (s)", linewidth=1.5)
+    plt.plot(df.index, df["LAT-Wall (s)"], label="LAT-Wall (s)", linewidth=1.5)
 
     plt.xlabel("Step")
     plt.ylabel("LAT (s)")
@@ -943,6 +959,162 @@ def plot_lat_curves(rl_copp_obj, model_index):
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
+    plt.show()
+
+
+
+def interpolate_trajectory(x, y, num_points=100):
+    distances = np.sqrt(np.diff(x)**2 + np.diff(y)**2)
+    cumulative_dist = np.insert(np.cumsum(distances), 0, 0)
+    total_length = cumulative_dist[-1]
+    if total_length == 0:
+        return np.full(num_points, x[0]), np.full(num_points, y[0])
+
+    normalized_dist = cumulative_dist / total_length
+    interp_x = interp1d(normalized_dist, x, kind='linear')
+    interp_y = interp1d(normalized_dist, y, kind='linear')
+    uniform_points = np.linspace(0, 1, num_points)
+    return interp_x(uniform_points), interp_y(uniform_points)
+
+
+def draw_uncertainty_ellipse(ax, mean_x, mean_y, cov, color, nsig=1.0, alpha=0.3, zorder=2):
+    """Dibuja una elipse de incertidumbre basada en una matriz de covarianza 2x2."""
+    vals, vecs = np.linalg.eigh(cov)
+    order = vals.argsort()[::-1]
+    vals = vals[order]
+    vecs = vecs[:, order]
+    
+    theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+    width, height = 2 * nsig * np.sqrt(vals)
+
+    ell = Ellipse(xy=(mean_x, mean_y),
+                  width=width, height=height,
+                  angle=theta, color=color, alpha=alpha, zorder=zorder)
+    ax.add_patch(ell)
+
+
+def plot_scene_trajs_with_variability(rl_copp_obj, folder_path, num_points=100, nsig=1.0):
+    """
+    Plot a scene with interpolated mean trajectories from multiple models,
+    including uncertainty ellipses at each point based on covariance across trajectories.
+
+    Args:
+        rl_copp_obj: Main RL object providing access to config and paths.
+        folder_path (str): Path to the folder containing scene and trajectory CSVs.
+        num_points (int): Number of interpolation points per trajectory.
+        nsig (float): Number of standard deviations for the uncertainty ellipses (e.g., 1.0 or 2.0).
+    """
+    files = os.listdir(folder_path)
+    scene_file = [f for f in files if f.startswith("scene_") and f.endswith(".csv")][0]
+    traj_files = [f for f in files if f.startswith("trajectory_") and f.endswith(".csv")]
+
+    logging.debug(f"scene files: {scene_file}")
+    logging.debug(f"traj_files: {traj_files}")
+    scene_df = pd.read_csv(os.path.join(folder_path, scene_file))
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_xlim(2.5, -2.5)
+    ax.set_ylim(2.5, -2.5)
+    ax.set_aspect('equal')
+    ax.set_title(f"Scene with Interpolated Mean Trajectories ({nsig}σ uncertainty)")
+
+    # Draw 0.5 m grid
+    for i in np.arange(-2.5, 3, 0.5):
+        ax.axhline(i, color='lightgray', linewidth=0.5, zorder=0)
+        ax.axvline(i, color='lightgray', linewidth=0.5, zorder=0)
+
+    # Draw static scene elements
+    for _, row in scene_df.iterrows():
+        x, y = row['x'], row['y']
+        if row['type'] == 'robot':
+            ax.add_patch(plt.Circle((x, y), 0.35 / 2, color='blue', label='Robot', zorder=2))
+            
+            # Dibujar orientación (si existe la columna 'theta')
+            if 'theta' in row:
+                theta = row['theta']
+
+                # Triangle option:
+                # Coordenadas del triángulo
+                front_length = 0.15
+                side_offset = 0.08
+
+                # Punto frontal
+                front = (x + front_length * np.cos(theta), y + front_length * np.sin(theta))
+                # Puntos laterales
+                left = (x + side_offset * np.cos(theta + 2.5), y + side_offset * np.sin(theta + 2.5))
+                right = (x + side_offset * np.cos(theta - 2.5), y + side_offset * np.sin(theta - 2.5))
+
+                triangle = plt.Polygon([front, left, right], color='white', zorder=3)
+                ax.add_patch(triangle)
+                
+        elif row['type'] == 'obstacle':
+            ax.add_patch(plt.Circle((x, y), 0.25 / 2, color='gray', label='Obstacle'))
+        elif row['type'] == 'target':
+            for r, c in [(0.25, 'blue'), (0.125, 'red'), (0.015, 'yellow')]:
+                ax.add_patch(plt.Circle((x, y), r, color=c, alpha=0.6))
+
+    # Group trajectories by model ID
+    model_trajs = defaultdict(list)
+    for file in traj_files:
+        parts = file.split('_')
+        model_id = parts[-1].split('.')[0]
+        model_trajs[model_id].append(os.path.join(folder_path, file))
+
+    colors = plt.cm.get_cmap("tab10")
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path, "train_records.csv")
+
+    model_plot_data = []
+
+    # Interpolate and store data for later ordered plotting
+    for i, (model_id, paths) in enumerate(model_trajs.items()):
+        interpolated_xs, interpolated_ys = [], []
+        for path in paths:
+            df = pd.read_csv(path)
+            x_interp, y_interp = interpolate_trajectory(df['x'].values, df['y'].values, num_points)
+            interpolated_xs.append(x_interp)
+            interpolated_ys.append(y_interp)
+
+        interpolated_xs = np.array(interpolated_xs)
+        interpolated_ys = np.array(interpolated_ys)
+        mean_x = np.mean(interpolated_xs, axis=0)
+        mean_y = np.mean(interpolated_ys, axis=0)
+        color = colors((i + 1) % 10)
+
+        model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
+        timestep = float(utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+
+        model_plot_data.append({
+            "timestep": timestep,
+            "mean_x": mean_x,
+            "mean_y": mean_y,
+            "interpolated_xs": interpolated_xs,
+            "interpolated_ys": interpolated_ys,
+            "color": color,
+            "label": f"Model {timestep}s"
+        })
+
+    # Sort models by timestep before plotting
+    model_plot_data.sort(key=lambda d: d["timestep"])
+
+    for data in model_plot_data:
+        ax.plot(data["mean_x"], data["mean_y"], color=data["color"],
+                label=data["label"], linewidth=2, zorder=3)
+
+        for j in range(num_points):
+            if data["interpolated_xs"].shape[0] < 2:
+                continue  # Cannot compute covariance with less than 2 trajectories
+            cov = np.cov(data["interpolated_xs"][:, j], data["interpolated_ys"][:, j])
+            if not np.isnan(cov).any() and not np.isinf(cov).any():
+                draw_uncertainty_ellipse(ax, data["mean_x"][j], data["mean_y"][j], cov,
+                                         color=data["color"], nsig=nsig)
+
+    # Deduplicate legend entries
+    handles, labels = ax.get_legend_handles_labels()
+    unique = dict(zip(labels, handles))
+    ax.legend(unique.values(), unique.keys(), loc='upper right')
+
+    plt.grid(True)
     plt.show()
 
 
@@ -1043,7 +1215,7 @@ def main(args):
             sys.exit()
         scene_folder = os.path.join(rl_copp.paths["scene_configs"], args.scene_to_load_folder)
         logging.info(f"Scene config folder to be loaded: {scene_folder}")
-        plot_scene_trajs(rl_copp, scene_folder)
+        plot_scene_trajs_with_variability(rl_copp, scene_folder)
 
     if "plot_boxplots" in args.plot_types:
         plot_type_correct = True

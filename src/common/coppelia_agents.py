@@ -88,7 +88,7 @@ class CoppeliaAgent:
         self.initial_realTime = 0
 
         self.paths = paths
-        self.first_reset = False
+        self.first_reset_done = False
 
         # retries = 0
         # MAX_RETRIES = 5
@@ -221,6 +221,16 @@ class CoppeliaAgent:
         self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
         self.sim.callScriptFunction('draw_path', self.handle_robot_scripts, 0,0, self.colorID)
 
+        # Calculate lat:
+        self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
+        self.current_wall_offset_time = self.sim.getSystemTime()-self.episode_start_time_wall
+
+        self.lat_sim= self.current_sim_offset_time-self._lastactiont0_sim
+        self.lat_wall= self.current_wall_offset_time-self._lastactiont0_wall
+
+        self._lastactiont0_sim = self.current_sim_offset_time
+        self._lastactiont0_wall = self.current_wall_offset_time
+
         # Reset colorID counter
         self.colorID = 1
 
@@ -297,7 +307,7 @@ class CoppeliaAgent:
 
         # Save current scene configuration for further analysis
         if self.save_scene:
-            self.episode_idx = self.episode_idx + 1
+            
             
             # Crear lista donde guardaremos los datos
             scene_elements = []
@@ -330,10 +340,10 @@ class CoppeliaAgent:
 
             logging.info(f"Scene saved in CSV: {csv_path}")
 
-        
-
+        self.episode_idx = self.episode_idx + 1
         # Set first reset flag to True
-        self.first_reset = True
+        if (self.episode_idx<=1):
+            self.first_reset_done = True
 
 
     def agent_step(self):
@@ -422,29 +432,66 @@ class CoppeliaAgent:
                     # Get actual time of the last action
                     # if self.episode_start_time == 0:
                     #     self.episode_start_time = self.initial_simTime
-                    if self.reset_flag:
-                        # Reset timing variables after resetting the scene
+
+                    if self.first_reset_done:
                         self._lastactiont0_sim = 0.0
                         self._lastactiont0_wall = 0.0
+                        self.lat_sim = 0.0
+                        self.lat_wall = 0.0
+                        self.first_reset_done = False
+                        
+
+                    if self.reset_flag:
+                        logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}")
+                        self._commstoRL.stepSendLastActDur(self.lat_sim, self.lat_wall)
+                        logging.info("LAT already sent")
+
                         self.episode_start_time_sim = self.sim.getSimulationTime()
                         self.episode_start_time_wall = self.sim.getSystemTime()
+                        
+                        self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
+                        self.current_wall_offset_time = self.sim.getSystemTime()-self.episode_start_time_wall
+
+                        self._lastactiont0_sim = self.current_sim_offset_time
+                        self._lastactiont0_wall = self.current_wall_offset_time
                         self.reset_flag = False
+
+                    else:
+                        self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
+                        self.current_wall_offset_time = self.sim.getSystemTime()-self.episode_start_time_wall
+
+                        self.lat_sim= self.current_sim_offset_time-self._lastactiont0_sim
+                        self.lat_wall= self.current_wall_offset_time-self._lastactiont0_wall
+
+                        self._lastactiont0_sim = self.current_sim_offset_time
+                        self._lastactiont0_wall = self.current_wall_offset_time
+
+                        logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}")
+                        self._commstoRL.stepSendLastActDur(self.lat_sim, self.lat_wall)
+                        logging.info("LAT already sent")
+
+
+
+                    # if self.first_reset_done and self.reset_flag:
+                    #     # Reset timing variables after resetting the scene
+                    #     print("inside first_reset_done actions")
+                    #     self._lastactiont0_sim = 0.0
+                    #     self._lastactiont0_wall = 0.0
+                    #     self.episode_start_time_sim = self.sim.getSimulationTime()
+                    #     self.episode_start_time_wall = self.sim.getSystemTime()
+                    #     self.reset_flag = False
+                    #     self.first_reset_done = False
+
+                    # if self.reset_flag:
+                    #     print("inside reset_flag actions")
+                    #     self.episode_start_time_sim = self.sim.getSimulationTime()
+                    #     self.episode_start_time_wall = self.sim.getSystemTime()
+                    #     self.reset_flag = False
+
                     
-                    self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
-                    self.current_wall_offset_time = self.sim.getSystemTime()-self.episode_start_time_wall
-
-                    self.lat_sim= self.current_sim_offset_time-self._lastactiont0_sim
-                    self.lat_wall= self.current_wall_offset_time-self._lastactiont0_wall
-
-                    self._lastactiont0_sim = self.current_sim_offset_time
-                    self._lastactiont0_wall = self.current_wall_offset_time
-
-                    logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}")
-
                     self._waitingforrlcommands = False # from now on, we are waiting to execute the action
                     self.execute_cmd_vel = True
-                    self._commstoRL.stepSendLastActDur(self.lat_sim, self.lat_wall)
-                    logging.info("LAT already sent")
+                    
                     
             
                 # RESET received
