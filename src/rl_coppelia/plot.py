@@ -837,8 +837,15 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
 
             # If distance is greater than 0.45 m, plot a cross to indicate a collision
             if min_distance > 0.45:
-                ax.plot(final_x, final_y, marker='x', color='black',
+                ax.plot(final_x, final_y, marker='x', color=data["color"],
                         markersize=12, markeredgewidth=2, zorder=4)
+                ax.plot(final_x, final_y, marker='o', color="black",
+                        markersize=13, markeredgewidth=1.5, markerfacecolor='none', zorder=4)
+            # If not, draw a little circle to indicate the final position
+            else:
+                ax.plot(final_x, final_y, marker='o', color=data["color"],
+                        markersize=4, markeredgewidth=2, zorder=4)
+
 
 
     
