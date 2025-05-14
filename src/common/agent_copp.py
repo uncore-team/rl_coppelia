@@ -37,21 +37,22 @@ def sysCall_init():
     """
     Initialize the simulation.
     """
-    global sim, agent, verbose, sim_initialized, robot_name, params_env, comms_port, paths, file_id, experiment_to_load, episode_to_load, save_scene, save_traj
+    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_env, comms_port, paths, file_id, scene_to_load_folder, save_scene, save_traj, action_times
     sim = require('sim')    # type: ignore
 
     # Variables to get from agent_copp.py script
     comm_side = "agent"
     robot_name = "turtleBot"
     model_name = None
+    model_ids = None
     comms_port = 49054
     base_path = ""
     params_env = {}
     verbose = 1
-    experiment_to_load = ""
-    episode_to_load = ""
+    scene_to_load_folder = ""
     save_scene = None
     save_traj = None
+    action_times = None
 
     # If agent received a scene_config_path from Python RL side, it means that the user wants to load a scene configuration
 
@@ -65,9 +66,10 @@ def sysCall_init():
 
 
 def sysCall_thread():
-    global sim, agent, robot_name, params_env, comms_port, sim_initialized, paths, file_id, experiment_to_load, episode_to_load, save_scene, save_traj,agent_created
+    global sim, agent, robot_name, params_env, comms_port, sim_initialized, model_ids, paths, file_id, scene_to_load_folder, save_scene, save_traj, agent_created, action_times
 
     if sim_initialized:
+        logging.info("inside thread sim_initialized")
         # Create agent
         if robot_name == "turtleBot":
             agent = TurtleBotAgent(sim, params_env, paths, file_id, comms_port=comms_port)
@@ -76,16 +78,22 @@ def sysCall_thread():
             agent.robot_baselink = agent.robot
         logging.info("Agent initialized")
 
-        agent.experiment_to_load = experiment_to_load
-        agent.episode_to_load = episode_to_load
+        agent.scene_to_load_folder = scene_to_load_folder
         agent.save_scene = save_scene
+        agent.model_ids = model_ids
+        agent.save_traj_csv_folder = os.path.join(
+            agent.scene_configs_path,
+            agent.scene_to_load_folder
+        )
+        agent.action_times = action_times
+
         if agent.save_scene:
             os.makedirs(agent.save_scene_csv_folder, exist_ok=True)
             logging.info(f"Scene configurations will be saved in: {agent.save_scene_csv_folder}.")
 
         # Check if there is any path at agent.load_scene_path. If that is the case, it doesn't make sense to not save the trajectory,
         # so agent.save_traj will be overrieded to True
-        if agent.experiment_to_load =="" or agent.experiment_to_load is None:
+        if agent.scene_to_load_folder =="" or agent.scene_to_load_folder is None:
             agent.save_traj = save_traj
             if agent.save_traj:
                 os.makedirs(agent.save_traj_csv_folder, exist_ok=True)
@@ -93,7 +101,7 @@ def sysCall_thread():
         else:
             agent.save_traj = True
             os.makedirs(agent.save_traj_csv_folder, exist_ok=True)
-            logging.info(f"Scene configuration {agent.experiment_to_load}/scene_episode/scene_{agent.episode_to_load}.csv will be loaded and trajectory will be saved in {agent.save_traj_csv_folder}.")
+            logging.info(f"Scene configuration inside {agent.scene_to_load_folder} will be loaded and trajectory will be saved inside it.")
 
         agent_created = True
 
@@ -104,7 +112,7 @@ def sysCall_sensing():
     """  
     global sim, agent, verbose, agent_created
     initial_realTime = 0
-
+    
     if agent and not agent.finish_rec and agent_created:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
         action = agent.agent_step()

@@ -57,10 +57,10 @@ def main():
     test_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
 
     test_scene_parser = subparsers.add_parser("test_scene", help="Test a trained RL algorithm for robot movement in CoppeliaSim for just one iteration, using a preconfigured scene")
-    test_scene_parser.add_argument("--model_name", type=str, help="Name of the trained model is required (it must be located under 'models' folder)", required=True).completer = model_name_completer
-    test_scene_parser.add_argument("--experiment_to_load", type=str, help="Name of the experiment with the desired scene configuration to be loaded.", required=True)
-    test_scene_parser.add_argument("--episode_to_load", type=str, help="Number of the episode with the desired scene configuration to be loaded.", required=True)
-    test_scene_parser.add_argument("--robot_name", type=str, help="Name for the robot. Default will be burgerBot.", required=False)
+    test_scene_parser.add_argument("--model_ids", type=int, nargs='+', help="List with numerical IDs of the different models to be plotted. They must be located inside 'models' folder. Program will take the '_last' one", required=True)
+    test_scene_parser.add_argument("--scene_to_load_folder", type=str, help="Folder name, located inside 'scene_configs', that contains the scene be loaded", required=False)
+    test_scene_parser.add_argument("--robot_name", type=str, help="Name for the robot.", required=True)
+    test_scene_parser.add_argument("--iters_per_model", type=int, help="Number of iterations for testing each model.",required=False, default=1)
     test_scene_parser.add_argument("--scene_path", type=str, help="Path to the CoppeliaSim scene file.", required=False)
     test_scene_parser.add_argument("--dis_parallel_mode", action="store_true", help="Disables the parallel training or testing.", required=False)
     test_scene_parser.add_argument("--no_gui", action="store_true", help="Disables Coppelia GUI, it will just show the terminal", required=False)
@@ -105,7 +105,7 @@ def main():
 
     plot_parser = subparsers.add_parser("plot", help="Creates a set of plots for getting the results of a trained model or for comparing some models.")
     plot_parser.add_argument("--robot_name", type=str, help="Name for the robot.", required=True)
-    plot_parser.add_argument("--model_ids", type=int, nargs='+', help="List with numerical IDs of the different models to be plotted.", required=True)
+    plot_parser.add_argument("--model_ids", type=int, nargs='+', help="List with numerical IDs of the different models to be plotted.", required=False)
     plot_parser.add_argument("--scene_to_load_folder", type=str, help="Folder name, located inside 'scene_configs', that contains the scene and trajectories to be loaded", required=False)
     plot_parser.add_argument("--plot_types", type=str, nargs='+', help="List of types of plots that the user wants to create.", 
                              default=["spider", "convergence-time", "convergence-steps", "compare-rewards", "compare-episodes_length", 

@@ -105,6 +105,8 @@ def logging_config(logs_dir, side_name, robot_name, experiment_id, log_level = l
         elif verbose ==0:   # Nothing in terminal, and just the errors will be saved in log files
             rotating_handler.setLevel(logging.ERROR) 
             log_handlers =[rotating_handler]
+        else:
+            log_handlers =[logging.StreamHandler()]
     else:   # Nothing will be saved in log files (actually it's a deprecated option)
         log_handlers =[logging.StreamHandler()]
 
@@ -168,6 +170,85 @@ def find_next_free_port(start_port = 49054):
 # -------------------------------------------------------------
 # ------ Functions for managing files, names and folders ------
 # -------------------------------------------------------------
+
+
+def get_fixed_actimes(rl_copp_obj):
+    """
+    Given a list of model IDs, read their corresponding JSON parameter files
+    and extract the value of 'params_env["fixed_actime"]'.
+
+    Args:
+        rl_copp_obj (object): An object containing the model IDs and the path to the parameter files.
+        
+
+    Returns:
+        list of float: List of fixed_actime values for each model ID.
+
+    Raises:
+        FileNotFoundError: If a JSON file for a given model ID does not exist.
+        KeyError: If 'params_env' or 'fixed_actime' is missing in the JSON.
+    """
+    actime_values = []
+
+    for model_id in rl_copp_obj.args.model_ids:
+        json_file = os.path.join(rl_copp_obj.paths["parameters_used"], f"params_file_model_{model_id}.json")
+        
+        if not os.path.isfile(json_file):
+            raise FileNotFoundError(f"JSON file not found: {json_file}")
+        
+        with open(json_file, 'r') as f:
+            data = json.load(f)
+        
+        try:
+            fixed_actime = data["params_env"]["fixed_actime"]
+        except KeyError as e:
+            raise KeyError(f"Missing key in JSON file {json_file}: {e}")
+        
+        actime_values.append(fixed_actime)
+
+    return actime_values
+
+
+def get_model_names_and_paths(rl_copp_obj):
+    '''
+    For test_scene functionality
+    '''
+    model_names = {}
+    model_paths = {}
+
+    for model_id in rl_copp_obj.args.model_ids:
+        model_id_str = str(model_id)
+        model_name = f"{rl_copp_obj.args.robot_name}_model_{model_id_str}"
+        model_dir = os.path.join(rl_copp_obj.paths["models"], model_name)
+        model_path = os.path.join(model_dir, f"{model_name}_last")
+
+        model_names[model_id_str] = model_name
+        model_paths[model_id_str] = model_path
+
+    return model_names, model_paths
+
+
+def find_scene_csv_in_dir(folder_path):
+    """
+    Returns the path of the only CSV file in the given directory whose name starts with 'scene'.
+
+    Args:
+        folder_path (str): Path to the directory.
+
+    Returns:
+        str: Full path to the 'scene' CSV file found.
+
+    Raises:
+        ValueError: If no matching CSV is found or if multiple are found.
+    """
+    csv_files = [f for f in os.listdir(folder_path) if f.endswith('.csv') and f.startswith('scene')]
+
+    if len(csv_files) == 0:
+        raise ValueError(f"No 'scene*.csv' file found in {folder_path}")
+    elif len(csv_files) > 1:
+        raise ValueError(f"Multiple 'scene*.csv' files found in {folder_path}: {csv_files}")
+
+    return os.path.join(folder_path, csv_files[0])
 
 
 def get_last_model(models_path):
@@ -425,7 +506,7 @@ def find_coppelia_path():
     return os.getenv("COPPELIA_PATH", None)
 
 
-def stop_coppelia_simulation (sim):
+def stop_coppelia_simulation (self):
     """
     Check if Coppelia simulation is running and, in that case, it stops the simulation.
 
@@ -433,11 +514,11 @@ def stop_coppelia_simulation (sim):
         sim: CoppeliaSim object.
     """
     # Check simulation's state before stopping it
-    if sim.getSimulationState() != sim.simulation_stopped:
-        sim.stopSimulation()
+    if self.current_sim.getSimulationState() != self.current_sim.simulation_stopped:
+        self.current_sim.stopSimulation()
 
         # Wait until the simulation is completely stopped
-        while sim.getSimulationState() != sim.simulation_stopped:
+        while self.current_sim.getSimulationState() != self.current_sim.simulation_stopped:
             time.sleep(0.1)
 
 
@@ -479,7 +560,7 @@ def is_scene_loaded(sim, scene_path):
         sys.exit()
 
 
-def update_and_copy_script(sim, base_path, args, params_env, comms_port):
+def update_and_copy_script(rl_copp_obj):
     """
     Updates and the agent script of the CoppeliaSim scene with the content of the 'rl_coppelia/agent_copp.py'.
 
@@ -502,11 +583,11 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
         Exception: If an error occurs during the script update or copying process.
     """
     # Load Agent script
-    agent_object = sim.getObject(AGENT_SCRIPT_COPPELIA)
-    agent_script_handle = sim.getScript(1, agent_object)
+    agent_object = rl_copp_obj.current_sim.getObject(AGENT_SCRIPT_COPPELIA)
+    agent_script_handle = rl_copp_obj.current_sim.getScript(1, agent_object)
 
     # Read Agent_script.py  
-    agent_script_path = os.path.join(base_path, "src", AGENT_SCRIPT_PYTHON)
+    agent_script_path = os.path.join(rl_copp_obj.base_path, "src", AGENT_SCRIPT_PYTHON)
     logging.info(f"Copying content of {agent_script_path} inside the scene in {AGENT_SCRIPT_COPPELIA}")
 
     try:
@@ -514,48 +595,55 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
             script_content = file.read()
 
         # Dictionary with variables to update
-        if not hasattr(args, "model_name"):
+        if not hasattr(rl_copp_obj.args, "model_name"):
             
-            args.model_name = None
+            rl_copp_obj.args.model_name = None
             model_name = None
         else: 
             try:
-                model_name = os.path.basename(args.model_name)
+                model_name = os.path.basename(rl_copp_obj.args.model_name)
             except:
                 model_name = None
 
-        if not hasattr(args, "experiment_to_load"):
-            experiment_to_load = None
+        if not hasattr(rl_copp_obj.args, "scene_to_load_folder"):
+            scene_to_load_folder = None
         else:
-            experiment_to_load = args.experiment_to_load
+            scene_to_load_folder = rl_copp_obj.args.scene_to_load_folder
 
-        if not hasattr(args, "episode_to_load"):
-            episode_to_load = None
-        else:
-            episode_to_load = args.episode_to_load
-
-        if not hasattr(args, "save_scene"):
+        if not hasattr(rl_copp_obj.args, "save_scene"):
             save_scene = None
         else:
-            save_scene = args.save_scene
+            save_scene = rl_copp_obj.args.save_scene
 
-        if not hasattr(args, "save_traj"):
+        if not hasattr(rl_copp_obj.args, "save_traj"):
             save_traj = None
         else:
-            save_traj = args.save_traj
+            save_traj = rl_copp_obj.args.save_traj
+
+        if not hasattr(rl_copp_obj.args, "model_ids"):
+            model_ids = None
+            action_times = None
+            amp_model_ids = None
+        else:
+            model_ids = rl_copp_obj.args.model_ids
+            amp_model_ids = [model_id for model_id in model_ids for _ in range(rl_copp_obj.args.iters_per_model)]
+            rl_copp_obj.args.model_ids = amp_model_ids
+            action_times= get_fixed_actimes(rl_copp_obj)
+            print(action_times)
 
 
         replacements = {
-            "robot_name": args.robot_name,
+            "robot_name": rl_copp_obj.args.robot_name,
             "model_name": model_name,
-            "base_path": base_path,
-            "comms_port": comms_port,
-            "verbose": args.verbose,
-            "experiment_to_load": experiment_to_load,
-            "episode_to_load": episode_to_load,
+            "model_ids": amp_model_ids,
+            "base_path": rl_copp_obj.base_path,
+            "comms_port": rl_copp_obj.free_comms_port,
+            "verbose": rl_copp_obj.args.verbose,
+            "scene_to_load_folder": scene_to_load_folder,
             "save_scene": save_scene,
             "save_traj": save_traj,
-            "testvar": comms_port+1,
+            "testvar": rl_copp_obj.free_comms_port+1,
+            "action_times": action_times,
         }
 
         # Update standard variables
@@ -569,7 +657,7 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
 
         # Format the 'params_env' dictionary
         params_str = "{"
-        for key, value in params_env.items():
+        for key, value in rl_copp_obj.params_env.items():
             if isinstance(value, bool):
                 # Convert booleans to the right format (True/False)
                 params_str += f'\n    "{key}": {"True" if value else "False"},'
@@ -589,7 +677,7 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
         #     file.write(script_content)
 
         # Send updated script content to script C in CoppeliaSim
-        sim.setScriptText(agent_script_handle, script_content)
+        rl_copp_obj.current_sim.setScriptText(agent_script_handle, script_content)
         logging.info("Script updated successfully in CoppeliaSim.")
         return True
 
@@ -598,7 +686,7 @@ def update_and_copy_script(sim, base_path, args, params_env, comms_port):
         # sys.exit()
 
 
-def create_discs_under_target(sim, params_env):
+def create_discs_under_target(rl_copp_obj):
     """
     Creates three disc shapes in CoppeliaSim, assigns them as children of the Target object, 
     sets their colors, positions them at different heights, and gives them specific names.
@@ -612,39 +700,39 @@ def create_discs_under_target(sim, params_env):
         list: A list containing the handles of the three created discs.
     """
     # Get target handle
-    target_handle = sim.getObject("/Target")
+    target_handle = rl_copp_obj.current_sim.getObject("/Target")
 
     # Remove any existing child discs
-    child_objects = sim.getObjectsInTree(target_handle, sim.handle_all, 1)  # Get direct children
+    child_objects = rl_copp_obj.current_sim.getObjectsInTree(target_handle, rl_copp_obj.current_sim.handle_all, 1)  # Get direct children
     for child in child_objects:
-        obj_type = sim.getObjectType(child)
-        if obj_type == sim.object_shape_type:  # Ensure it's a shape before deleting
-            sim.removeObject(child)
+        obj_type = rl_copp_obj.current_sim.getObjectType(child)
+        if obj_type == rl_copp_obj.current_sim.object_shape_type:  # Ensure it's a shape before deleting
+            rl_copp_obj.current_sim.removeObject(child)
 
     # Disc properties: name, color (R, G, B), relative Z position
     disc_properties = [
-        ("Target_disc_1", [0, 0, 1], 0.002, params_env["reward_dist_1"]),  # Blue
-        ("Target_disc_2", [1, 0, 0], 0.004, params_env["reward_dist_2"]),  # Red
-        ("Target_disc_3", [1, 1, 0], 0.006, params_env["reward_dist_3"])   # Yellow
+        ("Target_disc_1", [0, 0, 1], 0.002, rl_copp_obj.params_env["reward_dist_1"]),  # Blue
+        ("Target_disc_2", [1, 0, 0], 0.004, rl_copp_obj.params_env["reward_dist_2"]),  # Red
+        ("Target_disc_3", [1, 1, 0], 0.006, rl_copp_obj.params_env["reward_dist_3"])   # Yellow
     ]
 
     disc_handles = []
 
     for name, color, z_offset, radius in disc_properties:
         # Create a disc with minimal thickness
-        disc_handle = sim.createPrimitiveShape(sim.primitiveshape_disc, [radius * 2, radius * 2, 0.01], 0)
+        disc_handle = rl_copp_obj.current_sim.createPrimitiveShape(rl_copp_obj.current_sim.primitiveshape_disc, [radius * 2, radius * 2, 0.01], 0)
 
         # Set the disc's alias (name in the scene)
-        sim.setObjectAlias(disc_handle, name)
+        rl_copp_obj.current_sim.setObjectAlias(disc_handle, name)
 
         # Set the disc as a child of the target object
-        sim.setObjectParent(disc_handle, target_handle, True)
+        rl_copp_obj.current_sim.setObjectParent(disc_handle, target_handle, True)
 
         # Adjust the relative position (lifting it in the Z axis)
-        sim.setObjectPosition(disc_handle, target_handle, [0, 0, z_offset])
+        rl_copp_obj.current_sim.setObjectPosition(disc_handle, target_handle, [0, 0, z_offset])
 
         # Set the color (ambient diffuse component)
-        sim.setShapeColor(disc_handle, None, sim.colorcomponent_ambient_diffuse, color)
+        rl_copp_obj.current_sim.setShapeColor(disc_handle, None, rl_copp_obj.current_sim.colorcomponent_ambient_diffuse, color)
 
         # Store the handle in the list
         disc_handles.append(disc_handle)
@@ -652,11 +740,11 @@ def create_discs_under_target(sim, params_env):
     return disc_handles  # Return the handles of the created discs
 
 
-def start_coppelia_and_simulation(base_path, args, params_env, comms_port):
+def start_coppelia_and_simulation(rl_copp_obj):
     """
     Run CoppeliaSim if it's not already running and open the scene if it's not loaded.
 
-    Args:
+    Args: 
         base_path (str): Path of the base directory.
         args: It will use two of the input arguments: robot_name and no_gui.
             robot_name (str): NAme of the current robot.
@@ -676,20 +764,20 @@ def start_coppelia_and_simulation(base_path, args, params_env, comms_port):
     coppelia_exe = os.path.join(coppelia_path, 'coppeliaSim.sh')
 
     # Scene path
-    if args.scene_path is None:
+    if rl_copp_obj.args.scene_path is None:
         try:
-            args.scene_path = os.path.join(base_path, "scenes", f"{args.robot_name}_scene.ttt")
+            rl_copp_obj.args.scene_path = os.path.join(rl_copp_obj.base_path, "scenes", f"{rl_copp_obj.args.robot_name}_scene.ttt")
         except:
-            args.scene_path = os.path.join(base_path, "scenes/burgerBot_scene.ttt")
+            rl_copp_obj.args.scene_path = os.path.join(rl_copp_obj.base_path, "scenes/burgerBot_scene.ttt")
 
     # Verify if CoppeliaSim is running
     # TODO Check that when we open several instances of CoppeliaSim with the GUI, only
     # one will be preserved if the screen powers off automatically for saving energy.
     # So please use the no_gui mode for the moment if you are leaving the PC.
-    if args.dis_parallel_mode:
+    if rl_copp_obj.args.dis_parallel_mode:
         if not is_coppelia_running():
             logging.info("Initiating CoppeliaSim...")
-            if args.no_gui:
+            if rl_copp_obj.args.no_gui:
                 process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe, "-h"])
             else:
                 process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe])
@@ -699,7 +787,7 @@ def start_coppelia_and_simulation(base_path, args, params_env, comms_port):
         logging.info("Initiating a new CoppeliaSim instance...")
         zmq_port = find_next_free_port(zmq_port)    
         ws_port = find_next_free_port(ws_port)
-        if args.no_gui:
+        if rl_copp_obj.args.no_gui:
             # process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe, "-h", f"-GzmqRemoteApi.rpcPort={zmq_port}", f"-GwsRemoteApi.port={ws_port}"])
             process = subprocess.Popen([
                 "gnome-terminal", 
@@ -720,7 +808,7 @@ def start_coppelia_and_simulation(base_path, args, params_env, comms_port):
     try:
         logging.info("Waiting for connection with CoppeliaSim...")
         client = RemoteAPIClient(port=zmq_port)
-        sim = client.getObject('sim')
+        rl_copp_obj.current_sim = client.getObject('sim')
     except Exception as e:
         logging.error(f"It was not possible to connect with CoppeliaSim: {e}")
         if process:
@@ -730,30 +818,23 @@ def start_coppelia_and_simulation(base_path, args, params_env, comms_port):
     logging.info("Connection established with CoppeliaSim")
 
     # Check if scene is loaded
-    if is_scene_loaded(sim, args.scene_path):
+    if is_scene_loaded(rl_copp_obj.current_sim, rl_copp_obj.args.scene_path):
         logging.info("Scene is already loaded, simulation will be stopped in case that it's running...")
-        stop_coppelia_simulation(sim)
+        stop_coppelia_simulation(rl_copp_obj.current_sim)
     else:
-        logging.info(f"Loading scene: {args.scene_path}")
-        sim.loadScene(args.scene_path)
+        logging.info(f"Loading scene: {rl_copp_obj.args.scene_path}")
+        rl_copp_obj.current_sim.loadScene(rl_copp_obj.args.scene_path)
         logging.info("Scene loaded successfully.")
 
     # Create target's discs # TODO
-    create_discs_under_target(sim, params_env)
+    create_discs_under_target(rl_copp_obj)
 
     # Update code inside Coppelia's scene
-    update_and_copy_script(sim, base_path, args, params_env, comms_port)
+    update_and_copy_script(rl_copp_obj)
 
     # Start the simulation
-    sim.startSimulation()
+    rl_copp_obj.current_sim.startSimulation()
     logging.info("Simulation started")
-
-    # For updating specific variable --> DEPRECATED
-    #sim.setStringSignal("robotName", robot_name)
-    #sim.setStringSignal("basePath", base_path)
-    #logging.info("Variables sent to Coppelia scene")
-
-    return sim
 
 
 def get_new_coppelia_pid(before_pids):
@@ -1026,7 +1107,7 @@ def get_data_from_training_csv(model_name, csv_path, column_header):
         raise ValueError(f"There was an error while checking the {column_header} column for the {model_name} model. CSV file '{csv_path}'")
 
 
-def get_params_file(paths, args):
+def get_params_file(paths, args, index_model_id = 0):
     """
     Retrieves the path to the parameter configuration file associated with a given model.
 
@@ -1050,10 +1131,16 @@ def get_params_file(paths, args):
     parameters_used_path = paths["parameters_used"]
 
     # Check if a model name was provided by the user
-    if args.model_name is None:
-        model_name, _ = get_last_model(models_path)
-    else:
-        model_name = args.model_name
+    if hasattr(args, "params_file"):
+        if hasattr(args, "model_name"):
+            if args.model_name is None:
+                model_name, _ = get_last_model(models_path)
+            else:
+                model_name = args.model_name
+        else:
+            model_name = f"{args.robot_name}_model_{args.model_ids[index_model_id]}" #TODO Fix this, right now we are choosing the algorithm of the first model
+            # (for test_scene functionality), so we cannot compare different models
+    
     
     # Extract the model_id from the model name
     match = re.search(r"model_\d+", model_name)

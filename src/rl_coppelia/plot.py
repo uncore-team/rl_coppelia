@@ -35,6 +35,8 @@ from common.rl_coppelia_manager import RLCoppeliaManager
 from pandas.api.types import CategoricalDtype
 from scipy.interpolate import interp1d
 from matplotlib.patches import Ellipse
+from scipy.stats import shapiro,gaussian_kde
+from sklearn.covariance import MinCovDet
 
 
 
@@ -725,9 +727,11 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
         raise ValueError(f"Expected one scene CSV, found {len(scene_files)}")
     
     scene_path = scene_files[0]
-    df = pd.read_csv(scene_path)
+    df_scene = pd.read_csv(scene_path)
 
     fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("y (m)")
     ax.set_xlim(2.5, -2.5)
     ax.set_ylim(2.5, -2.5)
     ax.set_aspect('equal')
@@ -739,7 +743,7 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
         ax.axvline(i, color='lightgray', linewidth=0.5, zorder=0)
 
     # Draw all the elements of the scene
-    for _, row in df.iterrows():
+    for _, row in df_scene.iterrows():
         x, y = row['x'], row['y']
         if row['type'] == 'robot':
             circle = plt.Circle((x, y), 0.35 / 2, color='blue', label='Robot', zorder=2)
@@ -806,9 +810,36 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
     # Sort models by timestep before plotting
     model_plot_data.sort(key=lambda d: d["timestep"])
 
+    # for data in model_plot_data:
+    #     ax.plot(data["x"], data["y"], color=data["color"],
+    #             label=data["label"], linewidth=2, zorder=3)
+
+
+    # Get all target positions
+    target_rows = df_scene[df_scene['type'] == 'target']
+    targets = [(row['x'], row['y']) for _, row in target_rows.iterrows()]
+
     for data in model_plot_data:
         ax.plot(data["x"], data["y"], color=data["color"],
                 label=data["label"], linewidth=2, zorder=3)
+
+        # Final position of the robot
+        final_x = data["x"].iloc[-1]
+        final_y = data["y"].iloc[-1]
+
+        # Get distance to nearest target
+        if len(targets) > 0:
+            distances = [np.hypot(final_x - tx, final_y - ty) for tx, ty in targets]
+            min_distance = min(distances)
+            # closest_target = targets[np.argmin(distances)]
+            
+            print(f"Distance to closest target: {min_distance:.2f} m")
+
+            # If distance is greater than 0.45 m, plot a cross to indicate a collision
+            if min_distance > 0.45:
+                ax.plot(final_x, final_y, marker='x', color='black',
+                        markersize=12, markeredgewidth=2, zorder=4)
+
 
     
     # Removed duplicated labels
@@ -978,19 +1009,134 @@ def interpolate_trajectory(x, y, num_points=100):
 
 
 def draw_uncertainty_ellipse(ax, mean_x, mean_y, cov, color, nsig=1.0, alpha=0.3, zorder=2):
-    """Dibuja una elipse de incertidumbre basada en una matriz de covarianza 2x2."""
+    """Draws an uncertainty ellipse based on a 2x2 covariance matrix.
+
+    The ellipse represents a confidence region for a 2D Gaussian distribution.
+
+    Args:
+        ax (matplotlib.axes.Axes): The axes object to draw the ellipse on.
+        mean_x (float): X-coordinate of the ellipse center.
+        mean_y (float): Y-coordinate of the ellipse center.
+        cov (ndarray): 2x2 covariance matrix.
+        color (str or tuple): Color of the ellipse.
+        nsig (float, optional): Number of standard deviations for the ellipse size. Defaults to 1.0.
+        alpha (float, optional): Transparency of the ellipse (0-1). Defaults to 0.3.
+        zorder (int, optional): Drawing order (higher means drawn on top). Defaults to 2.
+
+    Returns:
+        None: The ellipse is added to the provided axes object.
+    """
+    # Compute eigenvalues and eigenvectors of covariance matrix
     vals, vecs = np.linalg.eigh(cov)
+    
+    # Sort eigenvalues and eigenvectors in descending order
     order = vals.argsort()[::-1]
     vals = vals[order]
     vecs = vecs[:, order]
     
+    # Calculate rotation angle (in degrees) from eigenvectors
     theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+    
+    # Calculate width and height of ellipse (2 * nsig * standard deviation)
     width, height = 2 * nsig * np.sqrt(vals)
 
-    ell = Ellipse(xy=(mean_x, mean_y),
-                  width=width, height=height,
-                  angle=theta, color=color, alpha=alpha, zorder=zorder)
+    # Create ellipse patch
+    ell = Ellipse(
+        xy=(mean_x, mean_y),     # Ellipse center
+        width=width,             # Major axis length
+        height=height,           # Minor axis length
+        angle=theta,             # Rotation angle in degrees
+        color=color,             # Color
+        alpha=alpha,             # Transparency
+        zorder=zorder            # Drawing order
+    )
     ax.add_patch(ell)
+
+
+def test_normality_univariate(interpolated_xs, interpolated_ys):
+    """Performs Shapiro-Wilk test for each interpolated point across x and y"""
+    num_points = interpolated_xs.shape[1]
+    p_values_x = []
+    p_values_y = []
+    for j in range(num_points):
+        stat_x, p_x = shapiro(interpolated_xs[:, j])
+        stat_y, p_y = shapiro(interpolated_ys[:, j])
+        p_values_x.append(p_x)
+        p_values_y.append(p_y)
+    return p_values_x, p_values_y
+
+
+def plot_kde_density(ax, xs, ys, cmap="Reds", levels=[0.5, 0.9]):
+    """
+    Plots KDE contours on the given axes.
+
+    Parameters:
+    - ax: Matplotlib axes object where the contours will be plotted.
+    - xs: Array-like, x-coordinates of the data points.
+    - ys: Array-like, y-coordinates of the data points.
+    - cmap: Colormap for the contours.
+    - levels: List of contour levels to display, representing probability densities.
+    """
+    # Stack the data for KDE
+    xy = np.vstack([xs, ys])
+    kde = gaussian_kde(xy)
+
+    # Define grid over data range
+    x_min, x_max = xs.min() - 0.1, xs.max() + 0.1
+    y_min, y_max = ys.min() - 0.1, ys.max() + 0.1
+    xx, yy = np.mgrid[x_min:x_max:100j, y_min:y_max:100j]
+    grid_coords = np.vstack([xx.ravel(), yy.ravel()])
+
+    # Evaluate KDE on grid
+    density = kde(grid_coords).reshape(xx.shape)
+
+    # Normalize density for contour levels
+    density /= density.max()
+
+    # Plot contours
+    contour = ax.contour(xx, yy, density, levels=levels, cmap=cmap, alpha=0.7)
+    return contour
+
+
+def draw_robust_uncertainty_ellipse(ax, mean_x, mean_y, points, color='gray', alpha=0.3, zorder=1, nsig=2.0):
+    if len(points) < 2:
+        return
+
+    try:
+        # Primer intento: robusto
+        robust_cov = MinCovDet(support_fraction=0.9).fit(points)
+        cov = robust_cov.covariance_
+    except Exception as e:
+        logging.warning(f"[MCD fallback] Using classical covariance due to error: {e}")
+        try:
+            cov = np.cov(points.T)
+        except Exception as e2:
+            logging.warning(f"Failed to compute classical covariance too: {e2}")
+            return
+
+    try:
+        # Descomposición de la matriz de covarianza
+        vals, vecs = np.linalg.eigh(cov)
+        order = vals.argsort()[::-1]
+        vals = vals[order]
+        vecs = vecs[:, order]
+
+        # Parámetros de la elipse
+        theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+        width, height = 2 * nsig * np.sqrt(vals)
+
+        ell = Ellipse(
+            xy=(mean_x, mean_y),
+            width=width,
+            height=height,
+            angle=theta,
+            color=color,
+            alpha=alpha,
+            zorder=zorder
+        )
+        ax.add_patch(ell)
+    except Exception as e:
+        logging.warning(f"Failed to draw ellipse: {e}")
 
 
 def plot_scene_trajs_with_variability(rl_copp_obj, folder_path, num_points=100, nsig=1.0):
@@ -1077,6 +1223,7 @@ def plot_scene_trajs_with_variability(rl_copp_obj, folder_path, num_points=100, 
 
         interpolated_xs = np.array(interpolated_xs)
         interpolated_ys = np.array(interpolated_ys)
+        
         mean_x = np.mean(interpolated_xs, axis=0)
         mean_y = np.mean(interpolated_ys, axis=0)
         color = colors((i + 1) % 10)
@@ -1101,13 +1248,21 @@ def plot_scene_trajs_with_variability(rl_copp_obj, folder_path, num_points=100, 
         ax.plot(data["mean_x"], data["mean_y"], color=data["color"],
                 label=data["label"], linewidth=2, zorder=3)
 
-        for j in range(num_points):
-            if data["interpolated_xs"].shape[0] < 2:
-                continue  # Cannot compute covariance with less than 2 trajectories
-            cov = np.cov(data["interpolated_xs"][:, j], data["interpolated_ys"][:, j])
-            if not np.isnan(cov).any() and not np.isinf(cov).any():
-                draw_uncertainty_ellipse(ax, data["mean_x"][j], data["mean_y"][j], cov,
-                                         color=data["color"], nsig=nsig)
+
+
+        # for j in range(num_points):
+        #     if data["interpolated_xs"].shape[0] < 2:
+        #         continue  # Cannot compute covariance with less than 2 trajectories
+        #     # point_samples = np.stack((interpolated_xs[:, j], interpolated_ys[:, j]), axis=1)
+        #     # draw_robust_uncertainty_ellipse(
+        #     #     ax, mean_x[j], mean_y[j], point_samples,
+        #     #     color=data["color"], alpha=0.3, nsig=nsig
+        #     # )
+        #     cov = np.cov(data["interpolated_xs"][:, j], data["interpolated_ys"][:, j])
+        #     if not np.isnan(cov).any() and not np.isinf(cov).any():
+        #         draw_uncertainty_ellipse(ax, data["mean_x"][j], data["mean_y"][j], cov,
+        #                              color=data["color"], nsig=nsig)
+
 
     # Deduplicate legend entries
     handles, labels = ax.get_legend_handles_labels()
@@ -1215,7 +1370,7 @@ def main(args):
             sys.exit()
         scene_folder = os.path.join(rl_copp.paths["scene_configs"], args.scene_to_load_folder)
         logging.info(f"Scene config folder to be loaded: {scene_folder}")
-        plot_scene_trajs_with_variability(rl_copp, scene_folder)
+        plot_scene_trajs(rl_copp, scene_folder)
 
     if "plot_boxplots" in args.plot_types:
         plot_type_correct = True

@@ -7,6 +7,7 @@ import sys
 
 import pandas as pd
 
+from common import utils
 from spindecoupler import AgentSide # type: ignore
 from socketcomms.comms import BaseCommPoint # type: ignore
 
@@ -125,6 +126,12 @@ class CoppeliaAgent:
         self.crash_flag = False
         self.training_started = False
 
+        # For loading a scene
+        self.scene_to_load_folder = ""
+        self.id_obstacle = 0
+        self.action_times = []
+        # self.load_scene = True
+
         # Needed for saving scenes
         self.save_scene = False
         self.scene_configs_path = self.paths["scene_configs"]
@@ -140,18 +147,11 @@ class CoppeliaAgent:
 
         # For saving trajectory
         self.save_traj = False
+        self.model_ids = []
         self.save_traj_csv_folder = os.path.join(
             self.scene_configs_path,
-            self.experiment_id,
-            "traj_episode"
+            self.scene_to_load_folder
         )
-        
-
-        # For loading a scene
-        self.experiment_to_load = ""
-        self.episode_to_load = ""
-        self.id_obstacle = 0
-        # self.load_scene = True
         
     
     def get_observation(self):
@@ -186,12 +186,12 @@ class CoppeliaAgent:
     
 
     def generate_obs_from_csv(self, row):
-        logging.info(f"Generating obstacles from csv file")
+        logging.debug(f"Generating obstacles from csv file")
         height_obstacles = 0.4
         size_obstacles = 0.25
 
         x, y = row["x"], row["y"]
-        logging.info(f"Placing obstacle at x: {x} and y: {y}")
+        logging.debug(f"Placing obstacle at x: {x} and y: {y}")
         obs = self.sim.createPrimitiveShape(5, [size_obstacles, size_obstacles, height_obstacles])
         self.sim.setObjectPosition(obs, self.sim.handle_world, [x, y, height_obstacles / 2])
         self.sim.setObjectAlias(obs, f"Obstacle_csv_{self.id_obstacle}")
@@ -214,7 +214,10 @@ class CoppeliaAgent:
         Reset the simulator: position the robot and target, and reset the counters.
         If there are obstacles, remove them and create new ones.
         """
-        
+        if self.action_times != []:
+            if self.episode_idx < len(self.action_times):
+                self._rltimestep = self.action_times[self.episode_idx]
+                logging.info(f"Action time set to {self._rltimestep}")
         
         # Set speed to 0. It's important to do this before setting the position and orientation
         # of the robot, to avoid bugs with Coppelia simulation
@@ -237,7 +240,7 @@ class CoppeliaAgent:
         # Save trajectory at the beggining of the reset (last episode traj)
         if self.save_traj:
             if self.trajectory != []:
-                traj_output_path = os.path.join(self.save_traj_csv_folder, f"trajectory_{self.episode_idx}.csv")
+                traj_output_path = os.path.join(self.save_traj_csv_folder, f"trajectory_{self.episode_idx}_{self.model_ids[self.episode_idx-1]}.csv")
                 with open(traj_output_path, mode='w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=["x", "y"])
                     writer.writeheader()
@@ -255,7 +258,7 @@ class CoppeliaAgent:
                 self.sim.removeObjects(last_obstacles)
         
         # Just place the scene objects at random positions and call 'generate_obs'
-        if self.experiment_to_load == "" or self.experiment_to_load is None:
+        if self.scene_to_load_folder == "" or self.scene_to_load_folder is None:
             # Reset positions and orientation
             current_position = self.sim.getObjectPosition(self.robot_baselink, -1)
             if current_position != [0, 0, 0.06969]:
@@ -277,32 +280,34 @@ class CoppeliaAgent:
 
         # Load the preconfigured scene
         else:
-            self.id_obstacle = 0
-            # CSV path
-            csv_path = os.path.join(self.paths["scene_configs"], self.experiment_to_load, "scene_episode", f"scene_{self.episode_to_load}.csv")  
-            if not os.path.exists(csv_path):
-                logging.error(f"[ERROR] CSV scene file not found: {csv_path}")
-                sys.exit()
+            if self.episode_idx < len(self.action_times):
+                self.id_obstacle = 0
+                # CSV path
+                csv_folder = os.path.join(self.paths["scene_configs"], self.scene_to_load_folder)  
+                scene_path = utils.find_scene_csv_in_dir(csv_folder)
+                if not os.path.exists(scene_path):
+                    logging.error(f"[ERROR] CSV scene file not found: {scene_path}")
+                    sys.exit()
 
-            df = pd.read_csv(csv_path)
+                df = pd.read_csv(scene_path)
 
-            for _, row in df.iterrows():
-                x, y = row['x'], row['y']
-                z = 0.06969 if row['type'] == "robot" else 0.0
+                for _, row in df.iterrows():
+                    x, y = row['x'], row['y']
+                    z = 0.06969 if row['type'] == "robot" else 0.0
 
-                if row['type'] == 'robot':
-                    self.sim.setObjectPosition(self.robot_baselink, -1, [x, y, z])
-                    theta = float(row['theta']) if 'theta' in row and not pd.isna(row['theta']) else 0
-                    self.sim.setObjectOrientation(self.robot_baselink, -1, [0, 0, theta])
+                    if row['type'] == 'robot':
+                        self.sim.setObjectPosition(self.robot_baselink, -1, [x, y, z])
+                        theta = float(row['theta']) if 'theta' in row and not pd.isna(row['theta']) else 0
+                        self.sim.setObjectOrientation(self.robot_baselink, -1, [0, 0, theta])
 
-                elif row['type'] == 'target':
-                    self.sim.setObjectPosition(self.target, -1, [x, y, 0])
+                    elif row['type'] == 'target':
+                        self.sim.setObjectPosition(self.target, -1, [x, y, 0])
 
-                elif row['type'] == 'obstacle':
-                    self.id_obstacle = self.id_obstacle + 1
-                    self.generate_obs_from_csv(row)
+                    elif row['type'] == 'obstacle':
+                        self.id_obstacle = self.id_obstacle + 1
+                        self.generate_obs_from_csv(row)
 
-            logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
+                logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
 
 
         # Save current scene configuration for further analysis

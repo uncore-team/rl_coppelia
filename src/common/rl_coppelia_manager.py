@@ -149,11 +149,11 @@ class RLCoppeliaManager():
 
         Two different instances are needed, so one will be used for training and the other for evaluating during the EvalCallback
         """
-        self.current_sim = utils.start_coppelia_and_simulation(self.base_path, self.args, self.params_env, self.free_comms_port)
+        utils.start_coppelia_and_simulation(self)
 
 
     def stop_coppelia_sim(self, test_mode = False):
         """
         Check if Coppelia simulations are running and, if so, stops every instance.
         """
-        utils.stop_coppelia_simulation(self.current_sim)
+        utils.stop_coppelia_simulation(self)
