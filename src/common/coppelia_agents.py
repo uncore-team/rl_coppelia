@@ -214,7 +214,7 @@ class CoppeliaAgent:
         Reset the simulator: position the robot and target, and reset the counters.
         If there are obstacles, remove them and create new ones.
         """
-        if self.action_times != []:
+        if self.action_times != [] and self.action_times is not None:
             if self.episode_idx < len(self.action_times):
                 self._rltimestep = self.action_times[self.episode_idx]
                 logging.info(f"Action time set to {self._rltimestep}")
