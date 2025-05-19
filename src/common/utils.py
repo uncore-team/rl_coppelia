@@ -2025,7 +2025,7 @@ def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     x_norm = (x_raw - np.min(x_raw)) / (np.max(x_raw) - np.min(x_raw))
     
     # As there can be some confusing data at the beggining, jsut skip the first start_fraction of the data
-    start_fraction=0.0  # For method 1, change this to 0.05 and uncomment method1 code (and comment method 2)
+    start_fraction=0.02  # For method 1, change this to 0.05 and uncomment method1 code (and comment method 2)
     start_idx = int(len(x_norm) * start_fraction)
     x_norm_window = x_norm[start_idx:]
     reward_window = reward[start_idx:]
@@ -2048,7 +2048,7 @@ def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     # Generate model
     reward_fit = delayed_exponential_model(x_norm, A, k, B, delay)
     reward_derivative = delayed_exponential_derivative(x_norm, A, k, B, delay)
-    
+
     logging.debug("Parameters of the exponential model with delay")
     logging.debug(f"A: {A}")
     logging.debug(f"k: {k}")
@@ -2058,15 +2058,15 @@ def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     # Find the point in the x-axis when the derivative crosses below the threshold or zero
     # Method 1: skipping first points
 
-    # for i in range(start_idx, len(reward_derivative)):
-    #     if np.abs(reward_derivative[i]) < convergence_threshold:
-    #         convergence_point_norm = x_norm[i]
-    #         break
-    # else:
-    #     convergence_point_norm = x_norm[-1]
+    for i in range(start_idx, len(reward_derivative)):
+        if np.abs(reward_derivative[i]) < convergence_threshold:
+            convergence_point_norm = x_norm[i]
+            break
+    else:
+        convergence_point_norm = x_norm[-1]
 
     # Method 2: dynamic window to avoid minimum or maximum locals
-    window_size = round(0.1*len(reward_derivative))
+    window_size = round(0.2*len(reward_derivative))
     convergence_point_norm = x_norm[-1] # default value
     for i in range(len(reward_derivative) - window_size):
         window = reward_derivative[i:i + window_size]
