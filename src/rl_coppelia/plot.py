@@ -265,10 +265,11 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
             pass
 
     # Plot the spider graph
-    num_vars = len(labels)  # Vars number
+    num_vars = len(labels)  # Vars  number
     angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()   # Create angle for each category
     angles += angles[:1]    # Close th circle
-    _, ax = plt.subplots(figsize=(5, 5), dpi=100, subplot_kw=dict(polar=True))    # Create the figure
+    fig, ax = plt.subplots(figsize=(9.5, 6), subplot_kw=dict(polar=True))
+
 
     for data, name in zip(data_list, names):    # Plot each data set
         data = data + data[:1]  # Assure that we are closing the circle
@@ -278,17 +279,34 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     # Labels of the axis
     ax.set_yticklabels([])  # Remove labels from radial axis
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, fontsize=10, ha='center', rotation=60)
-    ax.spines['polar'].set_visible(False)
+    ax.set_xticklabels(labels, fontsize=16)  # Configurar los labels inicialmente
+
+    # Rotar los labels manualmente
+    for label, angle in zip(ax.get_xticklabels(), angles[:-1]):
+        angle_deg = np.degrees(angle)
+        # label.set_rotation(angle_deg)
+
+        # Adjust alignment for each label
+        if angle_deg == 0:
+            label.set_horizontalalignment('left')
+        elif angle_deg == 90 and angle_deg == 270:
+            label.set_horizontalalignment('center')
+        elif angle_deg == 180:
+            label.set_horizontalalignment('right')
+
 
     # Set the radial axis limits
-    ax.set_ylim(0, 1) 
+    ax.set_ylim(0, 1.1) 
+    
+    ax.spines['polar'].set_visible(False)  # Asegurarse de que los spines sean visibles
+    ax.spines['polar'].set_bounds(0, 1) 
 
     # Add the leyend and title
-    ax.legend(loc='upper left', bbox_to_anchor=(1.3, 1.1))  # Ajustar posición de la leyenda
-    ax.set_title(title, size=16, color='black', y=1.1)
+    ax.legend(loc='upper left', bbox_to_anchor=(1.1, 1.1), fontsize = 16)  # Ajustar posición de la leyenda
+    # ax.set_title(title, size=16, color='black', y=1.1)
 
     # Show the plot
+    plt.tight_layout()
     plt.show()
 
 
@@ -429,6 +447,7 @@ def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
         elif metric == "episodes_length":
             data = df['rollout/ep_len_mean'].values
             pre_title = "Episodes Length "
+
         y_label = pre_title
         
         # Plot the rewards for each model
@@ -447,6 +466,98 @@ def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
     # Show the plot
     plt.show()
 
+
+
+def plot_convergence_comparison (rl_copp_obj, title = "Convergence Comparison "):
+    """
+    Plot the convergence point of multiple models for comparing them.
+
+    Args:
+    - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
+    - title (str): The title of the chart.
+    """
+
+    # Define the x-axis options
+    x_axis = ["WallTime", "Steps", "SimTime", "Episodes"]
+    # Define y axis label
+    y_label = "Rewards "
+    
+    # Get the training csv path for later getting the action times from there
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
+    timestep = []
+
+    # Generate a color map for the models
+    color_map = plt.cm.get_cmap("tab10", len(rl_copp_obj.args.model_ids))
+
+    
+    for conv_type in x_axis:
+        plt.figure(figsize=(8, 5))
+
+        max_convergence_point = 0  # Track the maximum convergence point for this category
+
+        for model_index in range(len(rl_copp_obj.args.model_ids)):
+            # Get timestep of the selected model
+            model_name = rl_copp_obj.args.robot_name + "_model_" + str(rl_copp_obj.args.model_ids[model_index])
+            timestep.append(utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+            
+            # CSV File path to get data from
+            file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*.csv"
+            files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "training_metrics", file_pattern))
+
+            # Read the CSV file and obtain the convergence point
+            convergence_point, reward_fit, x_axis_values, reward, reward_at_convergence = utils.get_convergence_point (files[0], conv_type, convergence_threshold=0.02)
+
+            # Update the maximum convergence point
+            max_convergence_point = max(max_convergence_point, convergence_point)
+
+            # Assign a unique color for each model
+            color = color_map(model_index)
+            
+            # Plot the rewards for each model
+            plt.plot(x_axis_values,  reward, color = color)
+            
+            # Get line label depending on the current conv_type
+            if conv_type == "WallTime":
+                line_label = f"Convergence Wall Time: {convergence_point:.2f}h"
+            elif conv_type == "Steps":
+                line_label = f"Convergence Steps: {convergence_point:.2f}"
+            elif conv_type == "SimTime":
+                line_label = f"Convergence Sim Time: {convergence_point:.2f}h"
+            elif conv_type == "Episodes":
+                line_label = f"Convergence Episodes: {convergence_point:.2f}"
+            plt.axvline(convergence_point, color=color, linestyle=':', label=f'Model {timestep[model_index]}s - {line_label}')
+            
+
+        # Add labels and title
+        if conv_type == "WallTime":
+            plt.xlabel('Wall time (hours)')
+            title_def = title + '(Wall Time)'
+        elif conv_type == "Steps":
+            plt.xlabel('Steps')
+            title_def = title + '(Steps)'
+        elif conv_type == "SimTime":
+            plt.xlabel('Simulation time (hours)')
+            title_def = title + '(Sim Time)'
+        elif conv_type == "Episodes":
+            plt.xlabel('Episodes')
+            title_def = title + '(Episodes)'
+
+        # Set the y-axis label
+        plt.ylabel(y_label)
+
+        # Adjust the x-axis limit to improve visualization
+        plt.xlim(0, max_convergence_point * 1.2)  # Extend the x-axis by 20% beyond the max convergence point
+
+        # Set the title
+        plt.title(title_def)
+        
+        # Add legend to differentiate between models
+        plt.legend(loc='lower right')
+
+        # Show the plot
+        plt.grid()
+        plt.show()
 
 
 def plot_histogram (rl_copp_obj, model_index, mode, n_bins = 21, title = "Histogram for "):
@@ -703,11 +814,13 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
                     label=f"Model {timestep[i]}s")
         
         # Add labels, title and legend
-        plt.xlabel(f"{data_keys[id_data]} Intervals {data_keys_units[id_data]}", fontsize=12)
-        plt.ylabel('Percentage of Samples (%)', fontsize=12)
-        plt.title(data_keys[id_data] + title, fontsize=14)
-        plt.xticks(r, interval_labels, rotation=45 if mode == "speeds" else 0, ha='right')  # rotate labels for speed (many intervals)
-        plt.legend()
+        plt.xlabel(f"{data_keys[id_data]} Intervals {data_keys_units[id_data]}", fontsize=14, labelpad=15)
+        plt.ylabel('Percentage of Samples (%)', fontsize=14, labelpad=15)
+        plt.title(data_keys[id_data] + title, fontsize=16, pad=20)
+        plt.xticks(r, interval_labels, rotation=45 if mode == "speeds" else 0, ha='right', fontsize=12)  # rotate labels for speed (many intervals)
+        plt.yticks(fontsize=12)
+        plt.legend(fontsize=12)
+        # plt.legend(fontsize=12, loc='upper left', bbox_to_anchor=(1.05, 1)) 
         
         # Add grid for readability
         plt.grid(axis='y', linestyle='--', alpha=0.7)
@@ -852,7 +965,7 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
     # Removed duplicated labels
     handles, labels = ax.get_legend_handles_labels()
     unique = dict(zip(labels, handles))
-    ax.legend(unique.values(), unique.keys(), loc='upper right')
+    ax.legend(unique.values(), unique.keys(), loc='upper right', bbox_to_anchor=(1.1, 1.1), fontsize = 16)
 
     plt.grid(True)
     plt.show()
@@ -1346,6 +1459,14 @@ def main(args):
         else:
             logging.info(f"Plotting episodes-length-comparison graph for comparing the models {args.model_ids}")
             plot_metrics_comparison(rl_copp, "episodes_length")
+
+    if "compare-convergences" in args.plot_types:
+        plot_type_correct = True
+        if len(args.model_ids) <= 1:    
+            logging.error(f"Please, introduce more than one model ID for creating a convergences-comparison graph. Models specified: {args.model_ids}")
+        else:
+            logging.info(f"Plotting convergences-comparison graph for comparing the models {args.model_ids}")
+            plot_convergence_comparison(rl_copp)
     
     if "histogram_speeds" in args.plot_types:
         plot_type_correct = True

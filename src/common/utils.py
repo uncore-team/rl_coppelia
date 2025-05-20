@@ -1803,7 +1803,7 @@ def get_data_for_spider(csv_path, args, column_names):
         df = pd.read_csv(csv_path)
 
     except Exception as e:
-        logging.error(f"No csv file was found. Exception: {e}")
+        logging.error(f"No csv file was found in {csv_path}. Exception: {e}")
         sys.exit()
     
     data_to_extract = {}
@@ -1890,7 +1890,7 @@ def process_spider_data (df, tolerance=0.05):
     # Prepare the output: list of normalized data and names
     for id_, row in df.iterrows():
         action_time = row["Action time (s)"]
-        names.append(f"T_{action_time:.2f}")
+        names.append(f"Model {action_time:.2f}s")
         data_list.append(df_normalized.loc[id_, labels].tolist())
 
     return data_list, names, labels
@@ -1998,6 +1998,10 @@ def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     """
     # Read csv file
     df = pd.read_csv(file_path)
+
+    # Limit max steps <= 200000 #TODO: remove this and do it automatically, by using the experiment with less steps as a limit
+    mask = df['Step'] <= 200000
+    df = df[mask]
     
     # Prepare x axis depending on the selected option
     if x_axis == "WallTime":
