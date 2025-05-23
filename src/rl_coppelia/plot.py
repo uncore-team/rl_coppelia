@@ -215,7 +215,7 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     #     "Test Episode Completion Rate",  
     # ]
     categories = [
-        "Convergence Sim Time",
+        "Convergence Sim-Time",
         "Mean Reward",
         "Episode Efficiency",
         "Episode Completion Rate",  
@@ -277,23 +277,40 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
         ax.fill(angles, data, alpha=0.25)
 
     # Labels of the axis
+    labels = [label.replace(" ", "\n") for label in labels]  # Reemplazar espacios por saltos de línea
     ax.set_yticklabels([])  # Remove labels from radial axis
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, fontsize=16)  # Configurar los labels inicialmente
+    ax.set_xticklabels(labels, fontsize=18)  # Configurar los labels inicialmente
 
+    # Añadir espacio entre los labels y el gráfico
+    # ax.tick_params(axis='x', pad=30)
     # Rotar los labels manualmente
     for label, angle in zip(ax.get_xticklabels(), angles[:-1]):
         angle_deg = np.degrees(angle)
-        # label.set_rotation(angle_deg)
+        # # label.set_rotation(angle_deg)
 
-        # Adjust alignment for each label
-        if angle_deg == 0:
-            label.set_horizontalalignment('left')
-        elif angle_deg == 90 and angle_deg == 270:
-            label.set_horizontalalignment('center')
-        elif angle_deg == 180:
-            label.set_horizontalalignment('right')
-
+        # # Adjust alignment for each label
+        # if angle_deg == 0:
+        #     label.set_horizontalalignment('left')
+        # elif angle_deg == 90 and angle_deg == 270:
+        #     label.set_horizontalalignment('center')
+        # elif angle_deg == 180:
+        #     label.set_horizontalalignment('right')
+        # if angle_deg == 0 and angle_deg == 180:
+        #     ax.tick_params(axis='x', pad=90)
+        # else:
+        #     ax.tick_params(axis='x', pad=30)
+        label.set_rotation(angle_deg - 90)  # Rotar el label para alinearlo con el eje
+        label.set_verticalalignment('center')  # Centrar verticalmente las palabras
+        label.set_horizontalalignment('center')  # Centrar horizontalmente el texto
+        if "Convergence" in label.get_text():
+            label.set_y(label.get_position()[1] - 0.3)  # Aumentar el pad para este label
+        elif "Reward" in label.get_text():
+            label.set_y(label.get_position()[1] - 0.05) 
+        elif "Efficiency" in label.get_text():
+            label.set_y(label.get_position()[1] - 0.2)
+        else:
+            label.set_y(label.get_position()[1] - 0.1)  # Mantener el pad por defecto
 
     # Set the radial axis limits
     ax.set_ylim(0, 1.1) 
@@ -302,7 +319,7 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     ax.spines['polar'].set_bounds(0, 1) 
 
     # Add the leyend and title
-    ax.legend(loc='upper left', bbox_to_anchor=(1.1, 1.1), fontsize = 16)  # Ajustar posición de la leyenda
+    ax.legend(loc='upper left', bbox_to_anchor=(1.1, 1.1), fontsize = 18)  # Ajustar posición de la leyenda
     # ax.set_title(title, size=16, color='black', y=1.1)
 
     # Show the plot
@@ -453,17 +470,27 @@ def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
         # Plot the rewards for each model
         plt.plot(steps, data, label=f'Model {timestep[model_index]}s')
 
+        # Ajustar los ticks del eje X para que se muestren cada 50,000 pasos
+        xticks = np.arange(0, steps.max() + 100, 50000)  # Crear ticks desde 0 hasta el máximo de steps, con incrementos de 50,000
+        plt.xticks(xticks, fontsize=16)  # Aplicar los ticks al eje X
+
+        
+
     # Add labels and title
-    plt.xlabel('Steps')
+    plt.xlabel('Steps', fontsize=20, labelpad=12)
 
-    plt.ylabel(y_label)
+    plt.ylabel(y_label, fontsize=20, labelpad=12)
 
-    plt.title(pre_title + title)
+    plt.tick_params(axis='both', which='major', labelsize=16)  # Aumentar tamaño de los números del grid
+
+
+    # plt.title(pre_title + title)
     
     # Add legend to differentiate between models
-    plt.legend()
+    plt.legend(fontsize=18)
 
     # Show the plot
+    plt.grid(True)
     plt.show()
 
 
@@ -492,7 +519,7 @@ def plot_convergence_comparison (rl_copp_obj, title = "Convergence Comparison ")
 
     
     for conv_type in x_axis:
-        plt.figure(figsize=(8, 5))
+        plt.figure(figsize=(10, 6))
 
         max_convergence_point = 0  # Track the maximum convergence point for this category
 
@@ -526,37 +553,54 @@ def plot_convergence_comparison (rl_copp_obj, title = "Convergence Comparison ")
                 line_label = f"Convergence Sim Time: {convergence_point:.2f}h"
             elif conv_type == "Episodes":
                 line_label = f"Convergence Episodes: {convergence_point:.2f}"
-            plt.axvline(convergence_point, color=color, linestyle=':', label=f'Model {timestep[model_index]}s - {line_label}')
+            plt.axvline(
+                convergence_point, 
+                color=color, 
+                linestyle=':', 
+                label=f'Model {timestep[model_index]}s - {line_label}', 
+                linewidth=4
+                )
             
 
         # Add labels and title
         if conv_type == "WallTime":
-            plt.xlabel('Wall time (hours)')
+            plt.xlabel('Wall time (hours)', fontsize=26, labelpad=12)
             title_def = title + '(Wall Time)'
         elif conv_type == "Steps":
-            plt.xlabel('Steps')
+            plt.xlabel('Steps', fontsize=26, labelpad=12)
             title_def = title + '(Steps)'
         elif conv_type == "SimTime":
-            plt.xlabel('Simulation time (hours)')
+            plt.xlabel('Simulation time (hours)', fontsize=26, labelpad=12)
             title_def = title + '(Sim Time)'
         elif conv_type == "Episodes":
-            plt.xlabel('Episodes')
+            plt.xlabel('Episodes', fontsize=26, labelpad=12)
             title_def = title + '(Episodes)'
 
         # Set the y-axis label
-        plt.ylabel(y_label)
+        plt.ylabel(y_label, fontsize=26, labelpad=10)
 
         # Adjust the x-axis limit to improve visualization
         plt.xlim(0, max_convergence_point * 1.2)  # Extend the x-axis by 20% beyond the max convergence point
 
+        plt.tick_params(axis='both', which='major', labelsize=22)
+
         # Set the title
-        plt.title(title_def)
+        # plt.title(title_def)
         
         # Add legend to differentiate between models
-        plt.legend(loc='lower right')
+        # plt.legend(
+        #     loc='upper left', 
+        #     bbox_to_anchor=(0.33, 1.32),  # Ajustar la posición de la leyenda
+        #     fontsize=14
+        # )
+        plt.legend(
+            loc='lower right',  # Posicionar la leyenda dentro del gráfico, abajo a la derecha
+            fontsize=18
+        )
 
         # Show the plot
         plt.grid()
+        plt.tight_layout()
         plt.show()
 
 
@@ -814,12 +858,12 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
                     label=f"Model {timestep[i]}s")
         
         # Add labels, title and legend
-        plt.xlabel(f"{data_keys[id_data]} Intervals {data_keys_units[id_data]}", fontsize=14, labelpad=15)
-        plt.ylabel('Percentage of Samples (%)', fontsize=14, labelpad=15)
-        plt.title(data_keys[id_data] + title, fontsize=16, pad=20)
-        plt.xticks(r, interval_labels, rotation=45 if mode == "speeds" else 0, ha='right', fontsize=12)  # rotate labels for speed (many intervals)
-        plt.yticks(fontsize=12)
-        plt.legend(fontsize=12)
+        plt.xlabel(f"{data_keys[id_data]} Intervals {data_keys_units[id_data]}", fontsize=20, labelpad=15)
+        plt.ylabel('Percentage of Samples (%)', fontsize=20, labelpad=15)
+        # plt.title(data_keys[id_data] + title, fontsize=16, pad=20)
+        plt.xticks(r, interval_labels, rotation=30 if mode == "speeds" else 0, ha='right', fontsize=20)  # rotate labels for speed (many intervals)
+        plt.yticks(fontsize=20)
+        plt.legend(fontsize=20)
         # plt.legend(fontsize=12, loc='upper left', bbox_to_anchor=(1.05, 1)) 
         
         # Add grid for readability
@@ -842,13 +886,19 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
     scene_path = scene_files[0]
     df_scene = pd.read_csv(scene_path)
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.set_xlabel("x (m)")
-    ax.set_ylabel("y (m)")
+    fig, ax = plt.subplots(figsize=(9.4, 6))
+    ax.set_xlabel("x (m)", fontsize=18)
+    ax.set_ylabel("y (m)", fontsize=18)
     ax.set_xlim(2.5, -2.5)
     ax.set_ylim(2.5, -2.5)
     ax.set_aspect('equal')
-    ax.set_title("CoppeliaSim Scene Representation")
+
+    # Configurar el tamaño de los números de la cuadrícula
+    ax.tick_params(axis='both', which='major', labelsize=18)  # Cambia 12 por el tamaño deseado
+
+
+    # Set title
+    # ax.set_title("CoppeliaSim Scene Representation", fontsize=16, pad=20)
 
     # Draw 0.5 m grid
     for i in np.arange(-2.5, 3, 0.5):
@@ -965,7 +1015,7 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
     # Removed duplicated labels
     handles, labels = ax.get_legend_handles_labels()
     unique = dict(zip(labels, handles))
-    ax.legend(unique.values(), unique.keys(), loc='upper right', bbox_to_anchor=(1.1, 1.1), fontsize = 16)
+    ax.legend(unique.values(), unique.keys(), loc='upper right', bbox_to_anchor=(1.5, 1.03), fontsize = 16)
 
     plt.grid(True)
     plt.show()
@@ -1071,7 +1121,11 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         
         if metric == "Time (s)":
             metric = "Simulation Time"
-        plt.title(f"{metric} comparison")
+        # plt.title(f"{metric} comparison", fontsize=16)
+        plt.xlabel("Model", fontsize=20, labelpad=10)  # Aumentar tamaño de label del eje X
+        plt.ylabel(metric, fontsize=20, labelpad=10)  # Aumentar tamaño de label del eje Y
+        plt.tick_params(axis='both', which='major', labelsize=20)  # Aumentar tamaño de los números del grid
+
         plt.grid(True)
         plt.tight_layout()
         plt.show()
@@ -1101,13 +1155,14 @@ def plot_lat_curves(rl_copp_obj, model_index):
 
     # Plot
     plt.figure(figsize=(10, 6))
-    plt.plot(df.index, df["LAT-Sim (s)"], label="LAT-Sim (s)", linewidth=1.5)
-    plt.plot(df.index, df["LAT-Wall (s)"], label="LAT-Wall (s)", linewidth=1.5)
+    plt.plot(df.index, df["LAT-Sim (s)"], label="LAT-Agent (s)", linewidth=2)
+    plt.plot(df.index, df["LAT-Wall (s)"], label="LAT-Wall (s)", linewidth=2)
 
-    plt.xlabel("Step")
-    plt.ylabel("LAT (s)")
-    plt.title(f"LAT-Sim and LAT-Wall vs. Steps - Model {timestep}s")
-    plt.legend()
+    plt.xlabel("Step", fontsize = 20, labelpad=12)
+    plt.ylabel("LAT (s)", fontsize = 20, labelpad=12)
+    plt.tick_params(axis='both', which='major', labelsize=20)
+    # plt.title(f"LAT-Sim and LAT-Wall vs. Steps - Model {timestep}s")
+    plt.legend(fontsize=20)
     plt.grid(True)
     plt.tight_layout()
     plt.show()
