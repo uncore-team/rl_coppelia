@@ -215,7 +215,7 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     #     "Test Episode Completion Rate",  
     # ]
     categories = [
-        "Convergence Sim-Time",
+        "Learning Convergence",
         "Mean Reward",
         "Episode Efficiency",
         "Episode Completion Rate",  
@@ -423,7 +423,19 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
     plt.grid()
     plt.show()
     
-    
+
+def moving_average(data, window_size=10):
+    """
+    Aplica un filtro de media móvil para suavizar los datos.
+
+    Args:
+    - data (array-like): Datos originales a suavizar.
+    - window_size (int): Tamaño de la ventana para la media móvil.
+
+    Returns:
+    - array-like: Datos suavizados.
+    """
+    return np.convolve(data, np.ones(window_size) / window_size, mode='valid')
 
 
 def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
@@ -466,15 +478,21 @@ def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
             pre_title = "Episodes Length "
 
         y_label = pre_title
-        
+
+        # Smooth the data
+        window_size = 100  # Define the window size for smooth level
+        smoothed_data = moving_average(data, window_size=window_size)
+
+        # Adjust the steps to match the length of the smoothed data
+        smoothed_steps = steps[:len(smoothed_data)]
+
         # Plot the rewards for each model
-        plt.plot(steps, data, label=f'Model {timestep[model_index]}s')
+        plt.plot(smoothed_steps, smoothed_data, label=f'Model {timestep[model_index]}s')
 
         # Ajustar los ticks del eje X para que se muestren cada 50,000 pasos
         xticks = np.arange(0, steps.max() + 100, 50000)  # Crear ticks desde 0 hasta el máximo de steps, con incrementos de 50,000
         plt.xticks(xticks, fontsize=16)  # Aplicar los ticks al eje X
 
-        
 
     # Add labels and title
     plt.xlabel('Steps', fontsize=20, labelpad=12)
@@ -493,6 +511,101 @@ def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
     plt.grid(True)
     plt.show()
 
+
+def plot_metrics_comparison_v2 (rl_copp_obj, metric, title = "Comparison"):
+    """
+    Plot the same metric of multiple models for comparing them (with mean curve and variability). 
+    X axis will be the number of steps.
+
+    Args:
+    - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
+    - title (str): The title of the chart.
+    """
+
+    # Get the training csv path for later getting the action times from there
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path, "train_records.csv")  # Name of the train records csv to search the algorithm used
+    timestep_to_data = {}
+
+    for model_index in range(len(rl_copp_obj.args.model_ids)):
+        # Get timestep of the selected model
+        model_name = rl_copp_obj.args.robot_name + "_model_" + str(rl_copp_obj.args.model_ids[model_index])
+        timestep = utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")
+
+        # CSV File path to get data from
+        file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*.csv"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "training_metrics", file_pattern))
+        
+        # Read the CSV file
+        df = pd.read_csv(files[0])
+
+        # Limit max steps <= 200000
+        mask = df['Step'] <= 200000
+        df = df[mask]
+        
+        # Extract steps and rewards
+        steps = df['Step'].values
+        if metric == "rewards":
+            data = df['rollout/ep_rew_mean'].values
+        elif metric == "episodes_length":
+            data = df['rollout/ep_len_mean'].values
+
+        # Smooth the data
+        window_size = 30
+        smoothed_data = moving_average(data, window_size=window_size)
+        smoothed_steps = steps[:len(smoothed_data)]
+
+        # Group data by timestep
+        if timestep not in timestep_to_data:
+            timestep_to_data[timestep] = []
+        timestep_to_data[timestep].append((smoothed_steps, smoothed_data))
+
+    # Plot the mean curve and variability band for each timestep group
+    plt.figure(figsize=(10, 6))
+    for timestep, data_list in timestep_to_data.items():
+        # Align data by step and calculate mean and std
+        all_steps = [d[0] for d in data_list]
+        all_data = [d[1] for d in data_list]
+
+        # Define a common set of steps (e.g., 1000 evenly spaced points)
+        common_steps = np.linspace(min([steps[0] for steps in all_steps]), 
+                                max([steps[-1] for steps in all_steps]), 
+                                1000)
+
+        # Interpolate all curves to the common set of steps
+        interpolated_data = []
+        for steps, data in zip(all_steps, all_data):
+            interpolator = interp1d(steps, data, kind='linear', bounds_error=False, fill_value="extrapolate")
+            interpolated_data.append(interpolator(common_steps))
+
+        # Convert to NumPy arrays
+        interpolated_data = np.array(interpolated_data)
+
+        # Calculate mean and standard deviation
+        mean_data = np.mean(interpolated_data, axis=0)
+        std_data = np.std(interpolated_data, axis=0)
+
+        # Plot mean curve
+        plt.plot(common_steps, mean_data, label=f"Model {timestep}s", linewidth=2)
+
+        # Plot variability band
+        plt.fill_between(
+            common_steps,
+            mean_data - std_data,
+            mean_data + std_data,
+            alpha=0.3,
+            edgecolor="black",
+            linewidth=0.5
+        )
+
+    # Add labels and title
+    plt.xlabel('Steps', fontsize=20, labelpad=12)
+    plt.ylabel(metric.capitalize(), fontsize=20, labelpad=12)
+    plt.tick_params(axis='both', which='major', labelsize=16)
+    plt.legend(fontsize=18)
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 
 def plot_convergence_comparison (rl_copp_obj, title = "Convergence Comparison "):
@@ -909,7 +1022,7 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
     for _, row in df_scene.iterrows():
         x, y = row['x'], row['y']
         if row['type'] == 'robot':
-            circle = plt.Circle((x, y), 0.35 / 2, color='blue', label='Robot', zorder=2)
+            circle = plt.Circle((x, y), 0.35 / 2, color='black', label='Robot', zorder=4)
             ax.add_patch(circle)
 
             # Indicate orientation
@@ -925,7 +1038,7 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
                 left = (x + side_offset * np.cos(theta + 2.5), y + side_offset * np.sin(theta + 2.5))
                 right = (x + side_offset * np.cos(theta - 2.5), y + side_offset * np.sin(theta - 2.5))
 
-                triangle = plt.Polygon([front, left, right], color='white', zorder=3)
+                triangle = plt.Polygon([front, left, right], color='white', zorder=4)
                 ax.add_patch(triangle)
 
         elif row['type'] == 'obstacle':
@@ -1031,7 +1144,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         csv_folder (str): Carpeta donde buscar los CSV (por defecto, actual).
     """
     # Initialize variables
-    metrics = ["Time (s)", "Reward", "Target zone", "Crashes"]
+    metrics = ["Time (s)", "Reward", "Target zone", "Crashes", "Linear speed", "Angular speed"]
     combined_data = []
     model_action_times = []
 
@@ -1056,6 +1169,21 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
             df["Model"] = str(timestep) + "s"
             combined_data.append(df)
 
+        # Load other data (Linear speed and Angular speed)
+        file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*_otherdata_*.csv"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+        if not files:
+            logging.error(f"[!] Other data file not found for model {model_id}")
+            continue
+
+        for file in files:
+            df = pd.read_csv(file)
+            df["Model"] = str(timestep) + "s"
+            # Add Linear speed and Angular speed to the combined data
+            df["Angular speed"] = df["Angular speed"].abs()  # Use absolute value for Angular speed
+            combined_data.append(df)
+
+
     if not combined_data:
         logging.error("[!] Data not found.")
         return
@@ -1073,8 +1201,16 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
     for metric in metrics:
     
         plt.figure(figsize=(10, 6))
-        if metric in ["Time (s)", "Reward"]:
+        if metric in ["Time (s)", "Reward", "Linear speed", "Angular speed"]:
             sns.boxplot(data=full_df, x="Model", y=metric)
+            if metric == "Linear speed":
+                metric = metric + " (m/s)"
+
+            elif metric == "Angular speed":
+                metric = metric + " (rad/s)"
+
+            elif metric == "Time (s)":
+                metric = "Average episode duration (s)"
 
         elif metric == "Reward detail (>=0)": 
             df_reward_detail = full_df[full_df["Reward"] >= 0]
@@ -1119,8 +1255,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
             sns.barplot(data=crash_pct, x="Model", y="Collision Rate")
             plt.ylabel("Episodes with collision (%)")
         
-        if metric == "Time (s)":
-            metric = "Simulation Time"
+        
         # plt.title(f"{metric} comparison", fontsize=16)
         plt.xlabel("Model", fontsize=20, labelpad=10)  # Aumentar tamaño de label del eje X
         plt.ylabel(metric, fontsize=20, labelpad=10)  # Aumentar tamaño de label del eje Y
@@ -1508,7 +1643,7 @@ def main(args):
             logging.error(f"Please, introduce more than one model ID for creating a rewards-comparison graph. Models specified: {args.model_ids}")
         else:
             logging.info(f"Plotting rewards-comparison graph for comparing the models {args.model_ids}")
-            plot_metrics_comparison(rl_copp, "rewards")
+            plot_metrics_comparison_v2(rl_copp, "rewards")
         
     if "compare-episodes_length" in args.plot_types:
         plot_type_correct = True
