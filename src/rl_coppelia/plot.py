@@ -1158,6 +1158,9 @@ def plot_lat_curves(rl_copp_obj, model_index):
     plt.plot(df.index, df["LAT-Sim (s)"], label="LAT-Agent (s)", linewidth=2)
     plt.plot(df.index, df["LAT-Wall (s)"], label="LAT-Wall (s)", linewidth=2)
 
+    # Draw a horizontal line for the timestep value
+    plt.axhline(float(timestep), color='red', linestyle='--', linewidth=2, label=f"Timestep = {timestep}s")
+
     plt.xlabel("Step", fontsize = 20, labelpad=12)
     plt.ylabel("LAT (s)", fontsize = 20, labelpad=12)
     plt.tick_params(axis='both', which='major', labelsize=20)
