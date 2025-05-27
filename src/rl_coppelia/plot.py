@@ -37,6 +37,7 @@ from scipy.interpolate import interp1d
 from matplotlib.patches import Ellipse
 from scipy.stats import shapiro,gaussian_kde
 from sklearn.covariance import MinCovDet
+from scipy.interpolate import make_interp_spline
 
 
 def plot_spider(rl_copp_obj, title='Models Comparison'):
@@ -340,6 +341,11 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
     - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
     - title (str): The title of the chart.
     """
+    # Define some control variables
+    smooth_flag = True  # Set to True to apply smoothing
+    smooth_level = 15  # Define the window size for smoothing
+    band_flag = False  # Set to True to plot the variability band
+
 
     # Get the training csv path for later getting the action times from there
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
@@ -347,16 +353,24 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
     timestep_to_data = {}
 
     for model_index in range(len(rl_copp_obj.args.model_ids)):
-        # Get timestep of the selected model
-        model_name = rl_copp_obj.args.robot_name + "_model_" + str(rl_copp_obj.args.model_ids[model_index])
-        timestep = utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")
 
         # CSV File path to get data from
         file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*.csv"
         files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "training_metrics", file_pattern))
-        
+
         # Read the CSV file
-        df = pd.read_csv(files[0])
+        try:
+            df = pd.read_csv(files[0])
+        except Exception as e:
+            logging.error(f"File not found for model {model_name}. Skipping this model.")   
+            del rl_copp_obj.args.model_ids[model_index]
+            continue
+
+        print(f"Processing model {model_index} with ID {rl_copp_obj.args.model_ids[model_index]}")
+        # Get timestep of the selected model
+        model_name = rl_copp_obj.args.robot_name + "_model_" + str(rl_copp_obj.args.model_ids[model_index])
+        timestep = utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")
+
 
         # Limit max steps <= 200000
         mask = df['Step'] <= 200000
@@ -370,9 +384,14 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
             data = df['rollout/ep_len_mean'].values
 
         # Smooth the data
-        window_size = 30
-        smoothed_data = moving_average(data, window_size=window_size)
-        smoothed_steps = steps[:len(smoothed_data)]
+        if smooth_flag:
+            window_size = smooth_level
+            smoothed_data = moving_average(data, window_size=window_size)
+            smoothed_steps = steps[:len(smoothed_data)]
+
+        else:
+            smoothed_data = data
+            smoothed_steps = steps[:len(smoothed_data)]
 
         # Group data by timestep
         if timestep not in timestep_to_data:
@@ -407,19 +426,25 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
         # Plot mean curve
         plt.plot(common_steps, mean_data, label=f"Model {timestep}s", linewidth=2)
 
-        # Plot variability band
-        plt.fill_between(
-            common_steps,
-            mean_data - std_data,
-            mean_data + std_data,
-            alpha=0.3,
-            edgecolor="black",
-            linewidth=0.5
-        )
+
+        # Plot variability band if enabled
+        if band_flag:
+            # Fill the area between mean - std and mean + std
+            plt.fill_between(
+                common_steps,
+                mean_data - std_data,
+                mean_data + std_data,
+                alpha=0.3,
+                edgecolor="black",
+                linewidth=0.5
+            )
 
     # Add labels and title
     plt.xlabel('Steps', fontsize=20, labelpad=12)
     plt.ylabel(metric.capitalize(), fontsize=20, labelpad=12)
+    # Adjust x axis ticks to show every 50,000 steps
+    xticks = np.arange(0, steps.max() + 100, 50000) 
+    plt.xticks(xticks, fontsize=16)
     plt.tick_params(axis='both', which='major', labelsize=16)
     plt.legend(fontsize=18)
     plt.grid(True)
@@ -959,12 +984,11 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
 
 def compare_models_boxplots(rl_copp_obj, model_ids):
     """
-    Compara una variable entre modelos usando un boxplot.
+    Compare a variable betweeen multiple models using boxplots.
     
     Args:
-        model_ids (list): Lista de IDs de modelos (ej: [102, 248]).
-        robot_name (str): Nombre del robot (ej: "turtleBot").
-        csv_folder (str): Carpeta donde buscar los CSV (por defecto, actual).
+        - rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
+        - model_ids (list): List of model IDs to compare.
     """
     # Initialize variables
     metrics = [
@@ -978,6 +1002,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         ]
     combined_data = []
     model_action_times = []
+    timestep_values = []
 
     # Get trainings' csv name for searching action times later
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
@@ -993,12 +1018,14 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
             
         # Get action time for each model
         model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
-        timestep = (utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+        timestep = float(utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
         model_action_times.append(f"{timestep}s")
+        timestep_values.append(timestep)
 
         for file in files:
             df = pd.read_csv(file)
             df["Model"] = str(timestep) + "s"
+            df["Timestep"] = timestep
             combined_data.append(df)
 
         # Load other data (Linear speed and Angular speed)
@@ -1011,6 +1038,8 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         for file in files:
             df = pd.read_csv(file)
             df["Model"] = str(timestep) + "s"
+            print(f"Adding data for model {model_id} with action time {timestep}s")
+            df["Timestep"] = timestep
             # Add Linear speed and Angular speed to the combined data
             df["Angular speed"] = df["Angular speed"].abs()  # Use absolute value for Angular speed
             combined_data.append(df)
@@ -1029,18 +1058,58 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
 
     # Add a metric that doesn't appear on the csv file: reward detail, for plotting those cases with a positive reward, so user can observe reward more detailed
     # metrics.append("Reward detail (>=0)")
+    print(df["Timestep"])
 
     for metric in metrics:
     
         plt.figure(figsize=(10, 6))
-        if metric in ["Time (s)", "Reward", "Linear speed", "Angular speed", "Distance traveled (m)"]:
+        if metric == "Reward":
+            # Use numeric X-axis for proper spline alignment
+            ax = sns.boxplot(data=full_df, x="Model", y=metric)
+            
+            # Get the unique models and their positions
+            unique_models = sorted(full_df["Model"].unique(), key=lambda x: float(x.replace('s', '')))
+            x_positions = range(len(unique_models))
+
+            # Calculate the median for each model in the right order
+            medians = []
+            timesteps_ordered = []
+            for model in unique_models:
+                median_val = full_df[full_df["Model"] == model][metric].median()
+                medians.append(median_val)
+                timesteps_ordered.append(float(model.replace('s', '')))
+            
+            # Create the spline using the x positions and medians
+            if len(x_positions) > 2:  # We need at least 3 points for a spline
+                x_smooth = np.linspace(0, len(x_positions)-1, 300)
+                spline = make_interp_spline(x_positions, medians, k=min(2, len(x_positions)-1))
+                y_smooth = spline(x_smooth)
+                plt.plot(x_smooth, y_smooth, color='red', linestyle='--', linewidth=2, label='Spline')
+            
+            # Mark the median points
+            plt.scatter(x_positions, medians, color='black', marker='x', s=60, zorder=10)
+            
+            # Find the optimal timestep
+            if len(x_positions) > 2:
+                optimal_idx = np.argmax(y_smooth)
+                optimal_x_pos = x_smooth[optimal_idx]
+                optimal_y = y_smooth[optimal_idx]
+                
+                # Interpolate the optimal timestep
+                optimal_timestep = np.interp(optimal_x_pos, x_positions, timesteps_ordered)
+                
+                # Plot the optimal timestep
+                plt.plot(optimal_x_pos, optimal_y, marker='o', color='green', markersize=12, 
+                        label=f'Optimal: {optimal_timestep:.3f}s', zorder=15)
+            
+            plt.legend()
+
+        elif metric in ["Time (s)", "Linear speed", "Angular speed", "Distance traveled (m)"]:
             sns.boxplot(data=full_df, x="Model", y=metric)
             if metric == "Linear speed":
                 metric = metric + " (m/s)"
-
             elif metric == "Angular speed":
                 metric = metric + " (rad/s)"
-
             elif metric == "Time (s)":
                 metric = "Average episode duration (s)"
 
