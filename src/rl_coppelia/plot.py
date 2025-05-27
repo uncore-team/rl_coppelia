@@ -39,161 +39,6 @@ from scipy.stats import shapiro,gaussian_kde
 from sklearn.covariance import MinCovDet
 
 
-
-# def plot_histograms_comparison_old1(rl_copp_obj, model_indices, title="Histogram for angular speed", alpha=0.6, colors=None):
-#     """
-#     Plots histograms for showing the angular speeds of multiple robot models during the testing
-#     process, overlaying them for easy comparison.
-    
-#     Args:
-#     - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class for managing args and base path.
-#     - model_indices (list): List of model indices to plot.
-#     - title (str): The title of the chart.
-#     - alpha (float): Transparency level for the histograms.
-#     - colors (list, optional): List of colors for the histograms. If None, uses default colors.
-#     """
-#     # Configurar el histograma
-#     plt.figure(figsize=(12, 7))
-    
-#     # Crear bins equiespaciados desde -0.5 hasta 0.5
-#     bins = np.linspace(-0.5, 0.5, 21)  # 21 bins para tener 20 intervalos
-    
-#     # Si no se proporcionan colores, usar una paleta predeterminada
-#     if colors is None:
-#         colors = plt.cm.tab10(np.linspace(0, 1, len(model_indices)))
-    
-#     print(model_indices)
-#     # Crear histogramas para cada modelo
-#     for i, model_idx in enumerate(model_indices):
-#         print(model_idx)
-#         # CSV File path
-#         file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_speeds_*.csv"
-#         print(file_pattern)
-#         files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, 
-#                                        "testing_metrics", file_pattern))
-#         print(files)
-#         if not files:
-#             print(f"No files found for model {model_idx}")
-#             continue
-            
-#         # Read CSV
-#         df = pd.read_csv(files[0])
-#         angular_velocities = df['Angular speed']
-        
-#         # Imprimir estadísticas
-#         print(f"\nEstadísticas de velocidad angular para modelo {model_idx}:")
-#         print(f"Media: {angular_velocities.mean():.4f} rad/s")
-#         print(f"Mediana: {angular_velocities.median():.4f} rad/s")
-#         print(f"Desviación estándar: {angular_velocities.std():.4f} rad/s")
-#         print(f"Mínimo: {angular_velocities.min():.4f} rad/s")
-#         print(f"Máximo: {angular_velocities.max():.4f} rad/s")
-        
-#         # Crear el histograma con densidad=True para normalizar y permitir comparación justa
-#         plt.hist(angular_velocities, bins=bins, alpha=alpha, color=colors[i], 
-#                  edgecolor='black', label=f'Model {model_idx}',
-#                  density=True, histtype='stepfilled')
-    
-#     # Añadir títulos y etiquetas
-#     plt.title(title, fontsize=14)
-#     plt.xlabel('Angular speed (rad/s)', fontsize=12)
-#     plt.ylabel('Density', fontsize=12)
-#     plt.grid(axis='y', alpha=0.3)
-#     plt.legend(loc='upper right')
-    
-#     # Añadir una línea vertical en el cero
-#     plt.axvline(x=0, color='red', linestyle='--', alpha=0.5)
-    
-#     # Ajustar los límites del eje x para asegurar que se vea todo el rango
-#     plt.xlim(-0.55, 0.55)
-    
-#     # Mostrar el histograma
-#     plt.tight_layout()
-#     plt.show()
-
-
-# def plot_histograms_comparison_old2(rl_copp_obj, model_indices, num_intervals=5, title_prefix="Angular Speed Distribution"):
-#     """
-#     Plots multiple histograms for angular speeds, each focusing on a specific range.
-#     Each plot compares all specified models within that interval.
-    
-#     Args:
-#     - rl_copp_obj: RLCoppeliaManager instance
-#     - model_indices (list): List of model indices to compare
-#     - num_intervals (int): Number of intervals to divide the speed range (-0.5 to 0.5)
-#     - title_prefix (str): Prefix for the title of each plot
-#     """
-#     # Carga los datos de todos los modelos primero
-#     model_data = {}
-#     colors = plt.cm.tab10(np.linspace(0, 1, len(model_indices)))
-    
-#     for i, model_idx in enumerate(model_indices):
-#         file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_speeds_*.csv"
-#         files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, 
-#                                       "testing_metrics", file_pattern))
-        
-#         if not files:
-#             print(f"No files found for model {model_idx}")
-#             continue
-            
-#         df = pd.read_csv(files[0])
-#         angular_velocities = df['Angular speed']
-        
-#         # Imprimir estadísticas
-#         print(f"\nEstadísticas para modelo {model_idx}:")
-#         print(f"Media: {angular_velocities.mean():.4f} rad/s")
-#         print(f"Mediana: {angular_velocities.median():.4f} rad/s")
-#         print(f"Desviación estándar: {angular_velocities.std():.4f} rad/s")
-#         print(f"Mínimo: {angular_velocities.min():.4f} rad/s")
-#         print(f"Máximo: {angular_velocities.max():.4f} rad/s")
-        
-#         model_data[model_idx] = {
-#             'velocities': angular_velocities,
-#             'color': colors[i],
-#             'model_id': model_idx
-#         }
-    
-#     # Definir los intervalos
-#     min_speed = -0.5
-#     max_speed = 0.5
-#     interval_size = (max_speed - min_speed) / num_intervals
-#     intervals = [(min_speed + i * interval_size, min_speed + (i + 1) * interval_size) 
-#                 for i in range(num_intervals)]
-    
-#     # Crear un gráfico para cada intervalo
-#     for interval_start, interval_end in intervals:
-#         plt.figure(figsize=(10, 6))
-        
-#         # Definir bins solo para este intervalo (más detallado)
-#         bins = np.linspace(interval_start, interval_end, 15)  # 15 bins para cada intervalo
-        
-#         # Crear histogramas para cada modelo en este intervalo
-#         for model_idx, data in model_data.items():
-#             # Filtrar velocidades solo para este intervalo
-#             mask = (data['velocities'] >= interval_start) & (data['velocities'] <= interval_end)
-#             filtered_velocities = data['velocities'][mask]
-            
-#             if len(filtered_velocities) > 0:  # Solo graficar si hay datos en este rango
-#                 plt.hist(filtered_velocities, bins=bins, 
-#                          alpha=0.7, color=data['color'], 
-#                          edgecolor='black', 
-#                          label=f'Model {data["model_id"]}')
-        
-#         # Añadir etiquetas y leyenda
-#         plt.title(f"{title_prefix}: [{interval_start:.2f}, {interval_end:.2f}] rad/s", fontsize=14)
-#         plt.xlabel('Angular speed (rad/s)', fontsize=12)
-#         plt.ylabel('Frequency', fontsize=12)
-#         plt.grid(True, alpha=0.3)
-#         plt.legend()
-        
-#         # Ajustar los límites del eje x para mostrar solo este intervalo
-#         plt.xlim(interval_start, interval_end)
-        
-#         plt.tight_layout()
-#         plt.show()
-
-
-
-
 def plot_spider(rl_copp_obj, title='Models Comparison'):
     """
     Plots multiple spider charts on the same figure to compare different models.
@@ -215,10 +60,12 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     #     "Test Episode Completion Rate",  
     # ]
     categories = [
-        "Learning Convergence",
-        "Mean Reward",
-        "Episode Efficiency",
-        "Episode Completion Rate",  
+        "Learning_Convergence",
+        "Mean_Reward",
+        "Episode_Efficiency",
+        "Episode_Completion Rate",  
+        "Trajectory_Optimality",
+        "Innermost Target_Rate"
     ]
 
     # Get metrics from testing
@@ -226,7 +73,9 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     test_column_names = [
         "Avg reward",
         "Avg time reach target",
-        "Percentage terminated"
+        "Percentage terminated",
+        "Avg episode distance (m)",
+        "Target zone 3 (%)"
     ]
     test_data = utils.get_data_for_spider(testing_csv_path, rl_copp_obj.args, test_column_names)
 
@@ -268,7 +117,7 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     num_vars = len(labels)  # Vars  number
     angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()   # Create angle for each category
     angles += angles[:1]    # Close th circle
-    fig, ax = plt.subplots(figsize=(9.5, 6), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(10.5, 6), subplot_kw=dict(polar=True))
 
 
     for data, name in zip(data_list, names):    # Plot each data set
@@ -277,7 +126,7 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
         ax.fill(angles, data, alpha=0.25)
 
     # Labels of the axis
-    labels = [label.replace(" ", "\n") for label in labels]  # Reemplazar espacios por saltos de línea
+    labels = [label.replace("_", "\n") for label in labels]  # Replace underscores with newlines for better readability
     ax.set_yticklabels([])  # Remove labels from radial axis
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels(labels, fontsize=18)  # Configurar los labels inicialmente
@@ -306,8 +155,14 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
         if "Convergence" in label.get_text():
             label.set_y(label.get_position()[1] - 0.3)  # Aumentar el pad para este label
         elif "Reward" in label.get_text():
-            label.set_y(label.get_position()[1] - 0.05) 
+            label.set_y(label.get_position()[1] - 0.15) 
         elif "Efficiency" in label.get_text():
+            label.set_y(label.get_position()[1] - 0.15)
+        elif "Completion" in label.get_text():
+            label.set_y(label.get_position()[1] - 0.4)
+        elif "Target" in label.get_text():
+            label.set_y(label.get_position()[1] - 0.2)
+        elif "Trajectory" in label.get_text():
             label.set_y(label.get_position()[1] - 0.2)
         else:
             label.set_y(label.get_position()[1] - 0.1)  # Mantener el pad por defecto
@@ -325,42 +180,6 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     # Show the plot
     plt.tight_layout()
     plt.show()
-
-
-
-def plot_convergence_analysis(rl_copp_obj, model_index, x_axis, convergence_threshold=0.02):
-    """
-    Grafica el análisis de convergencia con ambos métodos para comparación
-    """
-    # CSV File path to get data from
-    file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*.csv"
-    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "training_metrics", file_pattern))
-    
-    # Obtener resultados con ambos métodos
-    conv_point1, reward_fit1, x_raw, reward, reward_conv1 = utils.get_convergence_point(
-        files[0], x_axis, convergence_threshold
-    )
-    
-    # Crear la figura
-    plt.figure(figsize=(12, 8))
-    
-    # Datos originales
-    plt.scatter(x_raw, reward, s=10, alpha=0.5, label='Datos originales')
-    
-    # Ajuste con filtrado de transitorio
-    plt.plot(x_raw, reward_fit1, 'r-', linewidth=2, label='Modelo exponencial')
-    plt.axvline(conv_point1, color='r', linestyle='--', alpha=0.7, 
-                label=f'Convergencia: {conv_point1:.2f}')
-    
-    
-    # Etiquetas y leyenda
-    plt.xlabel(f'{x_axis}')
-    plt.ylabel('Recompensa promedio por episodio')
-    plt.title(f'Análisis de convergencia ({x_axis})')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.show()
-    
 
 
 def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Convergence Analysis"):
@@ -426,14 +245,14 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
 
 def moving_average(data, window_size=10):
     """
-    Aplica un filtro de media móvil para suavizar los datos.
+    Applies a moving average filter to smooth the data.
 
     Args:
-    - data (array-like): Datos originales a suavizar.
-    - window_size (int): Tamaño de la ventana para la media móvil.
+    - data (array): Original data to be smoothed.
+    - window_size (int): Window size for the moving average.
 
     Returns:
-    - array-like: Datos suavizados.
+    - array: Smoothed data.
     """
     return np.convolve(data, np.ones(window_size) / window_size, mode='valid')
 
@@ -489,9 +308,9 @@ def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
         # Plot the rewards for each model
         plt.plot(smoothed_steps, smoothed_data, label=f'Model {timestep[model_index]}s')
 
-        # Ajustar los ticks del eje X para que se muestren cada 50,000 pasos
-        xticks = np.arange(0, steps.max() + 100, 50000)  # Crear ticks desde 0 hasta el máximo de steps, con incrementos de 50,000
-        plt.xticks(xticks, fontsize=16)  # Aplicar los ticks al eje X
+        # Adjust x axis ticks to show every 50,000 steps
+        xticks = np.arange(0, steps.max() + 100, 50000)  
+        plt.xticks(xticks, fontsize=16)
 
 
     # Add labels and title
@@ -512,7 +331,7 @@ def plot_metrics_comparison (rl_copp_obj, metric, title = "Comparison"):
     plt.show()
 
 
-def plot_metrics_comparison_v2 (rl_copp_obj, metric, title = "Comparison"):
+def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"):
     """
     Plot the same metric of multiple models for comparing them (with mean curve and variability). 
     X axis will be the number of steps.
@@ -740,7 +559,8 @@ def plot_histogram (rl_copp_obj, model_index, mode, n_bins = 21, title = "Histog
         # CSV File path to get data from
         # Capture the desired files through a pattern
         file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_otherdata_*.csv"
-        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+        subfolder_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_testing"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
         # Read CSV
         df = pd.read_csv(files[0])
         data_keys = ['Angular speed', 'Linear speed']
@@ -799,9 +619,11 @@ def plot_bars(rl_copp_obj, model_index, mode, title="Target Zone Distribution: "
     """
     # Obtener la ruta del archivo CSV
     file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_test_*.csv"
-    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+    subfolder_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_testing"
+    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
     
     # Leer el CSV
+    print(files)
     df = pd.read_csv(files[0])
     
     # Verificar que exista la columna
@@ -925,8 +747,9 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
                 file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_test_*.csv"
 
             # Search for the files with that pattern inside testing_metrics directory
-            files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, 
-                                        "testing_metrics", file_pattern))
+            subfolder_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_idx}_*_testing"
+            files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
+
             
             # If there are no files
             if not files:
@@ -1144,7 +967,15 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         csv_folder (str): Carpeta donde buscar los CSV (por defecto, actual).
     """
     # Initialize variables
-    metrics = ["Time (s)", "Reward", "Target zone", "Crashes", "Linear speed", "Angular speed"]
+    metrics = [
+        "Time (s)", 
+        "Reward", 
+        "Target zone", 
+        "Crashes", 
+        "Linear speed", 
+        "Angular speed", 
+        "Distance traveled (m)"
+        ]
     combined_data = []
     model_action_times = []
 
@@ -1154,7 +985,8 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
 
     for model_id in model_ids:
         file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*_test_*.csv"
-        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+        subfolder_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*_testing"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
         if not files:
             logging.error(f"[!] File not found for model {model_id}")
             continue
@@ -1171,7 +1003,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
 
         # Load other data (Linear speed and Angular speed)
         file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*_otherdata_*.csv"
-        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
         if not files:
             logging.error(f"[!] Other data file not found for model {model_id}")
             continue
@@ -1196,12 +1028,12 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
             continue
 
     # Add a metric that doesn't appear on the csv file: reward detail, for plotting those cases with a positive reward, so user can observe reward more detailed
-    metrics.append("Reward detail (>=0)")
+    # metrics.append("Reward detail (>=0)")
 
     for metric in metrics:
     
         plt.figure(figsize=(10, 6))
-        if metric in ["Time (s)", "Reward", "Linear speed", "Angular speed"]:
+        if metric in ["Time (s)", "Reward", "Linear speed", "Angular speed", "Distance traveled (m)"]:
             sns.boxplot(data=full_df, x="Model", y=metric)
             if metric == "Linear speed":
                 metric = metric + " (m/s)"
@@ -1211,6 +1043,8 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
 
             elif metric == "Time (s)":
                 metric = "Average episode duration (s)"
+
+            
 
         elif metric == "Reward detail (>=0)": 
             df_reward_detail = full_df[full_df["Reward"] >= 0]
@@ -1277,7 +1111,8 @@ def plot_lat_curves(rl_copp_obj, model_index):
     # CSV File path to get data from
     # Capture the desired files through a pattern
     file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_otherdata_*.csv"
-    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", file_pattern))
+    subfolder_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_testing"
+    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
 
     # Read CSV
     df = pd.read_csv(files[0])
@@ -1643,7 +1478,7 @@ def main(args):
             logging.error(f"Please, introduce more than one model ID for creating a rewards-comparison graph. Models specified: {args.model_ids}")
         else:
             logging.info(f"Plotting rewards-comparison graph for comparing the models {args.model_ids}")
-            plot_metrics_comparison_v2(rl_copp, "rewards")
+            plot_metrics_comparison_with_band(rl_copp, "rewards")
         
     if "compare-episodes_length" in args.plot_types:
         plot_type_correct = True

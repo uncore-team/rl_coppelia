@@ -1852,13 +1852,13 @@ def process_spider_data (df, tolerance=0.05):
 
     # Separate the different metrics depending on how they work:
     negative_metrics = [col for col in labels if "actor_loss" in col.lower()]  # More negative values --> Better
-    min_metrics = [col for col in labels if any(metric in col.lower() for metric in ["time", "critic_loss", "ep_len_mean"])]    # Smaller values (closer to 0) --> Better
+    min_metrics = [col for col in labels if any(metric in col.lower() for metric in ["time", "critic_loss", "ep_len_mean", "distance"])]    # Smaller values (closer to 0) --> Better
     max_metrics = [col for col in labels if col not in negative_metrics + min_metrics]    # Bigger values --> Better
 
     # Normalize data
     df_normalized = df.copy()
 
-    # --- max_metrics = ['rollout/ep_rew_mean', 'Avg reward']
+    # --- max_metrics = ['rollout/ep_rew_mean', 'Avg reward', 'Target zone 3 (%)']
     min_values = df[max_metrics].min()
     max_values = df[max_metrics].max()
     ranges = max_values - min_values
@@ -1874,7 +1874,7 @@ def process_spider_data (df, tolerance=0.05):
         # Apply Min-Max Scaling with tolerance for negative metrics --> More negative values are better.
         df_normalized[negative_metrics] = tolerance + (1 - 2 * tolerance) * (max_values - df_normalized[negative_metrics]) / ranges
         
-    # --- min_metrics = ['train/critic_loss', 'rollout/ep_len_mean', 'Avg time reach target']
+    # --- min_metrics = ['train/critic_loss', 'rollout/ep_len_mean', 'Avg time reach target', 'Avg episode distance (m)]
     if min_metrics:
         min_values = df[min_metrics].min()
         max_values = df[min_metrics].max()

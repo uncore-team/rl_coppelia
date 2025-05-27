@@ -37,7 +37,7 @@ def sysCall_init():
     """
     Initialize the simulation.
     """
-    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_env, comms_port, paths, file_id, scene_to_load_folder, save_scene, save_traj, action_times
+    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_env, comms_port, paths, file_id, scene_to_load_folder, save_scene, save_traj, action_times, model_name
     sim = require('sim')    # type: ignore
 
     # Variables to get from agent_copp.py script
@@ -66,7 +66,7 @@ def sysCall_init():
 
 
 def sysCall_thread():
-    global sim, agent, robot_name, params_env, comms_port, sim_initialized, model_ids, paths, file_id, scene_to_load_folder, save_scene, save_traj, agent_created, action_times
+    global sim, agent, robot_name, params_env, comms_port, sim_initialized, model_ids, paths, file_id, scene_to_load_folder, save_scene, save_traj, agent_created, action_times, model_name
 
     if sim_initialized:
         logging.info("inside thread sim_initialized")
@@ -81,10 +81,17 @@ def sysCall_thread():
         agent.scene_to_load_folder = scene_to_load_folder
         agent.save_scene = save_scene
         agent.model_ids = model_ids
-        agent.save_traj_csv_folder = os.path.join(
-            agent.scene_configs_path,
-            agent.scene_to_load_folder
-        )
+
+        # Set the folder where the trajectories will be saved (inside testing_metrics folder)
+        if model_name is None:
+            agent.save_traj_csv_folder = ""
+        else:
+            agent.save_traj_csv_folder = os.path.join(
+                agent.save_trajs_path,
+                f"{model_name}_testing",
+                "trajs"
+            )
+
         agent.action_times = action_times
 
         if agent.save_scene:

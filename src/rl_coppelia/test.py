@@ -1,7 +1,10 @@
 import csv
+import glob
 import logging
 import os
 import time
+import numpy as np
+import pandas as pd
 import stable_baselines3
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
@@ -44,6 +47,63 @@ def _get_metrics_test(env):
     """
     env.reached_target_distance=env.unwrapped.observation[0]
     return env.initial_target_distance,env.reached_target_distance,env.time_elapsed,env.reward, env.count, env.collision_flag, env.max_achieved, env.target_zone
+
+
+def calculate_episode_distance(trajs_folder, index):
+        """
+        Calculate the total distance traveled in a specific episode from its trajectory file.
+
+        Args:
+            trajs_folder (str): Path to the folder containing trajectory CSV files.
+            index (int): Index of the episode to identify the corresponding trajectory file 
+                        (e.g., "trajectory_<index>.csv").
+
+        Returns:
+            float: Total distance traveled during the specified episode, calculated as the sum 
+                of distances between successive positions in the trajectory.
+        """
+        current_traj_file = os.path.join(trajs_folder, f"trajectory_{index+1}.csv")
+        df_traj = pd.read_csv(current_traj_file)
+        x_positions = df_traj["x"].values
+        y_positions = df_traj["y"].values
+        step_distances = np.sqrt(np.diff(x_positions)**2 + np.diff(y_positions)**2)
+        distance_traveled = np.sum(step_distances)
+
+        return distance_traveled
+
+
+
+def calculate_average_distances(trajs_folder):
+        """
+        Calculate the average distance traveled per episode from the trajectory files.
+
+        Args:
+            trajs_folder (str): Path to the folder containing trajectory CSV files.
+
+        Returns:
+            float: Average distance traveled across all episodes.
+        """
+        traj_files = glob.glob(os.path.join(trajs_folder, "*.csv"))
+        total_distance = 0.0
+        count = 0
+        if not traj_files:
+            logging.warning(f"No trajectory files found in {trajs_folder}. Returning 0.0 as average distance.")
+            return 0.0
+        logging.info(f"Calculating average distance from {len(traj_files)} trajectory files in {trajs_folder}.")
+        # Iterate through each trajectory file and calculate the distance
+        # between successive positions
+        for traj_file in traj_files:
+            df_traj = pd.read_csv(traj_file)
+            x_positions = df_traj["x"].values
+            y_positions = df_traj["y"].values
+
+            # Calculate the distance between successive positions
+            step_distances = np.sqrt(np.diff(x_positions)**2 + np.diff(y_positions)**2)
+            logging.info(f"Step distances for {traj_file}: {np.sum(step_distances):.2f} m")
+            total_distance += np.sum(step_distances)
+            count += 1
+
+        return total_distance / count if count > 0 else 0.0
 
 
 def main(args):
@@ -90,8 +150,18 @@ def main(args):
     # Load the model file using the same algorithm used for training that model
     model = ModelClass.load(rl_copp.args.model_name, rl_copp.env)
     
+
+    # Create a folder for the test results
+    testing_folder = os.path.join(testing_metrics_path, f"{model_name}_testing")
+    os.makedirs(testing_folder, exist_ok=True)
+
+    # Create a subfolder for trajectories
+    trajs_folder = os.path.join(testing_folder, "trajs")
+    os.makedirs(trajs_folder, exist_ok=True)
+
+
     # Get output csv path
-    experiment_csv_name, _, experiment_csv_path, otherdata_csv_path = utils.get_output_csv(model_name, testing_metrics_path, train_flag=False)
+    experiment_csv_name, _, experiment_csv_path, otherdata_csv_path = utils.get_output_csv(model_name, testing_folder, train_flag=False)
 
     # Save a timestamp of the beggining of the testing
     start_time = time.time()
@@ -105,6 +175,7 @@ def main(args):
     collision_list = []
     max_achieved_list = []
     target_zone_list = []
+    episode_distances_list = []
 
     # Get the number of iterations
     if rl_copp.args.iterations is not None:
@@ -124,7 +195,8 @@ def main(args):
                 'Terminated', 
                 'Truncated', 
                 'Crashes',
-                'Max limits achieved'
+                'Max limits achieved',
+                'Distance traveled (m)'
             ]
     otherdata_headers = ["Linear speed", "Angular speed", "LAT-Sim (s)", "LAT-Wall (s)"]
 
@@ -138,8 +210,11 @@ def main(args):
         for i in tqdm(range(n_iter), desc="Testing Episodes", unit="episode"):
             # The tqdm progress bar will automatically update
             
-            # Get the observation from the BS3 environment
-            observation, *_ = rl_copp.env.envs[0].reset()
+            # Reset the environment only for the first iteration, as it will be reseted 
+            # also after each iteration.
+            if i == 0:
+                # Get the first observation from the BS3 environment
+                observation, *_ = rl_copp.env.envs[0].reset()
             
             # Call init_metrics() for getting the initial time of the iteration
             # and the initial distance to the target
@@ -171,46 +246,57 @@ def main(args):
             
             # Call get_metrics(), so we will have the total time of the iteration
             # and the final distance to the target
+            
             init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved, target_zone = _get_metrics_test(rl_copp.env.envs[0].unwrapped)
             
             if terminated:
                 if reward_target > 0:
-                    logging.info(f"Episode terminated with reward {reward_target} inside target zone {target_zone}")
+                    logging.info(f"Episode terminated with reward {round(reward_target,2)} inside target zone {target_zone}")
                 else:
-                    logging.info(f"Episode terminated unsuccessfully with reward {reward_target}")
+                    logging.info(f"Episode terminated unsuccessfully with reward {round(reward_target,2)}")
             
+            # Reset the environment and get an observation
+            observation, *_ = rl_copp.env.envs[0].reset()
+
+            # Traj file should be saved now (it's saved during the reset of the agent), 
+            # so we can calculate the distance traveled in the episode
+            episode_distance = calculate_episode_distance(trajs_folder, i)
+
             # Save the metrics in the lists for using them later
             rewards_list.append(reward_target)
             time_reach_targets_list.append(time_reach_target)
             timesteps_counts_list.append(timesteps_count)
             terminated_list.append(terminated)
-            # truncated_list.append(truncated)
             collision_list.append(collision_flag)
             max_achieved_list.append(max_achieved)
             target_zone_list.append(target_zone)
+            episode_distances_list.append(episode_distance)
             
             # Write a new row with the metrics in the csv file
             metrics_writer.writerow([init_target_distance, final_target_distance, time_reach_target, reward_target,
-                                    target_zone, timesteps_count, terminated, truncated, collision_flag, max_achieved])
+                                    target_zone, timesteps_count, terminated, truncated, collision_flag, max_achieved, 
+                                    episode_distance])
             
     logging.info(f"Testing metrics has been saved in {experiment_csv_path}")
 
     # Save a timestamp of the ending of the testing
-    end_time = time.time()
+    end_time = time.time()  
 
+    time.sleep(0.5)  # Wait a bit to ensure all data is written before closing the files
+    
     # Calculate final metrics and save them inside a dic
     avg_reward = sum(rewards_list) / len(rewards_list) if rewards_list else 0
     avg_time_reach_target = sum(time_reach_targets_list) / len(time_reach_targets_list) if time_reach_targets_list else 0
     avg_timesteps_count = sum(timesteps_counts_list) / len(timesteps_counts_list) if timesteps_counts_list else 0
-    # percentage_terminated = (sum(terminated_list) / len(terminated_list)) * 100 if terminated_list else 0
-    # percentage_truncated = (sum(truncated_list) / len(truncated_list)) * 100 if truncated_list else 0
     percentage_max_achieved = (sum(max_achieved_list) / len(max_achieved_list)) * 100 if max_achieved_list else 0
     percentage_collisions = (sum(collision_list) / len(collision_list)) * 100 if collision_list else 0
     percentage_not_finished = percentage_max_achieved + percentage_collisions
     percentage_target_zone_1 = (target_zone_list.count(1) / len(target_zone_list)) * 100
     percentage_target_zone_2 = (target_zone_list.count(2) / len(target_zone_list)) * 100
     percentage_target_zone_3 = (target_zone_list.count(3) / len(target_zone_list)) * 100
-    
+    avg_distance_per_episode = sum(episode_distances_list) / len(episode_distances_list) if episode_distances_list else 0
+
+
     data_to_store ={
         "Algorithm" : rl_copp.params_test["sb3_algorithm"],
         "Avg reward": avg_reward,
@@ -224,7 +310,8 @@ def main(args):
         "Number of collisions": sum(collision_list),
         "Target zone 1 (%)": percentage_target_zone_1,
         "Target zone 2 (%)": percentage_target_zone_2,
-        "Target zone 3 (%)": percentage_target_zone_3
+        "Target zone 3 (%)": percentage_target_zone_3,
+        "Average distance per episode (m)": avg_distance_per_episode,
     }
 
     # Name of the records csv to store the final values of the testing experiment.
@@ -234,7 +321,7 @@ def main(args):
     utils.update_records_file (record_csv_name, experiment_csv_name, start_time, end_time, data_to_store)
 
     # Finish the testing process
-    rl_copp.env.envs[0].reset()
+    # rl_copp.env.envs[0].reset()
     rl_copp.env.envs[0].unwrapped._commstoagent.stepExpFinished()
     logging.info("Testing has finished")
     

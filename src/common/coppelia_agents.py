@@ -148,10 +148,8 @@ class CoppeliaAgent:
         # For saving trajectory
         self.save_traj = False
         self.model_ids = []
-        self.save_traj_csv_folder = os.path.join(
-            self.scene_configs_path,
-            self.scene_to_load_folder
-        )
+        self.save_trajs_path = self.paths["testing_metrics"]
+        self.save_traj_csv_folder = ""
         
     
     def get_observation(self):
@@ -240,7 +238,10 @@ class CoppeliaAgent:
         # Save trajectory at the beggining of the reset (last episode traj)
         if self.save_traj:
             if self.trajectory != []:
-                traj_output_path = os.path.join(self.save_traj_csv_folder, f"trajectory_{self.episode_idx}_{self.model_ids[self.episode_idx-1]}.csv")
+                if self.model_ids is not None and self.model_ids != []:
+                    traj_output_path = os.path.join(self.save_traj_csv_folder, f"trajectory_{self.episode_idx}_{self.model_ids[self.episode_idx-1]}.csv")
+                else:
+                    traj_output_path = os.path.join(self.save_traj_csv_folder, f"trajectory_{self.episode_idx}.csv")
                 with open(traj_output_path, mode='w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=["x", "y"])
                     writer.writeheader()
