@@ -130,31 +130,12 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     labels = [label.replace("_", "\n") for label in labels]  # Replace underscores with newlines for better readability
     ax.set_yticklabels([])  # Remove labels from radial axis
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, fontsize=18)  # Configurar los labels inicialmente
+    ax.set_xticklabels(labels, fontsize=18)  # Configure labels
 
-    # Añadir espacio entre los labels y el gráfico
-    # ax.tick_params(axis='x', pad=30)
-    # Rotar los labels manualmente
-    for label, angle in zip(ax.get_xticklabels(), angles[:-1]):
-        angle_deg = np.degrees(angle)
-        # # label.set_rotation(angle_deg)
-
-        # # Adjust alignment for each label
-        # if angle_deg == 0:
-        #     label.set_horizontalalignment('left')
-        # elif angle_deg == 90 and angle_deg == 270:
-        #     label.set_horizontalalignment('center')
-        # elif angle_deg == 180:
-        #     label.set_horizontalalignment('right')
-        # if angle_deg == 0 and angle_deg == 180:
-        #     ax.tick_params(axis='x', pad=90)
-        # else:
-        #     ax.tick_params(axis='x', pad=30)
-        label.set_rotation(angle_deg - 90)  # Rotar el label para alinearlo con el eje
-        label.set_verticalalignment('center')  # Centrar verticalmente las palabras
-        label.set_horizontalalignment('center')  # Centrar horizontalmente el texto
+    # Adjust the position of each label manually
+    for label in ax.get_xticklabels():
         if "Convergence" in label.get_text():
-            label.set_y(label.get_position()[1] - 0.3)  # Aumentar el pad para este label
+            label.set_y(label.get_position()[1] - 0.3)  
         elif "Reward" in label.get_text():
             label.set_y(label.get_position()[1] - 0.15) 
         elif "Efficiency" in label.get_text():
@@ -166,16 +147,16 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
         elif "Trajectory" in label.get_text():
             label.set_y(label.get_position()[1] - 0.2)
         else:
-            label.set_y(label.get_position()[1] - 0.1)  # Mantener el pad por defecto
+            label.set_y(label.get_position()[1] - 0.1)  
 
     # Set the radial axis limits
     ax.set_ylim(0, 1.1) 
     
-    ax.spines['polar'].set_visible(False)  # Asegurarse de que los spines sean visibles
+    ax.spines['polar'].set_visible(False) 
     ax.spines['polar'].set_bounds(0, 1) 
 
     # Add the leyend and title
-    ax.legend(loc='upper left', bbox_to_anchor=(1.1, 1.1), fontsize = 18)  # Ajustar posición de la leyenda
+    ax.legend(loc='upper left', bbox_to_anchor=(1.1, 1.1), fontsize = 18)  # Adjust legend
     # ax.set_title(title, size=16, color='black', y=1.1)
 
     # Show the plot
@@ -628,30 +609,30 @@ def plot_histogram (rl_copp_obj, model_index, mode, n_bins = 21, title = "Histog
         # Adjust x axis limits to ensure that all the range is visible
         plt.xlim(bin_min[i]-0.05, bin_max[i]+0.05)
 
-        # Shos the histogram
+        # Show the histogram
         plt.tight_layout()
         plt.show()
 
 
 def plot_bars(rl_copp_obj, model_index, mode, title="Target Zone Distribution: "):
     """
-    Crea un histograma para las target zones con valores discretos (1, 2, 3) en el eje X.
+    Creates a histogram for the target zones with discrete values (1, 2, 3) on the X-axis.
     
     Args:
-        rl_copp_obj: Objeto que contiene la información de rutas y argumentos
-        model_index: Índice del modelo a analizar
-        title: Título para el gráfico
+        rl_copp_obj: Object containing the path and argument information.
+        model_index: Index of the model to analyze.
+        title: Title for the chart.
     """
-    # Obtener la ruta del archivo CSV
+    # Get CSV path
     file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_test_*.csv"
     subfolder_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*_testing"
     files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
     
-    # Leer el CSV
+    # Read CSV file
     print(files)
     df = pd.read_csv(files[0])
     
-    # Verificar que exista la columna
+    # Verify that the DataFrame has the expected columns
     if mode == "target_zones":
         data_keys = ['Target zone']
         
@@ -677,7 +658,7 @@ def plot_bars(rl_copp_obj, model_index, mode, title="Target Zone Distribution: "
             percentage = percentages.get(j, 0)
             logging.info(f"Zone {j}: {count} episodes ({percentage:.2f}%)")
         
-        # Obtener el valor de timestep para el título
+        # Get timestep value of the selected model
         train_records_csv_name = os.path.join(rl_copp_obj.paths["training_metrics"], "train_records.csv")
         model_name = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}"
         timestep = utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")
@@ -704,11 +685,11 @@ def plot_bars(rl_copp_obj, model_index, mode, title="Target Zone Distribution: "
         plt.ylabel('Frequence (number of episodes)', fontsize=12)
         plt.grid(axis='y', alpha=0.3)
         
-        # Ajustar los límites del eje Y para dejar espacio para las etiquetas
+        # Adjust Y axis limits
         max_count = counts.max()
-        plt.ylim(0, max_count * 1.15)  # 15% de espacio adicional
+        plt.ylim(0, max_count * 1.15)  # 15% aditional space
         
-        # Mostrar el histograma
+        # Show the plot
         plt.tight_layout()
         plt.show()
 
@@ -838,7 +819,25 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
         
 
 def plot_scene_trajs(rl_copp_obj, folder_path):
+    """
+    Plots the scene and the trajectories followed by the robot during testing.
 
+    This function visualizes the scene elements (robot, obstacles, targets) and overlays 
+    the trajectories followed by the robot. It also highlights the final position of the 
+    robot and indicates whether it reached a target or not.
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Instance of the RLCoppeliaManager class for managing 
+            paths and arguments.
+        folder_path (str): Path to the folder containing the scene and trajectory CSV files.
+
+    Raises:
+        ValueError: If the scene file is not found or if there is more than one scene file 
+            in the folder.
+
+    Returns:
+        None
+    """
     # Search scene files
     scene_files = glob.glob(os.path.join(folder_path, "scene_*.csv"))
     if len(scene_files) != 1:
@@ -854,9 +853,8 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
     ax.set_ylim(2.5, -2.5)
     ax.set_aspect('equal')
 
-    # Configurar el tamaño de los números de la cuadrícula
-    ax.tick_params(axis='both', which='major', labelsize=18)  # Cambia 12 por el tamaño deseado
-
+    # Configure ticks size
+    ax.tick_params(axis='both', which='major', labelsize=18)  
 
     # Set title
     # ax.set_title("CoppeliaSim Scene Representation", fontsize=16, pad=20)
@@ -873,7 +871,7 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
             circle = plt.Circle((x, y), 0.35 / 2, color='black', label='Robot', zorder=4)
             ax.add_patch(circle)
 
-            # Indicate orientation
+            # Indicate orientation using a triangle
             if 'theta' in row:
                 theta = row['theta']
                 # Triangle dimensions
@@ -892,8 +890,9 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
         elif row['type'] == 'obstacle':
             circle = plt.Circle((x, y), 0.25 / 2, color='gray', label='Obstacle')
             ax.add_patch(circle)
+
         elif row['type'] == 'target':
-            # Dibujar la diana con 3 círculos concéntricos
+            # Plot the target rings
             target_rings = [(0.5 / 2, 'blue'), (0.25 / 2, 'red'), (0.03 / 2, 'yellow')]
             for radius, color in target_rings:
                 circle = plt.Circle((x, y), radius, color=color, fill=True, alpha=0.6)
@@ -960,6 +959,9 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
             print(f"Distance to closest target: {min_distance:.2f} m")
 
             # If distance is greater than 0.45 m, plot a cross to indicate a collision
+            # Actually collision happens when the robot is nearer than 45cm to the target, but
+            # here we are measuring the distance between the central point of the robot and the target, 
+            # so we need to increase the distance a bit
             if min_distance > 0.45:
                 ax.plot(final_x, final_y, marker='x', color=data["color"],
                         markersize=12, markeredgewidth=2, zorder=4)
@@ -970,9 +972,6 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
                 ax.plot(final_x, final_y, marker='o', color=data["color"],
                         markersize=4, markeredgewidth=2, zorder=4)
 
-
-
-    
     # Removed duplicated labels
     handles, labels = ax.get_legend_handles_labels()
     unique = dict(zip(labels, handles))
@@ -1114,7 +1113,6 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
                 metric = "Average episode duration (s)"
 
             
-
         elif metric == "Reward detail (>=0)": 
             df_reward_detail = full_df[full_df["Reward"] >= 0]
             sns.boxplot(data=df_reward_detail, x="Model", y="Reward")
@@ -1129,10 +1127,10 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
 
             zone_counts = df_target.groupby(["Model", "Target zone"]).size().reset_index(name='count')
 
-            # Obtenemos totales por modelo
+            # Get total counts for each model
             totals = df_target.groupby("Model").size().reset_index(name='total')
 
-            # Unimos ambos y calculamos el porcentaje
+            # Merge counts with totals
             zone_percents = pd.merge(zone_counts, totals, on="Model")
             zone_percents["Zone percentage (%)"] = 100 * zone_percents["count"] / zone_percents["total"]
 
@@ -1160,9 +1158,9 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         
         
         # plt.title(f"{metric} comparison", fontsize=16)
-        plt.xlabel("Model", fontsize=20, labelpad=10)  # Aumentar tamaño de label del eje X
-        plt.ylabel(metric, fontsize=20, labelpad=10)  # Aumentar tamaño de label del eje Y
-        plt.tick_params(axis='both', which='major', labelsize=20)  # Aumentar tamaño de los números del grid
+        plt.xlabel("Model", fontsize=20, labelpad=10)  
+        plt.ylabel(metric, fontsize=20, labelpad=10)  
+        plt.tick_params(axis='both', which='major', labelsize=20)  
 
         plt.grid(True)
         plt.tight_layout()
@@ -1210,8 +1208,23 @@ def plot_lat_curves(rl_copp_obj, model_index):
     plt.show()
 
 
-
 def interpolate_trajectory(x, y, num_points=100):
+    """
+    Interpolates a trajectory to generate a specified number of evenly spaced points.
+
+    This function takes the x and y coordinates of a trajectory and interpolates them 
+    to produce a new trajectory with a uniform distribution of points along its length.
+
+    Args:
+        x (array-like): X-coordinates of the original trajectory.
+        y (array-like): Y-coordinates of the original trajectory.
+        num_points (int): Number of points for the interpolated trajectory.
+
+    Returns:
+        tuple:
+            - interp_x (array): Interpolated X-coordinates.
+            - interp_y (array): Interpolated Y-coordinates.
+    """
     distances = np.sqrt(np.diff(x)**2 + np.diff(y)**2)
     cumulative_dist = np.insert(np.cumsum(distances), 0, 0)
     total_length = cumulative_dist[-1]
@@ -1271,7 +1284,23 @@ def draw_uncertainty_ellipse(ax, mean_x, mean_y, cov, color, nsig=1.0, alpha=0.3
 
 
 def test_normality_univariate(interpolated_xs, interpolated_ys):
-    """Performs Shapiro-Wilk test for each interpolated point across x and y"""
+    """
+    Performs a Shapiro-Wilk test for normality on each interpolated point across x and y coordinates.
+
+    This function evaluates whether the distribution of interpolated points at each position 
+    along the trajectory follows a normal distribution.
+
+    Args:
+        interpolated_xs (ndarray): 2D array where each row represents a trajectory's interpolated 
+            x-coordinates and each column corresponds to a specific point along the trajectory.
+        interpolated_ys (ndarray): 2D array where each row represents a trajectory's interpolated 
+            y-coordinates and each column corresponds to a specific point along the trajectory.
+
+    Returns:
+        tuple:
+            - p_values_x (list): List of p-values from the Shapiro-Wilk test for the x-coordinates.
+            - p_values_y (list): List of p-values from the Shapiro-Wilk test for the y-coordinates.
+    """
     num_points = interpolated_xs.shape[1]
     p_values_x = []
     p_values_y = []
@@ -1316,6 +1345,26 @@ def plot_kde_density(ax, xs, ys, cmap="Reds", levels=[0.5, 0.9]):
 
 
 def draw_robust_uncertainty_ellipse(ax, mean_x, mean_y, points, color='gray', alpha=0.3, zorder=1, nsig=2.0):
+    """
+    Draws a robust uncertainty ellipse based on a set of 2D points.
+
+    This function computes a robust covariance matrix using the Minimum Covariance Determinant (MCD) 
+    estimator and uses it to draw an uncertainty ellipse. If the robust estimation fails, it falls 
+    back to the classical covariance matrix.
+
+    Args:
+        ax (matplotlib.axes.Axes): The axes object to draw the ellipse on.
+        mean_x (float): X-coordinate of the ellipse center.
+        mean_y (float): Y-coordinate of the ellipse center.
+        points (ndarray): Array of shape (n_samples, 2) containing the 2D points.
+        color (str or tuple): Color of the ellipse.
+        alpha (float, optional): Transparency of the ellipse (0-1). Defaults to 0.3.
+        zorder (int, optional): Drawing order (higher means drawn on top). Defaults to 1.
+        nsig (float, optional): Number of standard deviations for the ellipse size. Defaults to 2.0.
+
+    Returns:
+        None: The ellipse is added to the provided axes object.
+    """
     if len(points) < 2:
         return
 
@@ -1492,8 +1541,45 @@ def plot_scene_trajs_with_variability(rl_copp_obj, folder_path, num_points=100, 
 
 def main(args):
     """
-    Executes multiple testing runs. This method allows the user to test multiple models just by indicating
-    a list of model ids.
+    Main function for generating various plots to analyze and compare the performance of trained models.
+
+    This function processes user-specified plot types and generates corresponding visualizations 
+    for analyzing the performance of reinforcement learning models trained in CoppeliaSim. 
+    It supports multiple plot types, including convergence analysis, reward comparisons, 
+    trajectory visualizations, and more.
+
+    Args:
+        args (Namespace): Parsed command-line arguments containing the following attributes:
+            - robot_name (str): Name of the robot being analyzed.
+            - model_ids (list): List of model IDs to analyze or compare.
+            - plot_types (list): List of plot types to generate (e.g., "spider", "convergence-walltime").
+            - scene_to_load_folder (str, optional): Path to the folder containing scene configurations 
+              (required for trajectory plots).
+            - verbose (int, optional): Verbosity level for logging.
+
+    Supported Plot Types:
+        - "spider": Generates a spider chart comparing multiple models across various metrics.
+        - "convergence-walltime": Plots reward convergence vs. wall time for each model.
+        - "convergence-steps": Plots reward convergence vs. steps for each model.
+        - "convergence-simtime": Plots reward convergence vs. simulation time for each model.
+        - "convergence-episodes": Plots reward convergence vs. episodes for each model.
+        - "convergence-all": Generates all convergence plots for each model.
+        - "compare-rewards": Compares rewards across multiple models with smoothing and variability bands.
+        - "compare-episodes_length": Compares episode lengths across multiple models.
+        - "compare-convergences": Compares convergence points across multiple models.
+        - "histogram_speeds": Plots histograms for linear and angular speeds for each model.
+        - "grouped_bar_speeds": Creates grouped bar charts for linear and angular speeds across models.
+        - "grouped_bar_targets": Creates grouped bar charts for target zone frequencies across models.
+        - "bar_target_zones": Plots bar charts for target zone distributions for each model.
+        - "plot_scene_trajs": Visualizes the scene and trajectories followed by the robot during testing.
+        - "plot_boxplots": Generates boxplots for various metrics across models.
+        - "lat_curves": Plots LAT-sim and LAT-wall curves for each model.
+
+    Raises:
+        SystemExit: If a required argument (e.g., scene_to_load_folder for trajectory plots) is missing.
+
+    Returns:
+        None
     """
 
     rl_copp = RLCoppeliaManager(args)
