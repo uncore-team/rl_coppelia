@@ -24,6 +24,8 @@ learning tasks using CoppeliaSim as the simulation environment.
 import inspect
 import logging
 import os
+
+import psutil
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
@@ -106,6 +108,13 @@ class RLCoppeliaManager():
         # based ion the mean reward obtained during training.
         self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
 
+        # Get current opened processes in the PC so later we can know which ones are the Coppelia new ones.
+        self.before_pids = {proc.pid: proc.name() for proc in psutil.process_iter(['pid', 'name'])}
+
+        # Create coppelia current scene process ID and also terminal ID
+        self.current_coppelia_pid = None
+        self.terminal_pid = None
+
 
     def _get_calling_script(self):
         """
@@ -157,3 +166,4 @@ class RLCoppeliaManager():
         Check if Coppelia simulations are running and, if so, stops every instance.
         """
         utils.stop_coppelia_simulation(self)
+        utils.close_coppelia_sim(self.current_coppelia_pid, self.terminal_pid)

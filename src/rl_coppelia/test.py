@@ -258,9 +258,12 @@ def main(args):
             # Reset the environment and get an observation
             observation, *_ = rl_copp.env.envs[0].reset()
 
-            # Traj file should be saved now (it's saved during the reset of the agent), 
-            # so we can calculate the distance traveled in the episode
-            episode_distance = calculate_episode_distance(trajs_folder, i)
+            if rl_copp.args.save_traj:
+                # Traj file should be saved now (it's saved during the reset of the agent), 
+                # so we can calculate the distance traveled in the episode
+                episode_distance = calculate_episode_distance(trajs_folder, i)
+            else:
+                episode_distance = 0.0
 
             # Save the metrics in the lists for using them later
             rewards_list.append(reward_target)

@@ -8,6 +8,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -116,6 +117,21 @@ def logging_config(logs_dir, side_name, robot_name, experiment_id, log_level = l
         handlers=log_handlers
     )
 
+
+def logging_config_gui(log_level = logging.DEBUG):
+    """
+    Configures the logging system for the gui app.
+
+    Args:
+        log_level (optional): Logging level (default is logging.INFO).
+    """
+
+
+    logging.basicConfig(
+        level=log_level,  
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers= [logging.StreamHandler()]
+    )
 
 
 # ------------------------------------------
@@ -778,7 +794,11 @@ def start_coppelia_and_simulation(rl_copp_obj):
         if not is_coppelia_running():
             logging.info("Initiating CoppeliaSim...")
             if rl_copp_obj.args.no_gui:
-                process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe, "-h"])
+                process = subprocess.Popen([
+                    "gnome-terminal", 
+                    f"--title={rl_copp_obj.terminal_id}",
+                    "--",
+                    coppelia_exe, "-h"])
             else:
                 process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe])
         else:
@@ -787,22 +807,33 @@ def start_coppelia_and_simulation(rl_copp_obj):
         logging.info("Initiating a new CoppeliaSim instance...")
         zmq_port = find_next_free_port(zmq_port)    
         ws_port = find_next_free_port(ws_port)
+
+        # Save the PID of the terminal
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        rl_copp_obj.terminal_pid = f"CoppeliaTerminal_{timestamp}"
+
         if rl_copp_obj.args.no_gui:
-            # process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe, "-h", f"-GzmqRemoteApi.rpcPort={zmq_port}", f"-GwsRemoteApi.port={ws_port}"])
             process = subprocess.Popen([
                 "gnome-terminal", 
+                f"--title={rl_copp_obj.terminal_pid}",  # Title for identifying it
                 "--", 
                 "bash", "-c", 
                 f"{coppelia_exe} -h -GzmqRemoteApi.rpcPort={zmq_port} -GwsRemoteApi.port={ws_port}; exec bash"
             ])
+        
         else:
             # process = subprocess.Popen(["gnome-terminal", "--",coppelia_exe, f"-GzmqRemoteApi.rpcPort={zmq_port}", f"-GwsRemoteApi.port={ws_port}"])
             process = subprocess.Popen([
                 "gnome-terminal", 
+                f"--title={rl_copp_obj.terminal_pid}",
                 "--", 
                 "bash", "-c", 
                 f"{coppelia_exe} -GzmqRemoteApi.rpcPort={zmq_port} -GwsRemoteApi.port={ws_port}; exec bash"
             ])
+        
+
+    # Get the id of the new process.
+    rl_copp_obj.current_coppelia_pid = get_new_coppelia_pid(rl_copp_obj.before_pids)
             
     # Wait for CoppeliaSim connection
     try:
@@ -1215,6 +1246,35 @@ def auto_create_param_files(base_params_file, output_dir, start_value, end_value
     return param_files
 
 
+def close_coppelia_sim(current_pid, terminal_pid):
+    logging.info(f"Closing CoppeliaSim processes with PIDs: {current_pid} and terminal {terminal_pid}")
+    # Close the terminal
+    try:
+        # result = subprocess.run(['pkill', '-f', f'gnome-terminal.*{terminal_pid}'], check=False)
+        result = subprocess.run(['wmctrl', '-c', terminal_pid], check=False)
+
+
+        if result.returncode == 0:
+            logging.info(f"Terminal {terminal_pid} closed successfully.")
+        else:
+            logging.warning(f"No process found with title {terminal_pid}")
+    except:
+        if current_pid:
+            try:
+                for pid in current_pid:
+                    time.sleep(0.5)
+                    coppelia_proc = psutil.Process(pid)
+                    logging.info(f"Closing CoppeliaSim (PID {pid})...")
+                    coppelia_proc.terminate()
+                    coppelia_proc.wait(timeout=10)
+                    logging.info(f"CoppeliaSim (PID {pid}) closed.")
+            except psutil.NoSuchProcess:
+                logging.warning("CoppeliaSim process didn't exist anymore when trying to close it.")
+            except psutil.TimeoutExpired:
+                logging.warning("CoppeliaSim didn't answer, forcing ending.")
+                coppelia_proc.kill()
+
+
 def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
     """
     Runs the training process using a specified parameter file. This function executes the training
@@ -1248,7 +1308,7 @@ def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
     if mode == "sampling_at":
         fixed_actime = os.path.basename(file).split('_')[-1].replace('.json', '')
 
-    # Ger current opened processes in the PC so later we can know which ones are the Coppelia new ones.
+    # Get current opened processes in the PC so later we can know which ones are the Coppelia new ones.
     before_pids = {proc.pid: proc.name() for proc in psutil.process_iter(['pid', 'name'])}
 
     # Record the start time of the training
