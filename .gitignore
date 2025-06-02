@@ -9,3 +9,5 @@ src/rl_coppelia.egg-info/
 dependencies/rl_spin_decoupler
 tmp/*
 
+requirements (copy).txt
+requirements.txt.save
