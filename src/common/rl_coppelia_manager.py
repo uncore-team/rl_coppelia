@@ -20,13 +20,14 @@ The class includes functions for handling paths, logging, environment setup, and
 for loading parameters and saving the model and results. This class is the core component for managing reinforcement 
 learning tasks using CoppeliaSim as the simulation environment.
 """
-
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import inspect
 import logging
-import os
 
 import psutil
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 from common import utils

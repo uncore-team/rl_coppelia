@@ -1,7 +1,8 @@
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" # Suppress TensorFlow warnings
 import csv
 import glob
 import logging
-import os
 import time
 import numpy as np
 import pandas as pd

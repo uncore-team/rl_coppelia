@@ -188,6 +188,41 @@ def find_next_free_port(start_port = 49054):
 # -------------------------------------------------------------
 
 
+def get_or_create_csv_path(base_model_name, metrics_folder, get_output_csv_func):
+    """
+    Get the path to an existing CSV file matching the model name, or create a new one.
+
+    This function searches the specified metrics folder for a CSV file that matches the base model name.
+    If one is found, it returns the path to the existing file. Otherwise, it generates a new file path
+    using the provided CSV generation function.
+
+    Args:
+        base_model_name (str): The base name of the model (e.g., "turtleBot_model_15").
+        metrics_folder (str): The folder where training/testing metric CSVs are stored.
+        get_output_csv (Callable): Function used to generate a new CSV path if none is found.
+
+    Returns:
+        Tuple[str, bool]: A tuple containing:
+            - experiment_csv_path (str): The path to the existing or newly created CSV.
+            - csv_exists (bool): True if an existing CSV was found, False if a new one was created.
+    """
+    # Search for an existing CSV file matching the base model name
+    pattern = os.path.join(metrics_folder, f"{base_model_name}*.csv")
+    csv_matches = glob.glob(pattern)
+
+    if csv_matches:
+        experiment_csv_path = csv_matches[0]
+        logging.info(f"Found existing CSV file: {experiment_csv_path}")
+        csv_exists = True
+    else:
+        _, experiment_csv_path = get_output_csv(base_model_name, metrics_folder)
+        logging.info(f"No existing CSV found. New file will be created at: {experiment_csv_path}")
+        csv_exists = False
+
+    return experiment_csv_path, csv_exists
+
+
+
 def get_fixed_actimes(rl_copp_obj):
     """
     Given a list of model IDs, read their corresponding JSON parameter files
@@ -223,6 +258,27 @@ def get_fixed_actimes(rl_copp_obj):
         actime_values.append(fixed_actime)
 
     return actime_values
+
+
+def get_next_retrain_subfolder(log_dir):
+    """
+    Find the next available retrain subfolder name inside a given log directory.
+
+    Args:
+        log_dir (str): Path to the base TensorBoard log directory (e.g., tf_logs/turtleBot_tflogs_340).
+
+    Returns:
+        str: A subfolder name like "retrain_0", "retrain_1", etc.
+    """
+    existing = os.listdir(log_dir) if os.path.exists(log_dir) else []
+    retrain_indices = [
+        int(re.search(r"retrain_(\d+)", name).group(1))
+        for name in existing
+        if re.match(r"retrain_\d+", name)
+    ]
+    next_index = max(retrain_indices, default=-1) + 1
+    return f"retrain_{next_index}"
+
 
 
 def get_model_names_and_paths(rl_copp_obj):
@@ -469,19 +525,18 @@ def get_next_retrain_model_name(models_dir, base_model_name):
         str: Next model file name without extension 
              (e.g. "turtleBot_model_306_last_retrain2").
     """
-    pattern = re.compile(rf"^{re.escape(base_model_name)}_retrain(\d+)$")
-    max_retrain = 0
+    pattern = re.compile(rf"^{re.escape(base_model_name)}_retrain_(\d+)$")
+    max_index = -1
 
     for filename in os.listdir(models_dir):
         name, _ = os.path.splitext(filename)
         match = pattern.match(name)
         if match:
             retrain_idx = int(match.group(1))
-            if retrain_idx > max_retrain:
-                max_retrain = retrain_idx
+            max_index = max(max_index, retrain_idx)
 
-    next_index = max_retrain + 1
-    return f"{base_model_name}_retrain{next_index}"
+    next_index = max_index + 1
+    return f"{base_model_name}_retrain_{next_index}"
 
 
 
@@ -1014,31 +1069,46 @@ def update_records_file (file_path, exp_name, start_time, end_time, other_metric
         other_metrics (dic): Dictionary with other metrics that the user wants to record.
     """
     # Create the dictionary with the data to be saved in the CSV file
-    data = {
+    new_duration = (end_time - start_time) / 3600
+    new_end_time_str = datetime.datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
+    new_data = {
         "Exp_id": exp_name,
         "Start_time": datetime.datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S'),
-        "End_time": datetime.datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S'),
-        "Duration": (end_time - start_time)/3600,  # Training hours
-        **other_metrics  # Add final metrics (loss, etc.)
+        "End_time": new_end_time_str,
+        "Duration": new_duration,
+        **other_metrics
     }
 
-    # Create the header if the file does not exist
-    # Define the CSV header
-    headers = list(data.keys())
+    rows = []
+    updated = False
 
-    try:
-        with open(file_path, mode="r") as f:
-            pass
-    except FileNotFoundError:
-        with open(file_path, mode="w", newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)  # Write the headers
+    # Read existing data (if file exists)
+    if os.path.exists(file_path):
+        with open(file_path, mode="r", newline='') as f:
+            reader = csv.DictReader(f)
+            headers = reader.fieldnames if reader.fieldnames else list(new_data.keys())
 
-    # Write data
-    with open(file_path, mode="a", newline='') as f:
-        values = [data.get(header, '') for header in headers]
-        writer = csv.writer(f)
-        writer.writerow(values)
+            for row in reader:
+                if row["Exp_id"] == exp_name:
+                    # Update this row
+                    old_duration = float(row.get("Duration", 0.0))
+                    new_data["Start_time"] = row["Start_time"]  # Keep original
+                    new_data["Duration"] = old_duration + new_duration
+                    rows.append({**row, **new_data})
+                    updated = True
+                else:
+                    rows.append(row)
+    else:
+        headers = list(new_data.keys())
+
+    if not updated:
+        rows.append(new_data)
+
+    # Write updated CSV
+    with open(file_path, mode="w", newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
 
     logging.info(f"Record file has been updated in {file_path}")
 
@@ -1502,91 +1572,96 @@ class StopTrainingOnKeypress(BaseCallback): # TODO Check: confirmation message a
         return not self.stop_training
 
 
-def parse_tensorboard_logs(log_dir, 
-                           output_csv, 
-                           metrics = ["train/loss", "train/actor_loss", "train/critic_loss", "train/entropy_loss", 
-                                      "train/value_loss", "train/approx_kl", "train/clip_fraction", "train/explained_variance",
-                                      "train/ent_coef", "train/ent_coef_loss", "train/learning_rate",
-                                      "rollout/ep_len_mean", "rollout/ep_rew_mean", "custom/sim_time", "custom/episodes",
-                                    ]):
+
+
+
+def parse_tensorboard_logs(
+    log_dir,
+    output_csv,
+    metrics=[
+        "train/loss", "train/actor_loss", "train/critic_loss", "train/entropy_loss",
+        "train/value_loss", "train/approx_kl", "train/clip_fraction", "train/explained_variance",
+        "train/ent_coef", "train/ent_coef_loss", "train/learning_rate",
+        "rollout/ep_len_mean", "rollout/ep_rew_mean", "custom/sim_time", "custom/episodes"
+    ]
+):
     """
-    Private method that reads TensorBoard logs from a given directory and saves selected metrics into a CSV file.
-    
-    The function assumes that the metrics are logged simultaneously so that each metric has the same
-    number of events. Each row in the CSV will contain the step, wall_time, and the value for each metric.
-    
+    Parse TensorBoard logs from a directory and its subdirectories, saving the selected metrics to a CSV file.
+
+    The function searches recursively for TensorBoard event files and processes them in temporal order. All metric
+    data is combined and written to the same output CSV. The last row returned corresponds to the final training entry.
+
     Args:
-        log_dir (str): Directory where TensorBoard event files are located.
-        output_csv (str): Path to the CSV file to create (default: "metrics.csv").
-        metrics (list of str): List of metric names to extract (default: ["loss", "reward", "entropy", etc.]).
-    
+        log_dir (str): Root directory containing TensorBoard logs (including subfolders like retrain_0/).
+        output_csv (str): Path to the CSV file to create or append to.
+        metrics (List[str], optional): List of scalar tags to extract. Defaults to common training tags.
+
     Returns:
-        tuple: A tuple (rows, last_row_dict) where 'rows' is a list of rows with the extracted metrics
-               and 'last_row_dict' is a dictionary corresponding to the last row.
+        Tuple[List[dict], dict]: A list of all rows written, and the last row dictionary.
     """
-    try:
-        # Initialize the events accumulator
-        ea = event_accumulator.EventAccumulator(log_dir)
-        ea.Reload()  # Load all the events
-    except Exception as e:
-        logging.error(f"An error happened while trying to initialize the events accumulator. Error: {e}")
-        return []
 
-    # Get the avaliable scalar tags
-    available_tags = ea.Tags().get("scalars", [])
-    logging.debug(f"Avaliable tags: {available_tags}")
+    def find_event_dirs(base_dir):
+        """Recursively find directories containing TensorBoard event files."""
+        event_dirs = []
+        for root, _, files in os.walk(base_dir):
+            if any("tfevents" in f for f in files):
+                event_dirs.append(root)
+        return sorted(event_dirs)  # Sorted alphabetically (and by depth)
 
-    # Filtrate the avaliable metrics
-    metrics_present = [m for m in metrics if m in available_tags]
+    all_rows = []
+    last_row_dict = {}
 
-    # If none of our metrics is in the list of avaliable tags, then we indicate it and finish the function
-    if not metrics_present:     # TODO Fix this: right now, if there are no logs in tensorboard, the csv of this training will be not saved
-        logging.error("None of the specified metrics are available in the logs.")
-        return []
+    event_dirs = find_event_dirs(log_dir)
+    if not event_dirs:
+        logging.error(f"No TensorBoard event files found under {log_dir}")
+        return [], {}
 
-    # Define the CSV header
+    for subdir in event_dirs:
+        try:
+            ea = event_accumulator.EventAccumulator(subdir)
+            ea.Reload()
+        except Exception as e:
+            logging.warning(f"Skipping {subdir}: failed to load events. Error: {e}")
+            continue
+
+        available_tags = ea.Tags().get("scalars", [])
+        metrics_present = [m for m in metrics if m in available_tags]
+        if not metrics_present:
+            logging.info(f"No relevant metrics found in {subdir}. Skipping.")
+            continue
+
+        events_dict = {m: ea.Scalars(m) for m in metrics_present}
+        n_events = min(len(v) for v in events_dict.values())
+
+        for i in range(n_events):
+            step = events_dict[metrics_present[0]][i].step
+            wall_time = events_dict[metrics_present[0]][i].wall_time
+            formatted_time = datetime.datetime.fromtimestamp(wall_time).strftime("%Y-%m-%d_%H-%M-%S")
+
+            row = {"Step": step, "Step timestamp": formatted_time}
+            for m in metrics:
+                row[m] = events_dict[m][i].value if m in events_dict else ''
+            all_rows.append((wall_time, row))  # Store with timestamp for later sorting
+
+    if not all_rows:
+        logging.error("No valid event data found in any log directory.")
+        return [], {}
+
+    # Sort rows by wall_time to ensure chronological order
+    all_rows.sort(key=lambda x: x[0])
+    sorted_rows = [r for _, r in all_rows]
+    last_row_dict = sorted_rows[-1]
+
+    # Write to CSV
     headers = ["Step", "Step timestamp"] + metrics
-
-    # Get the events' list for each metric
-    events_dict = {}
-    for metric in metrics:
-        if metric in available_tags:
-            events_dict[metric] = ea.Scalars(metric)
-
-    # Determine the number of events to iterate over.
-    # For safety, we take the minimum number of events among the available metrics.
-    n_events = min(len(events) for events in events_dict.values())
-
-    rows = []
-    for i in range(n_events):
-        # Get the step and wall_time from the first metric.
-        step = events_dict[metrics_present[0]][i].step
-        wall_time = events_dict[metrics_present[0]][i].wall_time
-        formatted_wall_time = datetime.datetime.fromtimestamp(wall_time).strftime("%Y-%m-%d_%H-%M-%S")
-
-        row_dict = {"Step": step, "Step timestamp": formatted_wall_time}
-
-        for metric in metrics:
-            if metric in events_dict:
-                row_dict[metric] = events_dict[metric][i].value
-            else:
-                row_dict[metric] = ''  # Fill with '' if there is no value
-        rows.append(row_dict)
-
-
-    # Write data into the CSV file using DictWriter to guarantee column mapping
-    with open(output_csv, mode="w", newline="") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=headers)
+    with open(output_csv, mode="w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(sorted_rows)
 
-    logging.info(f"Metrics saved to {output_csv}")
+    logging.info(f"Combined TensorBoard metrics written to {output_csv}")
 
-    # Create a dictionary for the last row using header as keys. Only the second key-value of the dictionary is removed,
-    # because it's the timestamp that we are already getting with 'end_time = _get_current_time()' in train_mode() function.    
-    last_row_dict = rows[-1] if rows else {}
-    
-    return rows, last_row_dict
+    return sorted_rows, last_row_dict
 
 
 class SaveOnBestTrainingRewardCallback(BaseCallback):
@@ -1800,27 +1875,47 @@ class CustomMetricsCallback(BaseCallback):
         self.episodes_offset = episodes_offset
         self.sim_time_offset = sim_time_offset
 
+        # Get base env
+        self.base_env = get_base_env(self.rl_copp.env)
+        logging.info(f"N_episodes: {self.base_env.n_ep}, ATO: {self.base_env.ato}")
+
 
     def _on_step(self) -> bool:
         # Log in TensorBoard
         
-        # Get base env
-        base_env = get_base_env(self.rl_copp.env)
+        
 
         # Get current episode number
-        new_episode_count = base_env.n_ep
+        new_episode_count = self.base_env.n_ep
+
+        # if self.episode_count == 0 and self.num_timesteps == 0:
+        #     self.logger.record("custom/episodes", current_episode, self.num_timesteps)
+        #     self.logger.record("custom/sim_time", current_sim_time, self.num_timesteps)
+        #     self.logger.dump(self.num_timesteps)
 
         # If the episode count has increased, increment it
         if self.episode_count != new_episode_count:
             self.episode_count = new_episode_count
 
-        current_episode = base_env.n_ep+float(self.episodes_offset)
-        current_sim_time = base_env.ato+float(self.sim_time_offset)
+        current_episode = self.base_env.n_ep+float(self.episodes_offset)
+        current_sim_time = self.base_env.ato+float(self.sim_time_offset)
+
+        logging.info(f"Current episode: {current_episode}, Current sim time: {current_sim_time}")
+
+        if self.logger is None:
+            raise RuntimeError("Logger not initialized CustomMetricsCallback")
 
         if self.episode_count != self.last_logged_episode and self.episode_count % self.eval_freq == 0:
+            # Logging into tensorboard
+            logging.info(f"Logging custom metrics at timestep {self.num_timesteps}")
             self.logger.record("custom/sim_time", current_sim_time, self.num_timesteps)
+            logging.info(f"Logging sim time: {current_sim_time} at timestep {self.num_timesteps}")
             # self.logger.record("custom/agent_time", base_env.total_time_elapsed, self.num_timesteps)
             self.logger.record("custom/episodes", current_episode, self.num_timesteps)
+            logging.info(f"Logging episodes: {current_episode} at timestep {self.num_timesteps}")
+
+
+            # Log the current episode count and simulation time
             self.logger.dump(self.num_timesteps)
 
             # Update the last logged episode to avoid redundant logging

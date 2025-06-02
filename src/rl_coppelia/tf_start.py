@@ -5,35 +5,98 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
+
+import requests
 from common.rl_coppelia_manager import RLCoppeliaManager
+import tensorboard
+from tensorboard import program
 
 
-# Start TensorBoard and capture its output
+def wait_for_tensorboard(url, timeout=30):
+    print("Waiting for TensorBoard to be ready...", end="", flush=True)
+    for _ in range(timeout * 2):  # Check every 0.5s for 'timeout' seconds
+        try:
+            r = requests.get(url)
+            if r.status_code == 200 and "TensorBoard" in r.text:
+                print(" ready.")
+                return True
+        except requests.exceptions.ConnectionError:
+            pass
+        print(".", end="", flush=True)
+        time.sleep(0.5)
+    print("\n[ERROR] TensorBoard did not become ready in time.")
+    return False
+
+def wait_for_scalars_ready(base_url, timeout=30):
+    print("Waiting for scalars to become available...", end="", flush=True)
+    endpoint = f"{base_url}/data/plugin/scalars/tags"
+    for _ in range(timeout * 2):
+        try:
+            r = requests.get(endpoint)
+            if r.status_code == 200 and r.json():  # must return non-empty JSON
+                print(" ready.")
+                return True
+        except Exception:
+            pass
+        print(".", end="", flush=True)
+        time.sleep(0.5)
+    print("\n[ERROR] Scalars not found in expected time.")
+    return False
+
 def run_tensorboard(curr_tf_logs_path):
-    command = ["tensorboard", "--logdir", curr_tf_logs_path, "--port", "0"]  # Use port 0 to auto-select port
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    command = [
+        "tensorboard",
+        "--logdir", curr_tf_logs_path,
+        "--port=0",
+        "--load_fast=false"
+    ]
 
-    # Capture the output line by line
-    for line in process.stderr:
-        logging.debug(line.strip())
-        if "http://localhost" in line:
-            # Extract the port from the line
-            port_match = re.search(r'http://localhost:(\d+)', line)
-            if port_match:
-                port = port_match.group(1)
-                url = f'http://localhost:{port}'
-                logging.info(f"TensorBoard is running on port {port}. Opening the browser.")
-                webbrowser.open(url)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    url = None
+    while True:
+        line = process.stdout.readline()
+        if not line:
+            break
+        print(line.strip())
+
+        if "http://localhost" in line and url is None:
+            match = re.search(r'(http://localhost:\d+)', line)
+            if match:
+                url = match.group(1)
+
+                # Wait until scalars are visible
+                if wait_for_scalars_ready(url):
+                    webbrowser.open(url)
                 break
 
-    logging.info("Press 'q' and Enter to stop TensorBoard.")
-    input()  # Wait for the user to press Enter to stop
+    print("Press 'q' and Enter to stop TensorBoard.")
+    if input().lower().strip() == "q":
+        process.terminate()
+        process.wait()
 
-    process.send_signal(signal.SIGINT)  # Gracefully stop TensorBoard
+    # # Capture the output line by line
+    # for line in process.stderr:
+    #     logging.info(line.strip())
+    #     if "http://localhost" in line:
+    #         # Extract the port from the line
+    #         port_match = re.search(r'http://localhost:(\d+)', line)
+    #         if port_match:
+    #             port = port_match.group(1)
+    #             url = f'http://localhost:{port}'
+    #             logging.info(f"TensorBoard is running on port {port}. Opening the browser.")
+    #             webbrowser.open(url)
+    #             break
+
+    # logging.info("Press 'q' and Enter to stop TensorBoard.")
+    # input()  # Wait for the user to press Enter to stop
+
+    # process.send_signal(signal.SIGINT)  # Gracefully stop TensorBoard
     
-    # Wait for the process to finish (don't block forever)
-    process.communicate()
+    # # Wait for the process to finish (don't block forever)
+    # process.communicate()
 
 
 def main(args):
@@ -53,11 +116,17 @@ def main(args):
 
     # Extract robot name and model id from the model_name
     try:
-        parts = rl_copp.args.model_name.split('_')
-        robot_name = parts[0]  # The first part is the robot name
-        model_id = parts[2]  # The third part is the model ID
-    except IndexError:
-        logging.error(f"Error: Invalid model name format. Expected format is '<robot_name>_model_<id>', but got '{rl_copp.args.model_name}'")
+        # Extrae solo el nombre base (sin subcarpetas ni sufijos)
+        base_name = os.path.basename(rl_copp.args.model_name)
+        # Usa regex para extraer robot_name y model_id
+        match = re.match(r"([a-zA-Z0-9]+)_model_(\d+)", base_name)
+        if match:
+            robot_name = match.group(1)
+            model_id = match.group(2)
+        else:
+            raise ValueError
+    except Exception:
+        logging.error(f"Error: Invalid model name format. Expected format like '<robot_name>_model_<id>' or '<robot_name>_model_<id>_last', but got '{rl_copp.args.model_name}'")
         return
     
     # Define path

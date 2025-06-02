@@ -1,5 +1,6 @@
-import argparse
 import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" # Suppress TensorFlow warnings
+import argparse
 import argcomplete
 from argcomplete.completers import FilesCompleter
 from rl_coppelia import auto_testing, auto_training, plot, sat_training, test_scene, train, test, save, tf_start, retrain

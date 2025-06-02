@@ -164,7 +164,7 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     plt.show()
 
 
-def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Convergence Analysis"):
+def plot_convergence (rl_copp_obj, model_index, x_axis, show_plots = True, title = "Reward Convergence Analysis"):
     """
     Plots a graph with the reward vs Wall time, steps, episodes or simulatino time, and shows the point at which the reward stabilizes
     (converges) based on a first-order fit.
@@ -173,6 +173,8 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
     - rl_copp_object (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
     - title (str): The title of the chart.
     - x_axis (str): Name of the x_axis.
+
+
     """
     # CSV File path to get data from
     file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*.csv"
@@ -181,7 +183,7 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
 
     # Calculate the convergence time
     convergence_point, reward_fit, x_axis_values, reward, reward_at_convergence = utils.get_convergence_point (files[0], x_axis, convergence_threshold=0.02)
-    logging.info(f"Reward at convergence point: {reward_at_convergence}")
+    logging.info(f"Convergence point: {round(convergence_point,2)} - Reward: {round(reward_at_convergence,2)}")
 
     # Get the training csv path for later getting the action times from there
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
@@ -191,38 +193,41 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, title = "Reward Converge
 
 
     # Plot results
-    plt.figure(figsize=(8, 5))
-    # plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
-    # plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
-    if x_axis == "WallTime":
-        plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
-        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
-        plt.xlabel('Wall time (hours)')
-        plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Wall Time: {convergence_point:.2f}h')
-        title = title + ' vs Wall Time'
-    elif x_axis == "Steps":
-        plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
-        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
-        plt.xlabel('Steps')
-        plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Steps: {convergence_point:.2f}')
-        title = title +  ' vs Steps'
-    elif x_axis == "SimTime":
-        plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
-        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
-        plt.xlabel('Simulation time (hours)')
-        plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Sim Time: {convergence_point:.2f}h')
-        title = title + ' vs Sim Time'
-    elif x_axis == "Episodes":
-        plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
-        plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
-        plt.xlabel('Episodes')
-        plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Episodes: {convergence_point:.2f}')
-        title = title +  ' vs Episodes'
-    plt.ylabel('Reward')
-    plt.legend()
-    plt.title(title + ": Model " + str(timestep) + "s")
-    plt.grid()
-    plt.show()
+    if show_plots:
+        plt.figure(figsize=(8, 5))
+        # plt.plot(x_axis_values, reward, label='Original Data', marker='o', linestyle='')
+        # plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='--')
+        if x_axis == "WallTime":
+            plt.plot(x_axis_values, reward, label='Original Data', linestyle='-')
+            plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
+            plt.xlabel('Wall time (hours)')
+            plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Wall Time: {convergence_point:.2f}h')
+            title = title + ' vs Wall Time'
+        elif x_axis == "Steps":
+            plt.plot(x_axis_values, reward, label='Original Data', linestyle='-')
+            plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
+            plt.xlabel('Steps')
+            plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Steps: {convergence_point:.2f}')
+            title = title +  ' vs Steps'
+        elif x_axis == "SimTime":
+            plt.plot(x_axis_values, reward, label='Original Data', linestyle='-')
+            plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
+            plt.xlabel('Simulation time (hours)')
+            plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Sim Time: {convergence_point:.2f}h')
+            title = title + ' vs Sim Time'
+        elif x_axis == "Episodes":
+            plt.plot(x_axis_values, reward, label='Original Data', linestyle='-')
+            plt.plot(x_axis_values, reward_fit, label='Exponential Fit', linestyle='-')
+            plt.xlabel('Episodes')
+            plt.axvline(convergence_point, color='r', linestyle=':', label=f'Convergence Episodes: {convergence_point:.2f}')
+            title = title +  ' vs Episodes'
+        plt.ylabel('Reward')
+        plt.legend()
+        plt.title(title + ": Model " + str(timestep) + "s")
+        plt.grid()
+        plt.show()
+
+    return convergence_point
     
 
 def moving_average(data, window_size=10):
@@ -323,8 +328,8 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
     - title (str): The title of the chart.
     """
     # Define some control variables
-    smooth_flag = True  # Set to True to apply smoothing
-    smooth_level = 15  # Define the window size for smoothing
+    smooth_flag = False  # Set to True to apply smoothing
+    smooth_level = 40  # Define the window size for smoothing
     band_flag = False  # Set to True to plot the variability band
 
 
@@ -333,21 +338,24 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
     train_records_csv_name = os.path.join(training_metrics_path, "train_records.csv")  # Name of the train records csv to search the algorithm used
     timestep_to_data = {}
 
+    
+
     for model_index in range(len(rl_copp_obj.args.model_ids)):
 
         # CSV File path to get data from
         file_pattern = f"{rl_copp_obj.args.robot_name}_model_{rl_copp_obj.args.model_ids[model_index]}_*.csv"
         files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "training_metrics", file_pattern))
-
+        logging.info(f"Files detected {files}, model index {model_index}, model ID {rl_copp_obj.args.model_ids[model_index]}")
+        
         # Read the CSV file
         try:
             df = pd.read_csv(files[0])
         except Exception as e:
-            logging.error(f"File not found for model {model_name}. Skipping this model.")   
+            logging.error(f"File not found for model {model_name}. Skipping this model. Error: {e}")   
             del rl_copp_obj.args.model_ids[model_index]
             continue
 
-        print(f"Processing model {model_index} with ID {rl_copp_obj.args.model_ids[model_index]}")
+        # print(f"Processing model {model_index} with ID {rl_copp_obj.args.model_ids[model_index]}")
         # Get timestep of the selected model
         model_name = rl_copp_obj.args.robot_name + "_model_" + str(rl_copp_obj.args.model_ids[model_index])
         timestep = utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")
@@ -378,10 +386,13 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
         if timestep not in timestep_to_data:
             timestep_to_data[timestep] = []
         timestep_to_data[timestep].append((smoothed_steps, smoothed_data))
+    
+    # Create a color map for the models
+    color_map = plt.cm.get_cmap("tab20", len(timestep_to_data))
 
     # Plot the mean curve and variability band for each timestep group
-    plt.figure(figsize=(10, 6))
-    for timestep, data_list in timestep_to_data.items():
+    plt.figure(figsize=(13, 10))
+    for model_index, (timestep, data_list) in enumerate(timestep_to_data.items()):
         # Align data by step and calculate mean and std
         all_steps = [d[0] for d in data_list]
         all_data = [d[1] for d in data_list]
@@ -405,7 +416,8 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
         std_data = np.std(interpolated_data, axis=0)
 
         # Plot mean curve
-        plt.plot(common_steps, mean_data, label=f"Model {timestep}s", linewidth=2)
+        color = color_map(model_index)  # Assign a unique color for each model
+        plt.plot(common_steps, mean_data, label=f"Model {timestep}s", color=color, linewidth=2)
 
 
         # Plot variability band if enabled
@@ -415,19 +427,21 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
                 common_steps,
                 mean_data - std_data,
                 mean_data + std_data,
+                color=color,
                 alpha=0.3,
                 edgecolor="black",
                 linewidth=0.5
             )
 
     # Add labels and title
+    
     plt.xlabel('Steps', fontsize=20, labelpad=12)
     plt.ylabel(metric.capitalize(), fontsize=20, labelpad=12)
     # Adjust x axis ticks to show every 50,000 steps
-    xticks = np.arange(0, steps.max() + 100, 50000) 
+    xticks = np.arange(0, steps.max() + 2000, 50000) 
     plt.xticks(xticks, fontsize=16)
     plt.tick_params(axis='both', which='major', labelsize=16)
-    plt.legend(fontsize=18)
+    plt.legend(fontsize=18, ncol = 2)
     plt.grid(True)
     plt.tight_layout()
     plt.show()
@@ -629,7 +643,6 @@ def plot_bars(rl_copp_obj, model_index, mode, title="Target Zone Distribution: "
     files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
     
     # Read CSV file
-    print(files)
     df = pd.read_csv(files[0])
     
     # Verify that the DataFrame has the expected columns
@@ -956,7 +969,7 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
             min_distance = min(distances)
             # closest_target = targets[np.argmin(distances)]
             
-            print(f"Distance to closest target: {min_distance:.2f} m")
+            logging.info(f"Distance to closest target: {min_distance:.2f} m")
 
             # If distance is greater than 0.45 m, plot a cross to indicate a collision
             # Actually collision happens when the robot is nearer than 45cm to the target, but
@@ -1002,6 +1015,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
     combined_data = []
     model_action_times = []
     timestep_values = []
+    x_label_name = "Timestep (s)"
 
     # Get trainings' csv name for searching action times later
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
@@ -1037,7 +1051,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         for file in files:
             df = pd.read_csv(file)
             df["Model"] = str(timestep) + "s"
-            print(f"Adding data for model {model_id} with action time {timestep}s")
+            logging.info(f"Adding data for model {model_id} with action time {timestep}s")
             df["Timestep"] = timestep
             # Add Linear speed and Angular speed to the combined data
             df["Angular speed"] = df["Angular speed"].abs()  # Use absolute value for Angular speed
@@ -1057,7 +1071,6 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
 
     # Add a metric that doesn't appear on the csv file: reward detail, for plotting those cases with a positive reward, so user can observe reward more detailed
     # metrics.append("Reward detail (>=0)")
-    print(df["Timestep"])
 
     for metric in metrics:
     
@@ -1072,11 +1085,19 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
 
             # Calculate the median for each model in the right order
             medians = []
+            means = []
             timesteps_ordered = []
             for model in unique_models:
-                median_val = full_df[full_df["Model"] == model][metric].median()
+                model_data = full_df[full_df["Model"] == model][metric]
+                median_val = model_data.median()
+                mean_val = model_data.mean()
                 medians.append(median_val)
+                means.append(mean_val)
                 timesteps_ordered.append(float(model.replace('s', '')))
+                
+                # Log the mean and median for the current model
+                logging.info(f"Model {model}: Mean Reward = {mean_val:.2f}, Median Reward = {median_val:.2f}")
+    
             
             # Create the spline using the x positions and medians
             if len(x_positions) > 2:  # We need at least 3 points for a spline
@@ -1117,10 +1138,9 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
             df_reward_detail = full_df[full_df["Reward"] >= 0]
             sns.boxplot(data=df_reward_detail, x="Model", y="Reward")
 
-
         elif metric == "Target zone":
-            # Filtrate episodes with target zone == 0, as those have suffered an early ending or a collision
-            df_target = full_df[full_df[metric] != 0]
+            # Filtrate episodes with target zone == Nan
+            df_target = full_df[full_df[metric].notna() & (full_df[metric] != 0)]
             
             # Assure that the models maintein the order
             model_order = [str(mid) for mid in model_action_times]
@@ -1128,14 +1148,29 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
             zone_counts = df_target.groupby(["Model", "Target zone"]).size().reset_index(name='count')
 
             # Get total counts for each model
-            totals = df_target.groupby("Model").size().reset_index(name='total')
+            
+            totals = full_df[full_df[metric].notna()].groupby("Model").size().reset_index(name='total')
+
+            # df_target.to_csv("df_target.csv", index=False)
 
             # Merge counts with totals
             zone_percents = pd.merge(zone_counts, totals, on="Model")
             zone_percents["Zone percentage (%)"] = 100 * zone_percents["count"] / zone_percents["total"]
 
-            sns.barplot(data=zone_percents, x="Target zone", y="Zone percentage (%)", hue="Model", hue_order=model_order)
-            plt.legend(title="Model")
+            tab20 = plt.cm.get_cmap('tab20', 20)
+            set3 = plt.cm.get_cmap('Set3', 12)
+            colors = [tab20(i) for i in range(20)] + [set3(i) for i in range(4)]
+
+            sns.barplot(
+                data=zone_percents, 
+                x="Target zone", 
+                y="Zone percentage (%)", 
+                hue="Model", 
+                hue_order=model_order,
+                palette=colors[:len(model_order)]                
+                )
+            plt.legend(title="Model", ncol = 2, fontsize=14, loc='upper left', bbox_to_anchor=(1, 1))
+            
 
         elif metric == "Crashes":
             # Ensure that the values of collisions are booleans
@@ -1152,13 +1187,27 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
                 .rename("Collision Rate")
                 .reset_index()
             )
-
+            metric = "Collision Rate (%)"
             sns.barplot(data=crash_pct, x="Model", y="Collision Rate")
             plt.ylabel("Episodes with collision (%)")
         
         
         # plt.title(f"{metric} comparison", fontsize=16)
-        plt.xlabel("Model", fontsize=20, labelpad=10)  
+        # Obtener las etiquetas actuales de los ticks
+        current_ticks = plt.xticks()[0]  # Obtiene las posiciones de los ticks
+        current_labels = plt.xticks()[1]  # Obtiene las etiquetas de los ticks
+
+        # Eliminar la 's' de las etiquetas
+        new_labels = [label.get_text().replace('s', '') for label in current_labels]
+
+        # Establecer las nuevas etiquetas
+        plt.xticks(current_ticks, new_labels, fontsize=16)
+        if metric == "Target zone":
+            x_label_name = "Target zone"
+            metric = "Probability (%)"
+        else:
+            x_label_name = "Timestep (s)"
+        plt.xlabel(x_label_name, fontsize=20, labelpad=10)  
         plt.ylabel(metric, fontsize=20, labelpad=10)  
         plt.tick_params(axis='both', which='major', labelsize=20)  
 
@@ -1539,6 +1588,260 @@ def plot_scene_trajs_with_variability(rl_copp_obj, folder_path, num_points=100, 
     plt.show()
 
 
+def plot_reward_graphs_from_csv(rl_copp_obj, model):
+    """
+    Plots reward graphs from a CSV file containing training metrics.
+    - Reward vs Steps
+    - Reward vs Time (s)
+    - Reward vs Episodes
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class to access paths and arguments.
+        model (int): Model ID to specify which CSV file to read.
+        
+    The CSV must contain the following columns: 'Reward', 'Steps', 'Time (s)', 'Episodes'.
+    """
+
+
+    csv_path = os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, f"{rl_copp_obj.args.model_ids[model]}.csv")
+    
+    # Check if file exists
+    if not os.path.isfile(csv_path):
+        csv_path = csv_path.replace(".csv", "ms.csv")
+        if not os.path.isfile(csv_path):
+            logging.error(f"[Error] File not found: {csv_path}")
+            return
+
+    # Load the CSV into a DataFrame
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as e:
+        logging.error(f"[Error] Failed to read CSV: {e}")
+        return
+
+    # Check required columns
+    required_columns = ["Reward", "Steps", "Time (s)", "Episodes"]
+    if not all(col in df.columns for col in required_columns):
+        logging.error(f"[Error] CSV must contain the following columns: {required_columns}")
+        return
+
+    # Plot 1: Reward vs Steps
+    plt.figure(figsize=(8, 5))
+    plt.plot(df["Steps"], df["Reward"], linestyle='-', color='blue')
+    # plt.title("Reward vs Steps")
+    plt.xlabel("Steps")
+    plt.ylabel("Reward")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # Plot 2: Reward vs Time (s)
+    plt.figure(figsize=(8, 5))
+    plt.plot(df["Time (s)"], df["Reward"], linestyle='-', color='green')
+    # plt.title("Reward vs Time (s)")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Reward")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # Plot 3: Reward vs Episodes
+    plt.figure(figsize=(8, 5))
+    plt.plot(df["Episodes"], df["Reward"], linestyle='-', color='orange')
+    # plt.title("Reward vs Episodes")
+    plt.xlabel("Episodes")
+    plt.ylabel("Reward")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_reward_comparison_from_csv(rl_copp_obj, x_axis_name="Steps"):
+    """
+    Plots a comparison of rewards vs steps for multiple models from their respective CSV files.
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class to access paths and arguments.
+        x_axis_name (str): Name of the x axis to plot. Options are "Steps", "Time (s)", "Episodes". Default is "Steps".
+    """
+    # Initialize the plot
+    plt.figure(figsize=(10, 6))
+
+    # Iterate over each model ID
+    for model in rl_copp_obj.args.model_ids:
+        # Construct the CSV file path
+        csv_path = os.path.join(
+            rl_copp_obj.base_path,
+            "robots",
+            rl_copp_obj.args.robot_name,
+            "Training",
+            f"{model}.csv"
+        )
+
+        # Check if the file exists
+        if not os.path.isfile(csv_path):
+            csv_path = csv_path.replace(".csv", "ms.csv")
+            if not os.path.isfile(csv_path):
+                logging.error(f"[Error] File not found: {csv_path}")
+                continue
+
+        # Load the CSV into a DataFrame
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception as e:
+            logging.error(f"[Error] Failed to read CSV for model {model}: {e}")
+            continue
+
+        # Check required columns
+        required_columns = ["Reward", x_axis_name]
+        if not all(col in df.columns for col in required_columns):
+            logging.error(f"[Error] CSV for model {model} must contain the following columns: {required_columns}")
+            continue
+
+        # Plot Reward vs Steps for the current model
+        plt.plot(
+            df[x_axis_name],
+            df["Reward"],
+            label=f"Model {model}ms",
+            linestyle='-'
+        )
+
+    # Add labels, legend, and grid
+    plt.xlabel(x_axis_name, fontsize=18, labelpad=10)
+    plt.ylabel("Reward", fontsize=18, labelpad=10)
+    # plt.title("Reward Comparison Across Models", fontsize=16)
+    plt.legend(fontsize=16)
+    plt.tick_params(axis='both', which='major', labelsize=16)
+    plt.grid(True)
+
+    # Show the plot
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_boxplots_from_csv(rl_copp_obj):
+    """
+    Plots boxplots for comparing Reward and Time (s) across multiple models.
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class to access paths and arguments.
+    """
+    # Initialize a list to store data for all models
+    combined_data = []
+
+    # Iterate over each model ID
+    for model in rl_copp_obj.args.model_ids:
+        # Construct the CSV file path
+        csv_path = os.path.join(
+            rl_copp_obj.base_path,
+            "robots",
+            rl_copp_obj.args.robot_name,
+            "Explotation",
+            f"{model}.csv"
+        )
+
+        # Check if the file exists
+        if not os.path.isfile(csv_path):
+            csv_path = csv_path.replace(".csv", "ms.csv")
+            if not os.path.isfile(csv_path):
+                logging.error(f"[Error] File not found: {csv_path}")
+                continue
+
+        # Load the CSV into a DataFrame
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception as e:
+            logging.error(f"[Error] Failed to read CSV for model {model}: {e}")
+            continue
+
+        # Check required columns
+        required_columns = ["Reward", "Time (s)"]
+        if not all(col in df.columns for col in required_columns):
+            logging.error(f"[Error] CSV for model {model} must contain the following columns: {required_columns}")
+            continue
+
+        # Add a column to identify the model
+        df["Model"] = f"Model {model}"
+
+        # Append the DataFrame to the combined data list
+        combined_data.append(df)
+
+    # Combine all data into a single DataFrame
+    if not combined_data:
+        logging.error("[Error] No valid data found for the specified models.")
+        return
+
+    combined_df = pd.concat(combined_data, ignore_index=True)
+
+    # Define flier properties for outliers in boxplots
+    flierprops = dict(marker='+', color='red', markersize=8, markeredgecolor='red')
+
+    # Plot boxplot for Reward
+    plt.figure(figsize=(8, 9))
+    sns.boxplot(data=combined_df, x="Model", y="Reward", flierprops=flierprops)
+    plt.xlabel("Models", fontsize=18)
+    plt.ylabel("Reward", fontsize=18)
+    # plt.title("Reward Comparison Across Models", fontsize=16)
+    plt.tick_params(axis='both', which='major', labelsize=16, pad=10)
+    plt.grid(axis="y", linestyle="--", alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+
+    # Plot boxplot for Time (s)
+    plt.figure(figsize=(8, 9))
+    sns.boxplot(data=combined_df, x="Model", y="Time (s)", flierprops=flierprops)
+    plt.xlabel("Models", fontsize=18, labelpad=10)
+    plt.ylabel("Time (ms)", fontsize=18, labelpad=10)
+    # plt.title("Time (ms) Comparison Across Models", fontsize=16)
+    plt.tick_params(axis='both', which='major', labelsize=16)
+    plt.grid(axis="y", linestyle="--", alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+
+def plot_convergence_points_comparison(rl_copp_obj, convergence_points_by_model):
+    """
+    Plots four line charts (one for each convergence metric: WallTime, Steps, SimTime, Episodes),
+    each showing the convergence value for all models.
+
+    Args:
+        rl_copp_obj: RLCoppeliaManager instance.
+        convergence_points_by_model (dict): Dict of {model_id: [walltime, steps, simtime, episodes]}.
+    """
+    if not convergence_points_by_model:
+        logging.warning("No convergence values to plot.")
+        return
+
+    metrics = ["WallTime", "Steps", "SimTime", "Episodes"]
+    model_ids = list(convergence_points_by_model.keys())
+    values = np.array([convergence_points_by_model[mid] for mid in model_ids])
+
+    # Get action times for x-tick labels
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path, "train_records.csv")
+    action_times = []
+    for mid in model_ids:
+        model_name = rl_copp_obj.args.robot_name + "_model_" + str(mid)
+        timestep = utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")
+        action_times.append(float(timestep))
+
+    # Sort by action_times for better visualization
+    sorted_indices = np.argsort(action_times)
+    action_times = np.array(action_times)[sorted_indices]
+    values = values[sorted_indices]
+    model_ids = np.array(model_ids)[sorted_indices]
+
+    for i, metric in enumerate(metrics):
+        plt.figure(figsize=(8, 6))
+        plt.plot(action_times, values[:, i], marker='o', linewidth=2)
+        plt.xlabel("Timestep (s)", fontsize=16)
+        plt.ylabel(f"Convergence {metric}", fontsize=16)
+        # plt.title(f"Convergence {metric} vs Timestep", fontsize=18)
+        plt.xticks(action_times, [f"{t}" for t in action_times], fontsize=14)
+        plt.yticks(fontsize=14)
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+
 def main(args):
     """
     Main function for generating various plots to analyze and compare the performance of trained models.
@@ -1621,11 +1924,23 @@ def main(args):
 
     if "convergence-all" in args.plot_types:
         plot_type_correct = True
+        # Global dictionary to hold convergence points for all models
+        convergence_points_by_model = {}
+
         for model in range(len(args.model_ids)):
             logging.info(f"Plotting all the convergence graphs for model {args.model_ids[model]}")
             convergence_modes = ["WallTime", "Steps", "SimTime", "Episodes"]
-            for i in range(len(convergence_modes)):
-                plot_convergence(rl_copp, model, convergence_modes[i])
+            convergence_points = []
+
+            # Collect convergence values per mode
+            for conv_mode in convergence_modes:
+                conv_x = plot_convergence(rl_copp, model, conv_mode, show_plots = False)
+                convergence_points.append(conv_x)
+            
+            # Save in the dictionary
+            convergence_points_by_model[args.model_ids[model]] = convergence_points
+
+        plot_convergence_points_comparison(rl_copp, convergence_points_by_model)
 
     if "compare-rewards" in args.plot_types:
         plot_type_correct = True
@@ -1693,12 +2008,19 @@ def main(args):
         for model in range(len(args.model_ids)):
             logging.info(f"Plotting curves for LAT-sim and LAT-wall for model {args.model_ids[model]}")
             plot_lat_curves(rl_copp, model)
+
+    if "plot_from_csv" in args.plot_types:
+        plot_type_correct = True
+        # for model in range(len(args.model_ids)):
+        #     logging.info(f"Plotting reward graphs from csv {args.model_ids[model]}.csv for robot {args.robot_name}")
+        #     plot_reward_graphs_from_csv(rl_copp, model)
+        if len(args.model_ids)>1:
+            logging.info(f"Plotting a reward comparison graph for models {args.model_ids} for robot {args.robot_name}")
+            # plot_reward_comparison_from_csv(rl_copp, "Steps")
+            # plot_reward_comparison_from_csv(rl_copp, "Time (s)")
+            plot_reward_comparison_from_csv(rl_copp, "Episodes")
+            plot_boxplots_from_csv(rl_copp)
     
     
     if not plot_type_correct:
         logging.error(f"Please check plot types: {args.plot_types}")
-
-
-
-
-    

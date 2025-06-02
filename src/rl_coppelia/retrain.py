@@ -60,8 +60,8 @@ def main(args):
     # Load the model file
     model = ModelClass.load(
         model_path_to_load, 
-        env=rl_copp.env
-        # tensorboard_log=train_log_file_path
+        env=rl_copp.env,
+        tensorboard_log=train_log_file_path
         )
 
     # Set lat timestep number from last training
@@ -117,39 +117,79 @@ def main(args):
     start_time = time.time()
 
     # Start the training
+    # Construct tb_log_name
+    # tb_log_name = f"{rl_copp.args.robot_name}_tflogs"
+    tb_log_name = f"{rl_copp.args.robot_name}_tflogs_{rl_copp.file_id}_retrain"
+    logging.info(f"Tensorboard log name: {tb_log_name}")
     try:
         if rl_copp.args.verbose ==0:
             model.learn(
                 total_timesteps=rl_copp.args.retrain_steps,
                 reset_num_timesteps=False,
                 callback=[checkpoint_callback, stop_callback, eval_train_callback, metrics_callback], 
-                tb_log_name=f"{rl_copp.args.robot_name}_tflogs"
+                tb_log_name=tb_log_name
                 )
         else:
             model.learn(
                 total_timesteps=rl_copp.args.retrain_steps,
                 reset_num_timesteps=False,
                 callback=[checkpoint_callback, stop_callback, eval_train_callback, metrics_callback], 
-                tb_log_name=f"{rl_copp.args.robot_name}_tflogs",
+                tb_log_name=tb_log_name,
                 progress_bar = True
                 )
     except Exception as e:
         traceback.print_exc()
         logging.critical(f"There was an error during the learning process. Exception: {e}")
 
+    
+
     # Save a timestamp of the ending of the training
     end_time = time.time()
 
+    logging.info(f"Training completed in {end_time - start_time:.2f} seconds.")
+    logging.info("Waiting 10s for logger to flush...")
+    time.sleep(10)  # Allow logger buffer to flush
+
     # Save the final trained model    
     model_name_to_save = utils.get_next_retrain_model_name(models_path,model_name)
+
+    base_env = utils.get_base_env(rl_copp.env)
+    current_episode = base_env.n_ep+float(last_episode)
+    current_sim_time = base_env.ato+float(last_sim_time)
+    
+
+    try:
+        model.logger.record("custom/episodes", current_episode)
+        model.logger.record("custom/sim_time", current_sim_time)
+
+        time.sleep(2)
+        model.logger.dump(model.num_timesteps)
+        logging.info(f"Final custom metrics logged: episode={current_episode}, sim_time={current_sim_time}.")
+    except Exception as e:
+        logging.warning(f"Logger dump failed: {e}")
     model.save(os.path.join(to_save_model_path, model_name_to_save))
     logging.info(f"Model {model_name_to_save} is saved within {to_save_model_path}")
 
     # Parse metrics from tensorboard log and save them in a csv file. Also, we get the metrics of the last row of that csv file
-    _, experiment_csv_path = utils.get_output_csv(model_name, training_metrics_path)
-    logging.info(f"Path to save csv training: {experiment_csv_path}")
+    # _last removed from model name
+
+    experiment_csv_path, csv_exists = utils.get_or_create_csv_path(
+        base_model_name=base_model_name,
+        metrics_folder=training_metrics_path,
+        get_output_csv_func=utils.get_output_csv
+    )
+    if csv_exists:
+        logging.info(f"CSV file {experiment_csv_path} already exists. It will be updated with the new data.")
+    else:
+        logging.info(f"CSV file {experiment_csv_path} does not exist. It will be created with the new data.")
+
     try:
-        _, last_metric_row = utils.parse_tensorboard_logs(train_log_file_path, output_csv=experiment_csv_path)
+        # Parse the tensorboard logs and save them in a csv file
+        # If the csv file already exists, it will be updated with the new data
+        _, last_metric_row = utils.parse_tensorboard_logs(
+            log_dir=train_log_file_path,
+            output_csv=experiment_csv_path
+        )
     except:
         last_metric_row = {}
         logging.error("There was an exception while trying to get data from tensorboard log.")
@@ -160,7 +200,7 @@ def main(args):
 
     # Get time to converge using the data from the training csv
     try:
-        convergence_time, _, _, _ = utils.get_convergence_point (experiment_csv_path, " Time", convergence_threshold=0.05)
+        convergence_time, _, _, _ = utils.get_convergence_point (experiment_csv_path, "SimTime", convergence_threshold=0.05)
     except Exception as e:
         logging.error(f"No convergence time was found. Exception: {e}")
         convergence_time = 0.0
@@ -175,7 +215,7 @@ def main(args):
     }
 
     # Update the train record.
-    utils.update_records_file (records_csv_name, model_name, start_time, end_time, data_to_store)
+    utils.update_records_file (records_csv_name, base_model_name, start_time, end_time, data_to_store)
     
     # Send a FINISH command to the agent
     rl_copp.env.envs[0].unwrapped._commstoagent.stepExpFinished()   # Unwrapped is needed so we can access the attributes of our wrapped env 
