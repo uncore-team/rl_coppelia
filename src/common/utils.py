@@ -1395,8 +1395,9 @@ def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
         cmd = ["rl_coppelia", "test"]
 
         # Add the model name to the command
-        model_name = args.robot_name + "_model_" + str(model_id)
-        cmd.extend(["--model_name", model_name])
+        model_folder = args.robot_name + "_model_" + str(model_id)
+        model_name = model_folder + "_last"
+        cmd.extend(["--model_name", f"{model_folder}/{model_name}"])
 
     # Add the flag to suppress the GUI if specified
     if no_gui:
@@ -1410,11 +1411,15 @@ def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
     if args.robot_name:
         cmd.extend(["--robot_name", args.robot_name])
 
-    # Add the robot name
+    # Add the iterations
+    if args.iterations:
+        cmd.extend(["--iterations", args.iterations])
+
+    # Add the verbose mode
     if args.verbose:
         cmd.extend(["--verbose", str(args.verbose)])
 
-    logging.info(f"CMD: {cmd}")
+    logging.info(f"CMD to be executed: {cmd}")
 
     try:
         # Run the command as a subprocess and capture the output

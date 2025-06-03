@@ -77,11 +77,12 @@ def main():
     auto_training_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
 
     auto_testing_parser = subparsers.add_parser("auto_testing", help="Auto testing of several models, saving the results of the comparision.")
+    auto_testing_parser.add_argument("--session_name", type=str, help="Name for the testing session.", required=True)
     auto_testing_parser.add_argument("--robot_name", type=str, help="Name for the robot.", required=True)
     auto_testing_parser.add_argument("--model_ids", type=int, nargs='+', help="List with numerical IDs of the different models to be tested.", required=True)
-    auto_testing_parser.add_argument("--iterations", type=int, help="Number of iterations for the test.", default=50, required=True)
+    auto_testing_parser.add_argument("--iterations", type=int, help="Number of iterations for the test.", default=200, required=True)
     auto_testing_parser.add_argument("--dis_parallel_mode", action="store_true", help="True if the user wants to disable the parallel execution and run the different trainings sequentially.", default=False)
-    auto_testing_parser.add_argument("--max_workers", type=int, help="Number of parallel processes if '--parallel_mode' flag is activated", default=3)
+    auto_testing_parser.add_argument("--max_workers", type=int, help="Number of parallel processes if '--parallel_mode' flag is activated", default=5)
     auto_testing_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
 
     sampling_at_parser = subparsers.add_parser("sat_training", help="Auto training of several models modifying just the fixed action time from an unique configuration file.")
@@ -111,6 +112,7 @@ def main():
     plot_parser.add_argument("--plot_types", type=str, nargs='+', help="List of types of plots that the user wants to create.", 
                              default=["spider", "convergence-time", "convergence-steps", "compare-rewards", "compare-episodes_length", 
                                       "histogram_speeds", "histogram_speed_comparison", "hist_target_zones", "bar_target_zones"], required=False)
+    plot_parser.add_argument("--save_plots", action="store_true", help="Saves the plots inside current folder instead of showing them.", required=False, default=False)
     plot_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
 
     retrain_parser = subparsers.add_parser("retrain", help="Retrain a pretrained RL algorithm for robot movement in CoppeliaSim")

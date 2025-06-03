@@ -225,7 +225,12 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, show_plots = True, title
         plt.legend()
         plt.title(title + ": Model " + str(timestep) + "s")
         plt.grid()
-        plt.show()
+        if rl_copp_obj.args.save_plots:
+            filename = f"convergence_{rl_copp_obj.args.model_ids[model_index]}_{x_axis}.png"
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
 
     return convergence_point
     
@@ -444,7 +449,12 @@ def plot_metrics_comparison_with_band (rl_copp_obj, metric, title = "Comparison"
     plt.legend(fontsize=18, ncol = 2)
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    if rl_copp_obj.args.save_plots:
+        filename = f"metrics_comparison_{metric}.png"
+        plt.savefig(filename)
+        plt.close()
+    else:
+        plt.show()
 
 
 def plot_convergence_comparison (rl_copp_obj, title = "Convergence Comparison "):
@@ -553,7 +563,12 @@ def plot_convergence_comparison (rl_copp_obj, title = "Convergence Comparison ")
         # Show the plot
         plt.grid()
         plt.tight_layout()
-        plt.show()
+        if rl_copp_obj.args.save_plots:
+            filename = f"convergence_{conv_type}.png"
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
 
 
 def plot_histogram (rl_copp_obj, model_index, mode, n_bins = 21, title = "Histogram for "):
@@ -704,7 +719,12 @@ def plot_bars(rl_copp_obj, model_index, mode, title="Target Zone Distribution: "
         
         # Show the plot
         plt.tight_layout()
-        plt.show()
+        if rl_copp_obj.args.save_plots:
+            filename = f"bars_{key}.png"
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
 
 
 def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribution by Intervals"):
@@ -825,7 +845,12 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         
         plt.tight_layout()
-        plt.show()
+        if rl_copp_obj.args.save_plots:
+            filename = f"grouped_bar_chart_{id_data}.png"
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
 
         # Reset timestep array
         timestep = []
@@ -994,6 +1019,234 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
     plt.show()
 
 
+def compare_models_boxplots_old(rl_copp_obj, model_ids):
+    """
+    Compare a variable betweeen multiple models using boxplots.
+    
+    Args:
+        - rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class just for managing the args and the base path.
+        - model_ids (list): List of model IDs to compare.
+    """
+    # Initialize variables
+    metrics = [
+        "Time (s)", 
+        "Reward", 
+        "Target zone", 
+        "Crashes", 
+        "Linear speed", 
+        "Angular speed", 
+        "Distance traveled (m)"
+        ]
+    combined_data = []
+    model_action_times = []
+    timestep_values = []
+    x_label_name = "Timestep (s)"
+
+    # Get trainings' csv name for searching action times later
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv") 
+
+    for model_id in model_ids:
+        file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*_test_*.csv"
+        subfolder_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*_testing"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
+        if not files:
+            logging.error(f"[!] File not found for model {model_id}")
+            continue
+            
+        # Get action time for each model
+        model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
+        timestep = float(utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+        model_action_times.append(f"{timestep}s")
+        timestep_values.append(float(timestep))
+
+        for file in files:
+            logging.info(f"File: {file}")
+            df = pd.read_csv(file)
+            df["Model"] = str(timestep) + "s"
+            df["Timestep"] = timestep
+            combined_data.append(df)
+
+        # Load other data (Linear speed and Angular speed)
+        file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*_otherdata_*.csv"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics", subfolder_pattern, file_pattern))
+        if not files:
+            logging.error(f"[!] Other data file not found for model {model_id}")
+            continue
+
+        for file in files:
+            df = pd.read_csv(file)
+            df["Model"] = str(timestep) + "s"
+            logging.info(f"Adding data for model {model_id} with action time {timestep}s")
+            df["Timestep"] = float(timestep)
+            # Add Linear speed and Angular speed to the combined data
+            df["Angular speed"] = df["Angular speed"].abs()  # Use absolute value for Angular speed
+            combined_data.append(df)
+
+
+    if not combined_data:
+        logging.error("[!] Data not found.")
+        return
+
+    full_df = pd.concat(combined_data, ignore_index=True)
+
+    for metric in metrics:
+        if metric not in full_df.columns:
+            logging.error(f"[!] Column '{metric}' no found")
+            continue
+
+    # Add a metric that doesn't appear on the csv file: reward detail, for plotting those cases with a positive reward, so user can observe reward more detailed
+    # metrics.append("Reward detail (>=0)")
+
+    for metric in metrics:
+    
+        plt.figure(figsize=(10, 6))
+        if metric == "Reward":
+            full_df["Timestep"] = full_df["Timestep"].astype(float)
+            timesteps_ordered = sorted(full_df["Timestep"].unique())
+
+            # Crear el boxplot con eje X numérico
+            ax = sns.boxplot(data=full_df, x="Timestep", y=metric, order=timesteps_ordered)
+
+            # Calcular medianas y medias para cada timestep
+            medians = []
+            means = []
+            for ts in timesteps_ordered:
+                model_data = full_df[full_df["Timestep"] == ts][metric].dropna()
+                median_val = model_data.median()
+                mean_val = model_data.mean()
+                medians.append(median_val)
+                means.append(mean_val)
+                logging.info(f"Timestep {ts:.3f}s: Mean Reward = {mean_val:.2f}, Median Reward = {median_val:.2f}")
+
+            # Dibujar spline si hay suficientes puntos
+            if len(timesteps_ordered) > 2:
+                x_smooth = np.linspace(min(timesteps_ordered), max(timesteps_ordered), 300)
+                spline = make_interp_spline(timesteps_ordered, medians, k=min(2, len(timesteps_ordered)-1))
+                y_smooth = spline(x_smooth)
+                plt.plot(x_smooth, y_smooth, color='red', linestyle='--', linewidth=2, label='Spline')
+
+                # Encontrar timestep óptimo
+                optimal_idx = np.argmax(y_smooth)
+                optimal_x = x_smooth[optimal_idx]
+                optimal_y = y_smooth[optimal_idx]
+                plt.plot(optimal_x, optimal_y, marker='o', color='green', markersize=12, 
+                        label=f'Optimal: {optimal_x:.3f}s', zorder=15)
+
+            # Marcar medianas
+            plt.scatter(timesteps_ordered, medians, color='black', marker='x', s=60, zorder=10)
+
+
+        elif metric in ["Time (s)", "Linear speed", "Angular speed", "Distance traveled (m)"]:
+            full_df["Timestep"] = full_df["Timestep"].astype(float)
+            timesteps_ordered = sorted(full_df["Timestep"].unique())
+            ax = sns.boxplot(data=full_df, x="Model", y=metric)
+            if metric == "Linear speed":
+                metric = metric + " (m/s)"
+            elif metric == "Angular speed":
+                metric = metric + " (rad/s)"
+            elif metric == "Time (s)":
+                metric = "Average episode duration (s)"
+
+            
+        elif metric == "Reward detail (>=0)": 
+            df_reward_detail = full_df[full_df["Reward"] >= 0]
+            ax = sns.boxplot(data=df_reward_detail, x="Model", y="Reward")
+
+        elif metric == "Target zone":
+            # Filtrate episodes with target zone == Nan
+            df_target = full_df[full_df[metric].notna() & (full_df[metric] != 0)]
+            
+            # Assure that the models maintein the order
+            model_order = [str(mid) for mid in model_action_times]
+
+            zone_counts = df_target.groupby(["Model", "Target zone"]).size().reset_index(name='count')
+
+            # Get total counts for each model
+            
+            totals = full_df[full_df[metric].notna()].groupby("Model").size().reset_index(name='total')
+
+            # df_target.to_csv("df_target.csv", index=False)
+
+            # Merge counts with totals
+            zone_percents = pd.merge(zone_counts, totals, on="Model")
+            zone_percents["Zone percentage (%)"] = 100 * zone_percents["count"] / zone_percents["total"]
+
+            tab20 = plt.cm.get_cmap('tab20', 20)
+            set3 = plt.cm.get_cmap('Set3', 12)
+            colors = [tab20(i) for i in range(20)] + [set3(i) for i in range(4)]
+
+            sns.barplot(
+                data=zone_percents, 
+                x="Target zone", 
+                y="Zone percentage (%)", 
+                hue="Model", 
+                hue_order=model_order,
+                palette=colors[:len(model_order)]                
+                )
+            plt.legend(title="Model", ncol = 2, fontsize=14, loc='upper left', bbox_to_anchor=(1, 1))
+            
+
+        elif metric == "Crashes":
+            # Ensure that the values of collisions are booleans
+            full_df[metric] = full_df[metric].astype(str).str.strip().str.lower().map({
+                "true": True, "1": True, "yes": True,
+                "false": False, "0": False, "no": False
+            })
+
+            # Calculate collsiion percentage
+            crash_pct = (
+                full_df.groupby("Model")[metric]
+                .mean()
+                .mul(100)
+                .rename("Collision Rate")
+                .reset_index()
+            )
+            metric = "Collision Rate (%)"
+            sns.barplot(data=crash_pct, x="Model", y="Collision Rate")
+            plt.ylabel("Episodes with collision (%)")
+        
+        
+        # plt.title(f"{metric} comparison", fontsize=16)
+        
+        # CORRECCIÓN: Solo aplicar la modificación de etiquetas para casos que NO sean "Reward"
+        if metric != "Reward":
+            # Obtener las etiquetas actuales de los ticks
+            current_ticks = plt.xticks()[0]  # Obtiene las posiciones de los ticks
+            current_labels = plt.xticks()[1]  # Obtiene las etiquetas de los ticks
+
+            # Eliminar la 's' de las etiquetas
+            new_labels = [label.get_text().replace('s', '') for label in current_labels]
+            plt.xticks(current_ticks, new_labels, fontsize=16)
+            current_ax = plt.gca()
+        
+        if metric == "Target zone":
+            x_label_name = "Target zone"
+            metric = "Probability (%)"
+        else:
+            x_label_name = "Timestep (s)"
+            tick_pos = ax.get_xticks()
+            tick_labels = [f"{float(t):.3f}" for t in ax.get_xticks()]
+            ax.set_xticks(tick_pos)
+            ax.set_xticklabels(tick_labels, fontsize=16)
+            
+        
+        
+        plt.xlabel("Timestep (s)", fontsize=20, labelpad=10)
+        plt.ylabel("Reward", fontsize=20, labelpad=10)
+        plt.tick_params(axis='both', which='major', labelsize=20)
+        plt.legend()
+        plt.grid(True)
+
+        plt.tight_layout()
+        if rl_copp_obj.args.save_plots:
+            filename = f"boxplot_{metric}.png"
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
+    
+
 def compare_models_boxplots(rl_copp_obj, model_ids):
     """
     Compare a variable betweeen multiple models using boxplots.
@@ -1033,9 +1286,10 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
         timestep = float(utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
         model_action_times.append(f"{timestep}s")
-        timestep_values.append(timestep)
+        timestep_values.append(float(timestep))
 
         for file in files:
+            logging.info(f"File: {file}")
             df = pd.read_csv(file)
             df["Model"] = str(timestep) + "s"
             df["Timestep"] = timestep
@@ -1052,7 +1306,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
             df = pd.read_csv(file)
             df["Model"] = str(timestep) + "s"
             logging.info(f"Adding data for model {model_id} with action time {timestep}s")
-            df["Timestep"] = timestep
+            df["Timestep"] = float(timestep)
             # Add Linear speed and Angular speed to the combined data
             df["Angular speed"] = df["Angular speed"].abs()  # Use absolute value for Angular speed
             combined_data.append(df)
@@ -1076,53 +1330,93 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
     
         plt.figure(figsize=(10, 6))
         if metric == "Reward":
-            # Use numeric X-axis for proper spline alignment
-            ax = sns.boxplot(data=full_df, x="Model", y=metric)
-            
-            # Get the unique models and their positions
+            # Ordenar los datos por timestep para que el boxplot aparezca en orden correcto
             unique_models = sorted(full_df["Model"].unique(), key=lambda x: float(x.replace('s', '')))
-            x_positions = range(len(unique_models))
-
-            # Calculate the median for each model in the right order
+            timesteps_ordered = [float(model.replace('s', '')) for model in unique_models]
+            
+            # Crear boxplots manuales con matplotlib para tener eje X numérico
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            # Preparar datos para boxplots manuales
+            box_data = []
             medians = []
             means = []
-            timesteps_ordered = []
-            for model in unique_models:
-                model_data = full_df[full_df["Model"] == model][metric]
-                median_val = model_data.median()
-                mean_val = model_data.mean()
-                medians.append(median_val)
-                means.append(mean_val)
-                timesteps_ordered.append(float(model.replace('s', '')))
+            valid_timesteps = []
+            
+            for i, model in enumerate(unique_models):
+                model_data = full_df[full_df["Model"] == model][metric].values
                 
-                # Log the mean and median for the current model
-                logging.info(f"Model {model}: Mean Reward = {mean_val:.2f}, Median Reward = {median_val:.2f}")
-    
-            
-            # Create the spline using the x positions and medians
-            if len(x_positions) > 2:  # We need at least 3 points for a spline
-                x_smooth = np.linspace(0, len(x_positions)-1, 300)
-                spline = make_interp_spline(x_positions, medians, k=min(2, len(x_positions)-1))
-                y_smooth = spline(x_smooth)
-                plt.plot(x_smooth, y_smooth, color='red', linestyle='--', linewidth=2, label='Spline')
-            
-            # Mark the median points
-            plt.scatter(x_positions, medians, color='black', marker='x', s=60, zorder=10)
-            
-            # Find the optimal timestep
-            if len(x_positions) > 2:
-                optimal_idx = np.argmax(y_smooth)
-                optimal_x_pos = x_smooth[optimal_idx]
-                optimal_y = y_smooth[optimal_idx]
+                # Debug: imprimir información sobre los datos
+                logging.info(f"Processing model: {model}")
+                logging.info(f"Model data shape: {model_data.shape}")
+                logging.info(f"Model data sample: {model_data[:5] if len(model_data) > 0 else 'No data'}")
+                logging.info(f"NaN count: {np.isnan(model_data).sum()}")
+                logging.info(f"Inf count: {np.isinf(model_data).sum()}")
                 
-                # Interpolate the optimal timestep
-                optimal_timestep = np.interp(optimal_x_pos, x_positions, timesteps_ordered)
+                # Filtrar valores NaN e infinitos ANTES de calcular estadísticas
+                original_size = len(model_data)
+                clean_data = model_data[np.isfinite(model_data)]
+                logging.info(f"After filtering: {original_size} -> {len(clean_data)} values")
                 
-                # Plot the optimal timestep
-                plt.plot(optimal_x_pos, optimal_y, marker='o', color='green', markersize=12, 
-                        label=f'Optimal: {optimal_timestep:.3f}s', zorder=15)
+                if len(clean_data) > 0:  # Solo procesar si hay datos válidos
+                    box_data.append(clean_data)
+                    # Calcular estadísticas con datos limpios
+                    median_val = np.median(clean_data)
+                    mean_val = np.mean(clean_data)
+                    medians.append(median_val)
+                    means.append(mean_val)
+                    valid_timesteps.append(timesteps_ordered[i])
+                    
+                    # Log the mean and median for the current model
+                    logging.info(f"Model {model}: Mean Reward = {mean_val:.2f}, Median Reward = {median_val:.2f}")
+                else:
+                    logging.warning(f"Model {model}: No valid data found after filtering NaN/Inf, skipping")
             
-            plt.legend()
+            if len(box_data) == 0:
+                logging.error("No valid data found for any model")
+                continue
+            
+            # Crear boxplots con posiciones numéricas reales
+            box_width = min(np.diff(valid_timesteps)) * 0.3 if len(valid_timesteps) > 1 else 0.05
+            bp = ax.boxplot(box_data, positions=valid_timesteps, widths=box_width, patch_artist=True)
+            
+            # Personalizar los boxplots para que se vean como seaborn
+            for patch in bp['boxes']:
+                patch.set_facecolor('lightblue')
+                patch.set_alpha(0.7)
+            
+            # Create the spline using the timesteps and medians (solo si hay datos válidos)
+            if len(valid_timesteps) > 2 and all(np.isfinite(medians)):
+                try:
+                    x_smooth = np.linspace(min(valid_timesteps), max(valid_timesteps), 300)
+                    spline = make_interp_spline(valid_timesteps, medians, k=min(2, len(valid_timesteps)-1))
+                    y_smooth = spline(x_smooth)
+                    ax.plot(x_smooth, y_smooth, color='red', linestyle='--', linewidth=2, label='Spline')
+                    
+                    # Find the optimal timestep
+                    optimal_idx = np.argmax(y_smooth)
+                    optimal_timestep = x_smooth[optimal_idx]
+                    optimal_reward = y_smooth[optimal_idx]
+                    
+                    # Plot the optimal timestep
+                    ax.plot(optimal_timestep, optimal_reward, marker='o', color='green', markersize=12, 
+                            label=f'Optimal: {optimal_timestep:.3f}s', zorder=15)
+                except Exception as e:
+                    logging.warning(f"Could not create spline: {e}")
+            
+            # Mark the median points (solo los válidos)
+            if len(valid_timesteps) > 0 and all(np.isfinite(medians)):
+                ax.scatter(valid_timesteps, medians, color='black', marker='x', s=60, zorder=10)
+            
+            ax.legend()
+            
+            # Configurar el eje X como numérico
+            if len(valid_timesteps) > 0:
+                ax.set_xticks(valid_timesteps)
+                ax.set_xticklabels([f"{t:.3f}" for t in valid_timesteps], fontsize=14)
+            
+            # Usar ax en lugar de plt para el resto de configuraciones
+            current_ax = ax
 
         elif metric in ["Time (s)", "Linear speed", "Angular speed", "Distance traveled (m)"]:
             sns.boxplot(data=full_df, x="Model", y=metric)
@@ -1193,27 +1487,36 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         
         
         # plt.title(f"{metric} comparison", fontsize=16)
-        # Obtener las etiquetas actuales de los ticks
-        current_ticks = plt.xticks()[0]  # Obtiene las posiciones de los ticks
-        current_labels = plt.xticks()[1]  # Obtiene las etiquetas de los ticks
+        
+        # CORRECCIÓN: Solo aplicar la modificación de etiquetas para casos que NO sean "Reward"
+        if metric != "Reward":
+            # Obtener las etiquetas actuales de los ticks
+            current_ticks = plt.xticks()[0]  # Obtiene las posiciones de los ticks
+            current_labels = plt.xticks()[1]  # Obtiene las etiquetas de los ticks
 
-        # Eliminar la 's' de las etiquetas
-        new_labels = [label.get_text().replace('s', '') for label in current_labels]
-
-        # Establecer las nuevas etiquetas
-        plt.xticks(current_ticks, new_labels, fontsize=16)
+            # Eliminar la 's' de las etiquetas
+            new_labels = [label.get_text().replace('s', '') for label in current_labels]
+            plt.xticks(current_ticks, new_labels, fontsize=16)
+            current_ax = plt.gca()
+        
         if metric == "Target zone":
             x_label_name = "Target zone"
             metric = "Probability (%)"
         else:
             x_label_name = "Timestep (s)"
-        plt.xlabel(x_label_name, fontsize=20, labelpad=10)  
-        plt.ylabel(metric, fontsize=20, labelpad=10)  
-        plt.tick_params(axis='both', which='major', labelsize=20)  
+            
+        current_ax.set_xlabel(x_label_name, fontsize=20, labelpad=10)  
+        current_ax.set_ylabel(metric, fontsize=20, labelpad=10)  
+        current_ax.tick_params(axis='both', which='major', labelsize=20)  
 
-        plt.grid(True)
+        current_ax.grid(True)
         plt.tight_layout()
-        plt.show()
+        if rl_copp_obj.args.save_plots:
+            filename = f"boxplot_{metric}.png"
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
 
     
 def plot_lat_curves(rl_copp_obj, model_index):
@@ -1839,7 +2142,12 @@ def plot_convergence_points_comparison(rl_copp_obj, convergence_points_by_model)
         plt.yticks(fontsize=14)
         plt.grid(True)
         plt.tight_layout()
-        plt.show()
+        if rl_copp_obj.args.save_plots:
+            filename = f"convergence_comparison_{i}.png"
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
 
 
 def main(args):
