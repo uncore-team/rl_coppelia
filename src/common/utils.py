@@ -864,7 +864,11 @@ def start_coppelia_and_simulation(rl_copp_obj):
         ws_port = find_next_free_port(ws_port)
 
         # Save the PID of the terminal
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        if hasattr(rl_copp_obj.args, "timestamp") and rl_copp_obj.args.timestamp is not None:
+            timestamp = rl_copp_obj.args.timestamp  # Obtained from GUI
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            
         rl_copp_obj.terminal_pid = f"CoppeliaTerminal_{timestamp}"
 
         if rl_copp_obj.args.no_gui:

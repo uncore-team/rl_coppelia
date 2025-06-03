@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import re
 import subprocess
@@ -11,8 +12,9 @@ import logging
 from common import utils
 from rl_coppelia import train, test, plot, auto_training, auto_testing, retrain, sat_training
 from pathlib import Path
-from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtWidgets import QProgressBar
+from PyQt5.QtCore import QTimer, QThread, pyqtSignal
+from PyQt5.QtWidgets import QProgressBar, QHBoxLayout, QTextEdit, QSizePolicy, QScrollArea
+from PyQt5.QtGui import QIcon
 
 
 class TestThread(QThread):
@@ -23,49 +25,63 @@ class TestThread(QThread):
     def __init__(self, args):
         super().__init__()
         self.args = args
+        self.terminal_title = ""
+        self.was_stopped_manually = False
+
+    def stop(self):
+        self.was_stopped_manually = True
+        if hasattr(self, 'process') and self.process and self.process.poll() is None:
+            self.process.terminate()  # O self.process.kill() si quieres forzar
 
     def run(self):
         """Ejecuta el test en un hilo separado."""
         try:
+            self.was_stopped_manually = False  # Reset flag
+
             # Ejecutar el comando usando subprocess
-            process = subprocess.Popen(
+            self.process = subprocess.Popen(
                 self.args,
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.STDOUT,
-                text=True,  # Para recibir la salida como texto en lugar de bytes
-                universal_newlines=True  # Para manejar la salida de texto correctamente
+                text=True,
+                universal_newlines=True
             )
 
             # Leer la salida en tiempo real para actualizar la barra de progreso
-            for line in process.stdout:
-                print(line.strip())  # Depuración: imprimir cada línea de salida
-                if "Testing Episodes" in line:  # Buscar la línea de progreso de tqdm
+            for line in self.process.stdout:
+                print(line.strip())  # Para depuración en consola
+                if "Testing Episodes" in line:
                     try:
-                        # Buscar el porcentaje en la línea usando una expresión regular
                         match = re.search(r"(\d+)%", line)
                         if match:
-                            progress = int(match.group(1))  # Extraer el porcentaje como entero
-                            self.progress_signal.emit(progress)  # Emitir señal para actualizar la barra
+                            progress = int(match.group(1))
+                            self.progress_signal.emit(progress)
                         else:
                             logging.warning(f"Could not parse progress from line: {line.strip()}")
                     except ValueError:
                         logging.warning(f"Could not parse progress from line: {line.strip()}")
 
-            process.wait()  # Esperar a que el proceso termine
-            if process.returncode != 0:
-                error_message = process.stderr.read()
-                self.error_signal.emit(error_message)
+            self.process.wait()
+
+            # Evitar emitir errores si fue parada manual
+            if self.was_stopped_manually:
+                return
+
+            if self.process.returncode != 0:
+                self.error_signal.emit("Process returned non-zero exit code.")
             else:
-                self.finished_signal.emit()  # Emitir señal de finalización
+                self.finished_signal.emit()
+
         except Exception as e:
             self.error_signal.emit(str(e))
+
 
 
 class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RL Coppelia Manager")
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(100, 100, 1000, 600)
 
         expanded_path = os.path.abspath(__file__)
         self.base_path = str(Path(expanded_path).parents[2])
@@ -74,33 +90,80 @@ class MainApp(QMainWindow):
         self.robot_name = ""
         self.experiment_id = 0
 
-        # Tab widget
-        self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        logo_path = os.path.join(self.base_path, "rl_coppelia", "assets", "uncore.png")
+        self.setWindowIcon(QIcon(logo_path))
 
-        # Add tabs
+        # Widget central con layout horizontal
+        main_layout = QHBoxLayout()
+        central_widget = QWidget()
+        central_widget.setLayout(main_layout)
+        self.setCentralWidget(central_widget)
+
+        # Sección izquierda: tabs existentes
+        self.tabs = QTabWidget()
         self.tabs.addTab(self.create_train_tab(), "Train")
         self.tabs.addTab(self.create_test_tab(), "Test")
         self.tabs.addTab(self.create_plot_tab(), "Plot")
         self.tabs.addTab(self.create_auto_training_tab(), "Auto Training")
         self.tabs.addTab(self.create_auto_testing_tab(), "Auto Testing")
         self.tabs.addTab(self.create_retrain_tab(), "Retrain")
+        main_layout.addWidget(self.tabs, stretch=3)
+
+        # Sección derecha: panel lateral con logs y procesos activos
+        self.side_panel = self.create_side_panel()
+        main_layout.addLayout(self.side_panel, stretch=1)
+
+
+    def update_processes_label(self):
+        """Actualizar el texto de procesos según cuántos haya."""
+        count = self.processes_container.count()
+        if count == 0:
+            self.processes_label.setText("No processes yet")
+        else:
+            self.processes_label.setText("Current processes:")
+
+
+    def create_side_panel(self):
+        """Creates the side panel with scrollable logs and a scrollable process list."""
+        from PyQt5.QtWidgets import QScrollArea
+
+        layout = QVBoxLayout()
+
+        # Logs
+        layout.addWidget(QLabel("Logs"))
+
+        self.logs_text = QTextEdit()
+        self.logs_text.setReadOnly(True)
+        self.logs_text.setLineWrapMode(QTextEdit.NoWrap)
+
+        logs_scroll = QScrollArea()
+        logs_scroll.setWidgetResizable(True)
+        logs_scroll.setWidget(self.logs_text)
+        logs_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        layout.addWidget(logs_scroll, stretch=1)  # Ocupa la mitad superior
+
+        # Contenedor de procesos
+        self.processes_label = QLabel("No processes yet")  # Inicia sin procesos
+        layout.addWidget(self.processes_label)
+
+        process_scroll_content = QWidget()
+        self.processes_container = QVBoxLayout()
+        process_scroll_content.setLayout(self.processes_container)
+
+        process_scroll = QScrollArea()
+        process_scroll.setWidgetResizable(True)
+        process_scroll.setWidget(process_scroll_content)
+
+        layout.addWidget(process_scroll, stretch=1)  # Ocupa la otra mitad
+
+        return layout
+
+
 
     def update_progress_bar(self, value):
         """Actualizar la barra de progreso."""
         self.progress_bar.setValue(value)
-
-    def on_test_finished(self):
-        """Manejar la finalización del test."""
-        logging.info("Test completed successfully.")
-        self.progress_bar.setValue(100)  # Asegurarse de que la barra esté llena
-        self.tabs.setTabEnabled(self.tabs.indexOf(self.create_test_tab()), True)  # Reactivar la pestaña de Test
-
-    def on_test_error(self, error_message):
-        """Manejar errores durante el test."""
-        logging.error(f"Error during test: {error_message}")
-        self.tabs.setTabEnabled(self.tabs.indexOf(self.create_test_tab()), True)  # Reactivar la pestaña de Test
-
 
     def update_test_inputs_when_model_name_introduced(self):
         """Update the robot name based on the selected model name."""
@@ -303,17 +366,16 @@ class MainApp(QMainWindow):
         # Iterations (optional, default: 50)
         self.test_iterations_input = QSpinBox()
         self.test_iterations_input.setRange(1, 1000)
-        self.test_iterations_input.setValue(50)
+        self.test_iterations_input.setValue(5)
 
         # Verbose level (optional, default: 3)
         self.verbose_input = QSpinBox()
         self.verbose_input.setRange(-1, 4)
         self.verbose_input.setValue(3)
 
-        # Barra de progreso
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
+       
+
+        
 
         # Add fields to the form
         form.addRow("Model ZIP File (required):", self.test_model_name_input)
@@ -325,17 +387,42 @@ class MainApp(QMainWindow):
         form.addRow("", self.dis_parallel_mode_checkbox)
         form.addRow("", self.no_gui_checkbox)
         form.addRow("Params File (optional):", self.test_params_file_input)
-        form.addRow("Iterations (default: 50):", self.test_iterations_input)
-        form.addRow("Verbose Level (default: 0):", self.verbose_input)
+        form.addRow("Iterations (default: 400):", self.test_iterations_input)
+        form.addRow("Verbose Level (default: 1):", self.verbose_input)
 
         # Buttons
         test_button = QPushButton("Start Testing")
         test_button.clicked.connect(self.start_testing)
-        layout.addLayout(form)
-        layout.addWidget(test_button)
+        test_button.setFixedHeight(40)  # Altura mayor
+        test_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)  # No se expande horizontalmente
+        test_button.setStyleSheet("""
+            QPushButton {
+                padding: 6px 16px;
+                font-size: 14px;
+                border-radius: 8px;
+                background-color: #007ACC;
+                color: white;
+            }
+            QPushButton:disabled {
+                background-color: #888;
+                color: #ccc;
+            }
+        """)
+        # Layout centrado (horizontal + vertical)
+        center_button_layout = QVBoxLayout()
+        center_button_layout.addStretch()
 
-        # Añadir la barra de progreso al diseño
-        layout.addWidget(self.progress_bar)
+        h_center = QHBoxLayout()
+        h_center.addStretch()
+        h_center.addWidget(test_button)
+        h_center.addStretch()
+
+        center_button_layout.addLayout(h_center)
+        center_button_layout.addStretch()
+
+        # Ensamblar la pestaña
+        layout.addLayout(form)
+        layout.addLayout(center_button_layout)
 
         tab.setLayout(layout)
         return tab
@@ -456,24 +543,109 @@ class MainApp(QMainWindow):
         logging.info(f"Starting training with args: {args}")
         train.main(args)
 
+
+    def stop_specific_test(self, test_thread, process_widget):
+        """Stop an individual test process and remove its widget."""
+        if test_thread.isRunning():
+            test_thread.stop()
+            logging.info("Stopping test thread...")
+
+        if hasattr(test_thread, 'terminal_title'):
+            logging.info(f"Closing terminal: {test_thread.terminal_title}")
+            subprocess.run(['wmctrl', '-c', test_thread.terminal_title], check=False)
+
+        # Log parada manual
+        process_type = getattr(process_widget, 'process_type', 'Unknown')
+        timestamp = getattr(process_widget, 'timestamp', 'Unknown')
+        model_name = getattr(process_widget, 'model_name', 'UnknownModel')
+        stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        message = f"<span style='color:orange;'>⏹️ Process <b>{process_type}</b> <i>{timestamp}</i> of <code>{model_name}</code> was manually stopped at <b>{stop_time}</b>.</span>"
+        self.logs_text.append(message)
+
+        process_widget.setParent(None)
+        self.update_processes_label()
+
+
+    def on_process_finished(self, process_widget):
+        """Handle successful process completion and log it to the GUI."""
+        process_type = getattr(process_widget, 'process_type', 'Unknown')
+        timestamp = getattr(process_widget, 'timestamp', 'Unknown')
+        model_name = getattr(process_widget, 'model_name', 'UnknownModel')
+        end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        message = f"<span style='color:green;'>Success: </span> Process <b>{process_type}</b> <i>{timestamp}</i> of <code>{model_name}</code> finished successfully at <b>{end_time}</b>."
+        self.logs_text.append(message)
+
+        process_widget.setParent(None)
+        self.update_processes_label()
+
+
+    def on_process_error(self, error_message, process_widget):
+        """Handle error during process execution and log it."""
+        process_type = getattr(process_widget, 'process_type', 'Unknown')
+        timestamp = getattr(process_widget, 'timestamp', 'Unknown')
+        model_name = getattr(process_widget, 'model_name', 'UnknownModel')
+        end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        message = (
+            f"<span style='color:red;'>❌ Process <b>{process_type}</b> <i>{timestamp}</i> of <code>{model_name}</code> "
+            f"failed at <b>{end_time}</b> with error:<br>{error_message}</span>"
+        )
+        self.logs_text.append(message)
+
+        process_widget.setParent(None)
+        self.update_processes_label()
+
+
+    def disable_button_with_countdown(self, button, seconds=8):
+        """Disable a button and show a countdown in its text."""
+        original_text = button.text()
+        button.setEnabled(False)
+
+        def update_text():
+            nonlocal seconds
+            if seconds > 0:
+                button.setText(f"Wait... ({seconds})")
+                seconds -= 1
+            else:
+                self.timer.stop()
+                button.setText(original_text)
+                button.setEnabled(True)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(update_text)
+        self.timer.start(1000)  # 1 segundo
+
+
     def start_testing(self):
-        """Start the testing process."""
+        """Start the testing process (multi-threaded and UI-tracked)."""
+        self.model_name = self.test_model_name_input.text()
+        if not self.model_name:
+            warning_msg = "<span style='color:orange;'>⚠️ Warning: please select a valid model name.</span>"
+            self.logs_text.append(warning_msg)
+            logging.warning("Please select a valid model name.")
+            return
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        terminal_title = f"CoppeliaTerminal_{timestamp}"
+
         args = [
             "rl_coppelia", "test",
-            "--model_name", self.remove_zip_extension(self.model_name),
+            "--model_name", self.remove_zip_extension(self.test_model_name_input.text()),
             "--iterations", str(self.test_iterations_input.value()),
+            "--timestamp", str(timestamp),
             "--verbose", str(self.verbose_input.value())
         ]
 
-        # Add optional parameters if they are provided
+        # Parámetros opcionales
         if self.save_traj_checkbox.isChecked():
             args.append("--save_traj")
         if self.test_params_file_input.text():
-            args.extend(["--params_file", self.test_params_file_input.text()])
+            args += ["--params_file", self.test_params_file_input.text()]
         if self.test_robot_name_input.text():
-            args.extend(["--robot_name", self.test_robot_name_input.text()])
+            args += ["--robot_name", self.test_robot_name_input.text()]
         if self.test_scene_path_input.text():
-            args.extend(["--scene_path", self.test_scene_path_input.text()])
+            args += ["--scene_path", self.test_scene_path_input.text()]
         if self.dis_parallel_mode_checkbox.isChecked():
             args.append("--dis_parallel_mode")
         if self.no_gui_checkbox.isChecked():
@@ -481,17 +653,46 @@ class MainApp(QMainWindow):
 
         logging.info(f"Starting testing with args: {args}")
 
-        # Deshabilitar la pestaña de Test
-        # self.tabs.setTabEnabled(self.tabs.indexOf(self.create_test_tab()), False)
+        # Crear hilo de test
+        test_thread = TestThread(args)
+        test_thread.terminal_title = terminal_title
 
-        # Crear y configurar el hilo
-        self.test_thread = TestThread(args)
-        self.test_thread.progress_signal.connect(self.update_progress_bar)
-        self.test_thread.finished_signal.connect(self.on_test_finished)
-        self.test_thread.error_signal.connect(self.on_test_error)
+        # Crear widget visual del proceso
+        process_widget = QWidget()
+        process_layout = QVBoxLayout()
+        process_widget.setLayout(process_layout)
 
-        # Iniciar el hilo
-        self.test_thread.start()
+        # Save metadata
+        process_widget.process_type = "Test"
+        process_widget.timestamp = timestamp
+        process_widget.model_name = self.model_name or "UnknownModel"
+
+        info_label = QLabel(f"<b>Test</b> — {timestamp}")
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, 100)
+        progress_bar.setValue(0)
+        stop_button = QPushButton("Stop")
+        stop_button.clicked.connect(lambda: self.stop_specific_test(test_thread, process_widget))
+
+        process_layout.addWidget(info_label)
+        process_layout.addWidget(progress_bar)
+        process_layout.addWidget(stop_button)
+
+        self.processes_container.addWidget(process_widget)
+        self.update_processes_label()
+
+        # Conectar señales con esta barra específica
+        test_thread.progress_signal.connect(progress_bar.setValue)
+        test_thread.finished_signal.connect(lambda: self.on_process_finished(process_widget))
+        test_thread.error_signal.connect(lambda msg: self.on_process_error(msg, process_widget))
+
+        test_thread.start()
+
+        # Desactivar botón de Start Testing temporalmente
+        button = self.sender()
+        if isinstance(button, QPushButton):
+            self.disable_button_with_countdown(button, seconds=8)
+
 
 
     def generate_plots(self):
@@ -534,9 +735,12 @@ class MainApp(QMainWindow):
         retrain.main(args)
 
 
-if __name__ == "__main__":
+def main():
     utils.logging_config_gui()
     app = QApplication(sys.argv)
+    logo_path = os.path.join(os.path.dirname(__file__), "assets", "uncore.png")
+    print(logo_path)
+    app.setWindowIcon(QIcon(logo_path))
     window = MainApp()
     window.show()
     sys.exit(app.exec_())

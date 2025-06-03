@@ -55,6 +55,7 @@ def main():
     test_parser.add_argument("--no_gui", action="store_true", help="Disables Coppelia GUI, it will just show the terminal", required=False)
     test_parser.add_argument("--params_file", type=str, help="Path to the configuration file.",required=False)
     test_parser.add_argument("--iterations", type=int, help="Number of iterations for the test. If set, it will override the parameter from the parameters' json file.",required=False)
+    test_parser.add_argument("--timestamp", type=str, help="Timestamp provided externally (e.g., from GUI).", required=False)
     test_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. 1: just a progress bar. 2: all logs for debugging", default=0, required=False)
 
     test_scene_parser = subparsers.add_parser("test_scene", help="Test a trained RL algorithm for robot movement in CoppeliaSim for just one iteration, using a preconfigured scene")
