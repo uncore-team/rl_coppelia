@@ -11,7 +11,7 @@ Description:
     comparing and saving the results.
 
 Usage:
-    rl_coppelia auto_test --robot_name <robot_name> --model_ids <model_ids> 
+    rl_coppelia auto_testing --robot_name <robot_name> --model_ids <model_ids> 
                             --iterations <num> [--parallel_mode] [--max_workers]
                             [--verbose <num>]
 
@@ -38,7 +38,7 @@ from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
 
 
-def copy_latest_test_csv(model_name, session_folder):
+def copy_latest_test_csv(rl_copp_obj, model_name, session_folder):
     """
     Copies the latest test and otherdata CSV files of a given model into the current auto-test session folder.
 
@@ -53,65 +53,61 @@ def copy_latest_test_csv(model_name, session_folder):
     Returns:
         tuple[str or None, str or None]: Paths to the copied test and otherdata CSV files, or None if not found.
     """
-    base_path = os.path.join("robots")
+    testing_path = os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "testing_metrics")
+    logging.info(f"testing_path: {testing_path}")
 
-    # Iterate through all robots in the robots directory
-    for robot in os.listdir(base_path):
-        model_folder = os.path.join(base_path, robot, "testing_metrics")
-        if not os.path.isdir(model_folder):
-            continue
-
-        test_files = sorted(
-            glob.glob(
-                os.path.join(model_folder, f"{model_name}_testing", f"{model_name}_test_*.csv")
-            )
+    test_files = sorted(
+        glob.glob(
+            os.path.join(testing_path, f"{model_name}_testing", f"{model_name}_test_*.csv")
         )
+    )
 
-        otherdata_files = sorted(
-            glob.glob(
-                os.path.join(model_folder, f"{model_name}_testing", f"{model_name}_otherdata_*.csv")
-            )
+    otherdata_files = sorted(
+        glob.glob(
+            os.path.join(testing_path, f"{model_name}_testing", f"{model_name}_otherdata_*.csv")
         )
+    )
 
-        test_csv_path = None
-        otherdata_csv_path = None
+    test_csv_path = None
+    otherdata_csv_path = None
 
-        if test_files:
-            latest_test_csv = test_files[-1]
-            test_csv_path = os.path.join(session_folder, f"test_{model_name}.csv")
-            os.system(f"cp '{latest_test_csv}' '{test_csv_path}'")
-            logging.info(f"Copied test CSV to session folder: {test_csv_path}")
+    if test_files:
+        latest_test_csv = test_files[-1]
+        test_csv_path = os.path.join(session_folder, f"{model_name}_test.csv")
+        os.system(f"cp '{latest_test_csv}' '{test_csv_path}'")
+        logging.info(f"Copied test CSV to session folder: {test_csv_path}")
 
-        if otherdata_files:
-            latest_otherdata_csv = otherdata_files[-1]
-            otherdata_csv_path = os.path.join(session_folder, f"otherdata_{model_name}.csv")
-            os.system(f"cp '{latest_otherdata_csv}' '{otherdata_csv_path}'")
-            logging.info(f"Copied otherdata CSV to session folder: {otherdata_csv_path}")
+    if otherdata_files:
+        latest_otherdata_csv = otherdata_files[-1]
+        otherdata_csv_path = os.path.join(session_folder, f"{model_name}_otherdata.csv")
+        os.system(f"cp '{latest_otherdata_csv}' '{otherdata_csv_path}'")
+        logging.info(f"Copied otherdata CSV to session folder: {otherdata_csv_path}")
 
-        if test_csv_path or otherdata_csv_path:
-            return test_csv_path, otherdata_csv_path
+    if test_csv_path or otherdata_csv_path:
+        return test_csv_path, otherdata_csv_path
 
     logging.warning(f"No test or otherdata CSV found for model: {model_name}")
     return None, None
 
-def collect_test_records(robot_name, model_ids, session_folder):
-    """
-    Collects selected test results from the global test_records.csv and writes a filtered CSV for the session.
 
-    This function extracts specific columns of interest from the global 'test_records.csv' file for each 
-    model ID provided, and writes them into a new CSV file named 'test_<session_name>.csv' inside the 
-    session folder. The output is sorted by 'Action time (s)' in ascending order.
+def collect_test_records(rl_copp_obj, session_folder):
+    """
+    Collects the latest test records for each model and merges them with training data to include action time.
+
+    This function extracts the latest matching row for each model from 'test_records.csv' (testing metrics),
+    and obtains the 'Action time (s)' from 'train_records.csv' (training metrics). It builds a combined 
+    session-specific CSV with selected fields and sorts it by action time.
 
     Args:
-        robot_name (str): Name of the robot.
-        model_ids (list[int]): List of model IDs to extract from the test records.
-        session_folder (str): Path to the session folder to save the filtered results.
+        rl_copp_obj (RLCoppeliaManager): Manager object containing robot name and model IDs.
+        session_folder (str): Directory where the filtered CSV will be saved.
     """
-    base_path = os.path.join("robots", robot_name, "testing_metrics")
-    records_file = os.path.join(base_path, "test_records.csv")
+    base_robot_path = os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name)
+    testing_records_file = os.path.join(base_robot_path, "testing_metrics", "test_records.csv")
+    training_records_file = os.path.join(base_robot_path, "training_metrics", "train_records.csv")
     session_records = os.path.join(session_folder, f"test_{os.path.basename(session_folder)}.csv")
 
-    # Define the columns to extract from the records
+    # Columns to extract from test_records.csv (except Action time, which comes from training)
     selected_columns = [
         "Exp_id", "Action time (s)", "Avg reward", "Avg time reach target",
         "Number of collisions", "Target zone 1 (%)", "Target zone 2 (%)",
@@ -119,28 +115,35 @@ def collect_test_records(robot_name, model_ids, session_folder):
     ]
 
     rows = []
-    # Extract the latest matching row for each model from the global test record
-    for model_id in model_ids:
-        model_name = f"{robot_name}_model_{model_id}"
-        with open(records_file, newline='') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if row.get("Exp_id", "").startswith(model_name):
-                    filtered_row = {key: row.get(key, "") for key in selected_columns}
-                    rows.append(filtered_row)
-                    break
+    for model_id in rl_copp_obj.args.model_ids:
+        model_name = f"{rl_copp_obj.args.robot_name}_model_{model_id}"
 
-    # Define a helper function for safe float conversion
+        # Get action time from training records
+        action_time = utils.get_data_from_training_csv(
+            model_name, training_records_file, column_header="Action time (s)"
+        )
+
+        # Get latest matching row from testing records
+        with open(testing_records_file, newline='') as f:
+            reader = csv.DictReader(f)
+            matching_rows = [row for row in reader if row.get("Exp_id", "").startswith(model_name)]
+            if matching_rows:
+                last_row = matching_rows[-1]
+                filtered_row = {key: last_row.get(key, "") for key in selected_columns if key != "Action time (s)"}
+                filtered_row["Action time (s)"] = action_time
+                rows.append(filtered_row)
+
+    # Helper for safe float sorting
     def safe_float(val):
         try:
             return float(val)
         except:
             return float('inf')
 
-    # Sort rows based on action time in ascending order
+    # Sort rows by action time
     rows.sort(key=lambda r: safe_float(r.get("Action time (s)", "inf")))
 
-    # Write the sorted and filtered data to the session CSV file
+    # Save filtered and sorted results
     if rows:
         with open(session_records, mode='w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=selected_columns)
@@ -149,7 +152,8 @@ def collect_test_records(robot_name, model_ids, session_folder):
         logging.info(f"Saved session test summary to {session_records}")
 
 
-def generate_plots(robot_name, model_ids, session_folder, verbose):
+
+def generate_plots(rl_copp_obj, session_folder):
     """
     Generates plots for the given models and saves them to the session folder.
 
@@ -163,18 +167,21 @@ def generate_plots(robot_name, model_ids, session_folder, verbose):
         session_folder (str): Directory where all plots will be saved.
         verbose (int): Verbosity level for logging and debugging.
     """
+    plots_dir = os.path.join(session_folder, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
+
     plot_args = Namespace(
-        robot_name=robot_name,
-        model_ids=model_ids,
+        robot_name=rl_copp_obj.args.robot_name,
+        model_ids=rl_copp_obj.args.model_ids,
         scene_to_load_folder=None,
         plot_types=["convergence-all", "compare-rewards", "compare-convergences", "grouped_bar_speeds", "plot_boxplots"],
-        verbose=verbose,
+        verbose=rl_copp_obj.args.verbose,
         save_plots = True
     )
 
     # Switch working directory to session folder to ensure plots are saved there
     original_dir = os.getcwd()
-    os.chdir(session_folder)
+    os.chdir(plots_dir)
     try:
         plot.main(plot_args)
     finally:
@@ -202,6 +209,8 @@ def main(args):
         session_name_clean = args.session_name[:-4] if args.session_name.endswith('.csv') else args.session_name
         session_dir = os.path.join(auto_test_base_path, session_name_clean)
 
+        os.makedirs(session_dir, exist_ok=True)
+
         # Extract session_id from cleaned session name
         session_filename = os.path.basename(session_name_clean)
         parts = session_filename.split('_')
@@ -225,7 +234,7 @@ def main(args):
             for model_id in args.model_ids:
                 futures.append(executor.submit(utils.auto_run_mode, rl_copp.args, "auto_testing", model_id=model_id, no_gui=True))
                 logging.info(f"Submitted job for model {model_id}, waiting 8 seconds before next submission...")
-                time.sleep(8)
+                time.sleep(12)
             
             # Collect results as they complete.
             for future in concurrent.futures.as_completed(futures):
@@ -250,14 +259,13 @@ def main(args):
             time.sleep(2)
 
     # Copy individual test CSVs
-    for model_id, status, _ in results:
+    for m_name, status, _ in results:
         if status == "Success":
-            model_name = f"{args.robot_name}_model_{model_id}"
-            copy_latest_test_csv(model_name, session_dir)
+            copy_latest_test_csv(rl_copp, m_name, session_dir)
 
     # Generate combined session CSV and plots
-    collect_test_records(args.robot_name, args.model_ids, session_dir)
-    generate_plots(args.robot_name, args.model_ids, session_dir, args.verbose)
+    collect_test_records(rl_copp, session_dir)
+    generate_plots(rl_copp, session_dir)
 
     logging.info("All tests completed, records consolidated, and plots generated.")
 

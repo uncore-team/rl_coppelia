@@ -1413,7 +1413,7 @@ def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
 
     # Add the iterations
     if args.iterations:
-        cmd.extend(["--iterations", args.iterations])
+        cmd.extend(["--iterations", str(args.iterations)])
 
     # Add the verbose mode
     if args.verbose:

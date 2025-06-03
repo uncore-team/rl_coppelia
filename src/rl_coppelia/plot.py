@@ -18,7 +18,8 @@ Features:
     - Runs a testing session either sequentially or in parallel with a delay between submissions.
     - Saves a summary of testing results in a CSV file, along with some plots comparing the obtained metrics.
 """
-
+import matplotlib
+matplotlib.use('Agg')  # Use a non-GUI backend suitable for script-based PNG saving
 from collections import defaultdict
 import glob
 import logging
@@ -1330,6 +1331,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
     
         plt.figure(figsize=(10, 6))
         if metric == "Reward":
+            y_label_name = metric
             # Ordenar los datos por timestep para que el boxplot aparezca en orden correcto
             unique_models = sorted(full_df["Model"].unique(), key=lambda x: float(x.replace('s', '')))
             timesteps_ordered = [float(model.replace('s', '')) for model in unique_models]
@@ -1421,18 +1423,20 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         elif metric in ["Time (s)", "Linear speed", "Angular speed", "Distance traveled (m)"]:
             sns.boxplot(data=full_df, x="Model", y=metric)
             if metric == "Linear speed":
-                metric = metric + " (m/s)"
+                y_label_name = metric + " (m/s)"
             elif metric == "Angular speed":
-                metric = metric + " (rad/s)"
+                y_label_name = metric + " (rad/s)"
             elif metric == "Time (s)":
-                metric = "Average episode duration (s)"
+                y_label_name = "Average episode duration (s)"
 
             
         elif metric == "Reward detail (>=0)": 
+            y_label_name = metric
             df_reward_detail = full_df[full_df["Reward"] >= 0]
             sns.boxplot(data=df_reward_detail, x="Model", y="Reward")
 
         elif metric == "Target zone":
+            y_label_name = metric
             # Filtrate episodes with target zone == Nan
             df_target = full_df[full_df[metric].notna() & (full_df[metric] != 0)]
             
@@ -1481,7 +1485,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
                 .rename("Collision Rate")
                 .reset_index()
             )
-            metric = "Collision Rate (%)"
+            y_label_name = "Collision Rate (%)"
             sns.barplot(data=crash_pct, x="Model", y="Collision Rate")
             plt.ylabel("Episodes with collision (%)")
         
@@ -1501,12 +1505,12 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
         
         if metric == "Target zone":
             x_label_name = "Target zone"
-            metric = "Probability (%)"
+            y_label_name = "Probability (%)"
         else:
             x_label_name = "Timestep (s)"
             
         current_ax.set_xlabel(x_label_name, fontsize=20, labelpad=10)  
-        current_ax.set_ylabel(metric, fontsize=20, labelpad=10)  
+        current_ax.set_ylabel(y_label_name, fontsize=20, labelpad=10)  
         current_ax.tick_params(axis='both', which='major', labelsize=20)  
 
         current_ax.grid(True)
