@@ -1,0 +1,1 @@
+recursive-include src/rl_coppelia/assets *.png

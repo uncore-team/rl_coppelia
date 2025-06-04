@@ -199,7 +199,7 @@ def main(args):
                 'Max limits achieved',
                 'Distance traveled (m)'
             ]
-    otherdata_headers = ["Linear speed", "Angular speed", "LAT-Sim (s)", "LAT-Wall (s)"]
+    otherdata_headers = ["Episode number", "Linear speed", "Angular speed", "LAT-Sim (s)", "LAT-Wall (s)"]
 
     # Open a csv file to store the metrics
     with open(experiment_csv_path, mode='w', newline='') as metrics_file:
@@ -210,6 +210,9 @@ def main(args):
         # Wrap your range with tqdm to create a progress bar
         for i in tqdm(range(n_iter), desc="Testing Episodes", unit="episode"):
             # The tqdm progress bar will automatically update
+
+            # Get episode number
+            n_ep = i+1
             
             # Reset the environment only for the first iteration, as it will be reseted 
             # also after each iteration.
@@ -239,10 +242,12 @@ def main(args):
                     with open(otherdata_csv_path, mode="w", newline='') as f:
                         otherdata_writer = csv.writer(f)
                         otherdata_writer.writerow(otherdata_headers)  # Write the headers
+
+                
                 
                 with open(otherdata_csv_path, mode='a', newline='') as speed_file:
                     otherdata_writer = csv.writer(speed_file)
-                    otherdata_writer.writerow([info["linear_speed"], info["angular_speed"], info["lat_sim"], info["lat_wall"]])
+                    otherdata_writer.writerow([n_ep, info["linear_speed"], info["angular_speed"], info["lat_sim"], info["lat_wall"]])    # saves also the episode number
             
             
             # Call get_metrics(), so we will have the total time of the iteration

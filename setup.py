@@ -14,4 +14,9 @@ setup(
             "rl_coppelia_gui=rl_coppelia.gui_rl_coppelia:main"
         ]
     },
+    include_package_data=True,
+    package_data={
+        "rl_coppelia": ["assets/*.png"],
+    },
+
 )

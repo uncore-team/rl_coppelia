@@ -32,8 +32,7 @@ def model_name_completer(prefix, parsed_args, **kwargs):
     return matches
 
 
-
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(prog="rl_coppelia", description="Training and testing CLI")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -127,7 +126,7 @@ def main():
 
 
     argcomplete.autocomplete(parser)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.command == "train":
         train.main(args)

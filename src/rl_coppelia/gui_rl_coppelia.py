@@ -1,4 +1,7 @@
+import contextlib
+import csv
 from datetime import datetime
+import io
 import os
 import re
 import subprocess
@@ -10,17 +13,22 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 import logging
 from common import utils
-from rl_coppelia import train, test, plot, auto_training, auto_testing, retrain, sat_training
+from rl_coppelia import cli, train, test, plot, auto_training, auto_testing, retrain, sat_training
 from pathlib import Path
-from PyQt5.QtCore import QTimer, QThread, pyqtSignal
-from PyQt5.QtWidgets import QProgressBar, QHBoxLayout, QTextEdit, QSizePolicy, QScrollArea
+from PyQt5.QtCore import QTimer, QThread, pyqtSignal,QSize
+from PyQt5.QtWidgets import QProgressBar, QGridLayout, QHBoxLayout, QTextEdit, QSizePolicy, QScrollArea, QAbstractItemView,QListWidgetItem, QListWidget, QComboBox
 from PyQt5.QtGui import QIcon
+import pkg_resources
+
+
+PLOT_TYPES = ["spider", "convergence-time", "convergence-steps", "compare-rewards", "compare-episodes_length", 
+                "histogram_speeds", "histogram_speed_comparison", "hist_target_zones", "bar_target_zones"]
 
 
 class TestThread(QThread):
-    progress_signal = pyqtSignal(int)  # Señal para actualizar la barra de progreso
-    finished_signal = pyqtSignal()    # Señal para indicar que el test ha terminado
-    error_signal = pyqtSignal(str)    # Señal para manejar errores
+    progress_signal = pyqtSignal(int)  # Signal for updating progress bar
+    finished_signal = pyqtSignal()    # Signal for indicating the process has finished
+    error_signal = pyqtSignal(str)    # Signal for managing errors
 
     def __init__(self, args):
         super().__init__()
@@ -31,14 +39,14 @@ class TestThread(QThread):
     def stop(self):
         self.was_stopped_manually = True
         if hasattr(self, 'process') and self.process and self.process.poll() is None:
-            self.process.terminate()  # O self.process.kill() si quieres forzar
+            self.process.terminate()
 
     def run(self):
-        """Ejecuta el test en un hilo separado."""
+        """Execute each test in a separate thread, so the user can run multiple tests simultanously."""
         try:
             self.was_stopped_manually = False  # Reset flag
 
-            # Ejecutar el comando usando subprocess
+            # Execute the command using subprocess
             self.process = subprocess.Popen(
                 self.args,
                 stdout=subprocess.PIPE, 
@@ -47,9 +55,9 @@ class TestThread(QThread):
                 universal_newlines=True
             )
 
-            # Leer la salida en tiempo real para actualizar la barra de progreso
+            # Read the output of the process for updating the progress bar in real time
             for line in self.process.stdout:
-                print(line.strip())  # Para depuración en consola
+                logging.debug(line.strip())  # Console debug
                 if "Testing Episodes" in line:
                     try:
                         match = re.search(r"(\d+)%", line)
@@ -63,7 +71,7 @@ class TestThread(QThread):
 
             self.process.wait()
 
-            # Evitar emitir errores si fue parada manual
+            # Avoid error indicators if the process was manually stopped
             if self.was_stopped_manually:
                 return
 
@@ -76,30 +84,138 @@ class TestThread(QThread):
             self.error_signal.emit(str(e))
 
 
+class WelcomeScreen(QWidget):
+    """Welcome screen."""
+
+    def __init__(self, on_continue_callback):
+        super().__init__()
+        self.on_continue_callback = on_continue_callback
+        self.init_ui()
+
+    def init_ui(self):
+        from PyQt5.QtGui import QPixmap
+
+        main_layout = QHBoxLayout()
+
+        # Left side: logo
+        logo_label = QLabel()
+        logo_path = pkg_resources.resource_filename("rl_coppelia", "assets/uncore.png")
+        logo_pixmap = QPixmap(logo_path)
+        logo_pixmap = logo_pixmap.scaledToHeight(180, Qt.SmoothTransformation)
+        logo_label.setPixmap(logo_pixmap)
+        logo_label.setAlignment(Qt.AlignCenter)
+
+        logo_layout = QVBoxLayout()
+        logo_layout.addStretch()
+        logo_layout.addWidget(logo_label)
+        logo_layout.addStretch()
+
+        logo_container = QWidget()
+        logo_container.setLayout(logo_layout)
+        main_layout.addWidget(logo_container, stretch=1)
+
+        # Right side: text and button
+        right_layout = QVBoxLayout()
+
+        title = QLabel("<h1>Welcome to RL Coppelia GUI</h1>")
+        title.setAlignment(Qt.AlignLeft)
+        right_layout.addWidget(title)
+
+        team_text = QLabel("""
+            <p>
+            Created by <b>UnCoRE: UNexpected COgnitive, Robotics & Education Team</b>, a enthusiastic bunch of 
+            researchers and teachers working at Universidad de Málaga.
+            </p>
+        """)
+        team_text.setWordWrap(True)
+        right_layout.addWidget(team_text)
+
+        desc = QLabel("""
+            <p>
+            This application helps you manage, test, train and analyze reinforcement learning experiments
+            in robotic environments simulated in CoppeliaSim.
+            </p>
+            <p>
+            Have fun!
+            </p>
+                      
+        """)
+        desc.setWordWrap(True)
+        right_layout.addWidget(desc)
+
+        license_text = QLabel("""
+            <p style='font-size:10pt; color:gray;'>
+            Licensed under the <b>GNU General Public License v3.0</b>
+            </p>
+        """)
+        license_text.setWordWrap(True)
+        right_layout.addWidget(license_text)
+
+        # 🚀 Botón “Let's go”
+        continue_btn = QPushButton("Let's go")
+        continue_btn.setFixedSize(150, 50)
+        continue_btn.clicked.connect(self.on_continue_callback)
+        continue_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #007ACC;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
+                border-radius: 10px;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #005fa3;
+            }
+            QPushButton:pressed {
+                background-color: #00487a;
+            }
+        """)
+
+        # Add some extra space before the button
+        right_layout.addSpacing(30)
+
+        # Centered layout with respect the button
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(continue_btn)
+        btn_layout.addStretch()
+        right_layout.addLayout(btn_layout)
+
+        right_layout.addStretch()
+
+        right_container = QWidget()
+        right_container.setLayout(right_layout)
+        main_layout.addWidget(right_container, stretch=2)
+
+        self.setLayout(main_layout)
+
 
 class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RL Coppelia Manager")
-        self.setGeometry(100, 100, 1000, 600)
+        self.setGeometry(200, 200, 500, 300)
 
+        self.welcome_screen = WelcomeScreen(self.load_main_interface)
+        self.setCentralWidget(self.welcome_screen)
+
+
+    def load_main_interface(self):
+        """Load the main interface after the welcome screen."""
+        self.resize(1000, 600)
         expanded_path = os.path.abspath(__file__)
         self.base_path = str(Path(expanded_path).parents[2])
-        logging.info(f"Base path configured as: {self.base_path}")
+        logging.debug(f"Base path configured as: {self.base_path}")
         self.model_name = ""
         self.robot_name = ""
         self.experiment_id = 0
 
-        logo_path = os.path.join(self.base_path, "rl_coppelia", "assets", "uncore.png")
-        self.setWindowIcon(QIcon(logo_path))
-
-        # Widget central con layout horizontal
         main_layout = QHBoxLayout()
         central_widget = QWidget()
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
 
-        # Sección izquierda: tabs existentes
         self.tabs = QTabWidget()
         self.tabs.addTab(self.create_train_tab(), "Train")
         self.tabs.addTab(self.create_test_tab(), "Test")
@@ -109,13 +225,37 @@ class MainApp(QMainWindow):
         self.tabs.addTab(self.create_retrain_tab(), "Retrain")
         main_layout.addWidget(self.tabs, stretch=3)
 
-        # Sección derecha: panel lateral con logs y procesos activos
-        self.side_panel = self.create_side_panel()
-        main_layout.addLayout(self.side_panel, stretch=1)
+        side_panel_widget = QWidget()
+        side_panel_widget.setLayout(self.create_side_panel())
+        main_layout.addWidget(side_panel_widget, stretch=1)
+
+
+    def create_styled_button(self, text: str, on_click: callable) -> QPushButton:
+        """Create a consistently styled action button."""
+        button = QPushButton(text)
+        button.setFixedSize(180, 50)
+        button.setStyleSheet("""
+            QPushButton {
+                background-color: #007ACC;
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
+                border-radius: 10px;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #005fa3;
+            }
+            QPushButton:pressed {
+                background-color: #00487a;
+            }
+        """)
+        button.clicked.connect(on_click)
+        return button
 
 
     def update_processes_label(self):
-        """Actualizar el texto de procesos según cuántos haya."""
+        """Update text of the proccesses box according to the amount of them."""
         count = self.processes_container.count()
         if count == 0:
             self.processes_label.setText("No processes yet")
@@ -141,10 +281,10 @@ class MainApp(QMainWindow):
         logs_scroll.setWidget(self.logs_text)
         logs_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        layout.addWidget(logs_scroll, stretch=1)  # Ocupa la mitad superior
+        layout.addWidget(logs_scroll, stretch=1)  # It will fill the upper half
 
         # Contenedor de procesos
-        self.processes_label = QLabel("No processes yet")  # Inicia sin procesos
+        self.processes_label = QLabel("No processes yet")  # init the fesult message
         layout.addWidget(self.processes_label)
 
         process_scroll_content = QWidget()
@@ -155,15 +295,15 @@ class MainApp(QMainWindow):
         process_scroll.setWidgetResizable(True)
         process_scroll.setWidget(process_scroll_content)
 
-        layout.addWidget(process_scroll, stretch=1)  # Ocupa la otra mitad
+        layout.addWidget(process_scroll, stretch=1)  # It fills the lower half
 
         return layout
 
 
-
     def update_progress_bar(self, value):
-        """Actualizar la barra de progreso."""
+        """Updates the progress bar with a given value."""
         self.progress_bar.setValue(value)
+
 
     def update_test_inputs_when_model_name_introduced(self):
         """Update the robot name based on the selected model name."""
@@ -222,16 +362,16 @@ class MainApp(QMainWindow):
             with open(bashrc_path, "r") as bashrc:
                 content = bashrc.read()
                 
-            # Buscar en PYTHONPATH
+            # Search in PYTHONPATH
             pythonpath_matches = re.findall(r'(?:export\s+)?PYTHONPATH[^=]*=(.+)', content)
             for match in pythonpath_matches:
-                # Limpiar la línea (remover comillas, espacios, etc.)
+                # Clean the result (remove spaces and "")
                 clean_match = match.strip().strip('"').strip("'")
                 paths = clean_match.split(":")
                 for path in paths:
                     path = path.strip()
                     if path and "rl_coppelia" in path:
-                        # Expandir variables de entorno si las hay
+                        # Expand environment variables (if so)
                         expanded_path = os.path.expandvars(path)
                         if os.path.exists(expanded_path):
                             base_path = str(Path(expanded_path).parents[1])  # Get the parent directory of rl_coppelia
@@ -240,7 +380,7 @@ class MainApp(QMainWindow):
                                 logging.warning(f"Found rl_coppelia path in PYTHONPATH: {base_path}, but it does not match the expected base path: {self.base_path}")
                             return base_path  
             
-            # Buscar en PATH si no se encontró en PYTHONPATH
+            # Search in PATH it the previous search was unsuccessful
             path_matches = re.findall(r'(?:export\s+)?PATH[^=]*=(.+)', content)
             for match in path_matches:
                 clean_match = match.strip().strip('"').strip("'")
@@ -266,7 +406,7 @@ class MainApp(QMainWindow):
         """Open a file dialog to select a ZIP file, starting in the rl_coppelia directory."""
         rl_coppelia_path = self.get_rl_coppelia_path_from_bashrc()
         
-        # Si encontramos la ruta de rl_coppelia, usarla como directorio inicial
+        # If rl_coppelia path was found, then it will be used as main directory for searching files
         if rl_coppelia_path and os.path.exists(rl_coppelia_path):
             start_path = rl_coppelia_path
             print(f"Starting file dialog in rl_coppelia directory: {start_path}")
@@ -391,43 +531,30 @@ class MainApp(QMainWindow):
         form.addRow("Verbose Level (default: 1):", self.verbose_input)
 
         # Buttons
-        test_button = QPushButton("Start Testing")
-        test_button.clicked.connect(self.start_testing)
-        test_button.setFixedHeight(40)  # Altura mayor
-        test_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)  # No se expande horizontalmente
-        test_button.setStyleSheet("""
-            QPushButton {
-                padding: 6px 16px;
-                font-size: 14px;
-                border-radius: 8px;
-                background-color: #007ACC;
-                color: white;
-            }
-            QPushButton:disabled {
-                background-color: #888;
-                color: #ccc;
-            }
-        """)
-        # Layout centrado (horizontal + vertical)
-        center_button_layout = QVBoxLayout()
-        center_button_layout.addStretch()
+        test_button = self.create_styled_button("Start Testing", self.start_testing)
 
-        h_center = QHBoxLayout()
-        h_center.addStretch()
-        h_center.addWidget(test_button)
-        h_center.addStretch()
+        # Layout centrado vertical y horizontal
+        button_layout = QVBoxLayout()
+        button_layout.addStretch()
 
-        center_button_layout.addLayout(h_center)
-        center_button_layout.addStretch()
+        centered_h = QHBoxLayout()
+        centered_h.addStretch()
+        centered_h.addWidget(test_button)
+        centered_h.addStretch()
 
-        # Ensamblar la pestaña
+        button_layout.addLayout(centered_h)
+        button_layout.addStretch()
+
         layout.addLayout(form)
-        layout.addLayout(center_button_layout)
+        layout.addLayout(button_layout)
 
         tab.setLayout(layout)
         return tab
 
     
+
+
+
 
     def create_plot_tab(self):
         """Tab for plot configuration."""
@@ -436,22 +563,156 @@ class MainApp(QMainWindow):
 
         # Form for plot parameters
         form = QFormLayout()
-        self.plot_robot_name_input = QLineEdit()
-        self.plot_model_ids_input = QLineEdit()
-        self.plot_types_input = QLineEdit()
+        self.plot_robot_name_input = QComboBox()
+        self.plot_robot_name_input.setEditable(False)
+        self.populate_robot_names()
+        self.plot_robot_name_input.currentIndexChanged.connect(self.update_model_ids_for_selected_robot)
+        self.plot_model_ids_input = QListWidget()
+        self.plot_model_ids_input.setFixedHeight(200)
+        self.plot_model_ids_input.setSelectionMode(QAbstractItemView.NoSelection)
+        self.plot_types_checkboxes = []
 
-        form.addRow("Robot Name:", self.plot_robot_name_input)
-        form.addRow("Model IDs (comma-separated):", self.plot_model_ids_input)
-        form.addRow("Plot Types (comma-separated):", self.plot_types_input)
+        grid_widget = QWidget()
+        grid_layout = QGridLayout()
+        grid_widget.setLayout(grid_layout)
+
+        cols = 2
+        for index, plot_type in enumerate(PLOT_TYPES):
+            checkbox = QCheckBox(plot_type)
+            row = index // cols
+            col = index % cols
+            grid_layout.addWidget(checkbox, row, col)
+            self.plot_types_checkboxes.append(checkbox)
+
+        form.addRow("Robot name (required):", self.plot_robot_name_input)
+        form.addRow("Model IDs (required):", self.plot_model_ids_input)
+        form.addRow("Plot types:", grid_widget)
+
+        self.update_model_ids_placeholder("Select a robot first")
 
         # Buttons
-        plot_button = QPushButton("Generate Plots")
-        plot_button.clicked.connect(self.generate_plots)
+        plot_button = self.create_styled_button("Generate Plots", self.start_plot)
+
+        button_layout = QVBoxLayout()
+        button_layout.addStretch()
+
+        centered_h = QHBoxLayout()
+        centered_h.addStretch()
+        centered_h.addWidget(plot_button)
+        centered_h.addStretch()
+
+        button_layout.addLayout(centered_h)
+        button_layout.addStretch()
+
         layout.addLayout(form)
-        layout.addWidget(plot_button)
+        layout.addLayout(button_layout)
+
 
         tab.setLayout(layout)
         return tab
+    
+
+    def update_model_ids_placeholder(self, text):
+        """Show a placeholder item in the model IDs list."""
+        self.plot_model_ids_input.clear()
+        placeholder = QListWidgetItem(text)
+        placeholder.setFlags(Qt.NoItemFlags)
+        placeholder.setForeground(Qt.gray)
+        self.plot_model_ids_input.addItem(placeholder)
+
+
+    def update_model_ids_for_selected_robot(self):
+        """Update the avaliable models accordingly to the selected robot."""
+        robot_name = self.plot_robot_name_input.currentText()
+        if robot_name.startswith("Select"):
+            self.update_model_ids_placeholder("Select a robot first")
+            return
+
+        model_dir = os.path.join(self.base_path, "robots", robot_name, "models")
+        if not os.path.isdir(model_dir):
+            self.update_model_ids_placeholder("No models found for this robot")
+            return
+
+        # Load action times from train_records.csv file
+        action_times = {}
+        csv_path = os.path.join(self.base_path, "robots", robot_name, "training_metrics", "train_records.csv")
+        if os.path.isfile(csv_path):
+            with open(csv_path, newline="") as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    model_name = row.get("Exp_id") 
+                    action_time = row.get("Action time (s)")
+                    if model_name and action_time:
+                        action_times[model_name.strip()] = action_time.strip()
+
+        # Search valid models
+        model_ids = []
+        for entry in os.listdir(model_dir):
+            subdir_path = os.path.join(model_dir, entry)
+            if os.path.isdir(subdir_path):
+                match = re.match(rf"{robot_name}_model_(\d+)", entry)
+                if match:
+                    model_id = match.group(1)
+                    expected_file = f"{robot_name}_model_{model_id}_last.zip"
+                    expected_path = os.path.join(subdir_path, expected_file)
+                    if os.path.isfile(expected_path):
+                        model_ids.append(model_id)
+
+        if not model_ids:
+            self.update_model_ids_placeholder("No valid models found")
+            return
+
+        # Show checkboxes with models and their action times
+        self.plot_model_ids_input.clear()
+        for model_id in sorted(model_ids, key=int):
+            full_model_name = f"{robot_name}_model_{model_id}"
+            time_str = action_times.get(full_model_name, "n/a")
+
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(0, 20))
+
+            widget = QWidget()
+            layout = QHBoxLayout(widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+
+            checkbox = QCheckBox()
+            checkbox.setProperty("model_id", model_id)
+            checkbox.setText(model_id)
+            layout.addWidget(checkbox)
+
+            label = QLabel(f"<span style='color:gray;'>Action time: {time_str}s</span>")
+            label.setTextFormat(Qt.RichText)
+            layout.addWidget(label)
+
+            layout.addStretch()
+
+            self.plot_model_ids_input.addItem(item)
+            self.plot_model_ids_input.setItemWidget(item, widget)
+
+
+
+    def populate_robot_names(self):
+        """Load available robot names from robots/ directory into the dropdown."""
+        robots_dir = os.path.join(self.base_path, "robots")
+        if os.path.isdir(robots_dir):
+            robot_names = sorted(
+                [name for name in os.listdir(robots_dir) if os.path.isdir(os.path.join(robots_dir, name))]
+            )
+            self.plot_robot_name_input.clear()
+            self.plot_robot_name_input.addItems(robot_names)
+        else:
+            logging.warning(f"Robots directory not found at: {robots_dir}")
+
+        self.plot_robot_name_input.clear()
+        self.plot_robot_name_input.addItem("Select a robot...")
+        self.plot_robot_name_input.model().item(0).setEnabled(False)  # No seleccionable
+
+        self.plot_robot_name_input.addItems(robot_names)
+        self.plot_robot_name_input.setCurrentIndex(0)
+
+
+
+
 
     def create_auto_training_tab(self):
         """Tab for auto training configuration."""
@@ -637,7 +898,7 @@ class MainApp(QMainWindow):
             "--verbose", str(self.verbose_input.value())
         ]
 
-        # Parámetros opcionales
+        # Optional args
         if self.save_traj_checkbox.isChecked():
             args.append("--save_traj")
         if self.test_params_file_input.text():
@@ -653,11 +914,11 @@ class MainApp(QMainWindow):
 
         logging.info(f"Starting testing with args: {args}")
 
-        # Crear hilo de test
+        # Create test thread
         test_thread = TestThread(args)
         test_thread.terminal_title = terminal_title
 
-        # Crear widget visual del proceso
+        # Create a widget for the process
         process_widget = QWidget()
         process_layout = QVBoxLayout()
         process_widget.setLayout(process_layout)
@@ -681,29 +942,80 @@ class MainApp(QMainWindow):
         self.processes_container.addWidget(process_widget)
         self.update_processes_label()
 
-        # Conectar señales con esta barra específica
+        # Conect signales with this specific progress bar
         test_thread.progress_signal.connect(progress_bar.setValue)
         test_thread.finished_signal.connect(lambda: self.on_process_finished(process_widget))
         test_thread.error_signal.connect(lambda msg: self.on_process_error(msg, process_widget))
 
         test_thread.start()
 
-        # Desactivar botón de Start Testing temporalmente
+        # Deactivate 'Start testing' button for few seconds
         button = self.sender()
         if isinstance(button, QPushButton):
             self.disable_button_with_countdown(button, seconds=8)
 
 
 
-    def generate_plots(self):
+    def start_plot(self):
         """Generate plots."""
-        args = {
-            "robot_name": self.plot_robot_name_input.text(),
-            "model_ids": [int(x) for x in self.plot_model_ids_input.text().split(",")],
-            "plot_types": self.plot_types_input.text().split(","),
-        }
+        # Check if robot name was selected
+        robot_name = self.plot_robot_name_input.currentText()
+        if robot_name == "Select a robot...":   # It means that the user did not pick any robot
+            self.logs_text.append("<span style='color:orange;'>⚠️ Please select a robot.</span>")
+            return
+
+        selected_ids = []
+        for i in range(self.plot_model_ids_input.count()):
+            item = self.plot_model_ids_input.item(i)
+            widget = self.plot_model_ids_input.itemWidget(item)
+            if widget:
+                checkbox = widget.findChild(QCheckBox)
+                if checkbox and checkbox.isChecked():
+                    selected_ids.append(int(checkbox.property("model_id")))
+
+        selected_types = [
+            cb.text() for cb in self.plot_types_checkboxes if cb.isChecked()
+        ]
+
+
+        if not selected_ids:
+            self.logs_text.append("<span style='color:orange;'>⚠️ Please select at least one model ID.</span>")
+            return
+
+        if not selected_types:
+            self.logs_text.append("<span style='color:orange;'>⚠️ Please select at least one plot type.</span>")
+            return
+
+        args = [
+            "plot",
+            "--robot_name", robot_name,
+            "--model_ids", *map(str, selected_ids),
+            "--plot_types", *selected_types,
+            "--verbose", str(10)
+        ]
         logging.info(f"Generating plots with args: {args}")
-        plot.main(args)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            try:
+                cli.main(args)
+            except Exception as e:
+                self.logs_text.append(f"<span style='color:red;'>❌ Exception during plotting: {str(e)}</span>")
+                return
+
+        content = output.getvalue()
+
+        # Search lines with "ERROR"
+        errors = [line for line in content.splitlines() if " - ERROR - " in line]
+
+        if errors:
+            self.logs_text.append("<span style='color:red;'>❌ Errors detected during plotting:</span>")
+            for err in errors:
+                self.logs_text.append(f"<pre>{err}</pre>")
+        else:
+            self.logs_text.append(
+                f"<span style='color:green;'> --> </span> Plots generated for models {selected_ids} with types: {', '.join(selected_types)}."
+            )
+
 
     def start_auto_training(self):
         """Start auto training."""
@@ -738,8 +1050,8 @@ class MainApp(QMainWindow):
 def main():
     utils.logging_config_gui()
     app = QApplication(sys.argv)
-    logo_path = os.path.join(os.path.dirname(__file__), "assets", "uncore.png")
-    print(logo_path)
+    logo_path = pkg_resources.resource_filename("rl_coppelia", "assets/uncore.png")
+
     app.setWindowIcon(QIcon(logo_path))
     window = MainApp()
     window.show()
