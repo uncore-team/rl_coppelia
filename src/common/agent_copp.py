@@ -84,7 +84,11 @@ def sysCall_thread():
 
         # Set the folder where the trajectories will be saved (inside testing_metrics folder)
         if model_name is None:
-            agent.save_traj_csv_folder = ""
+            agent.save_traj_csv_folder = os.path.join(
+            agent.scene_configs_path,
+            agent.scene_to_load_folder,
+            "trajs"
+        )
         else:
             agent.save_traj_csv_folder = os.path.join(
                 agent.save_trajs_path,

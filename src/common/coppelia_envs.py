@@ -93,6 +93,7 @@ class CoppeliaEnv(gym.Env):
         self.crash_flag = False
         self.initial_ato=0
         self.reset_flag = False
+        self.initial_target_distance = 0
 
 
     def step(self, action):

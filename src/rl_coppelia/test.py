@@ -15,96 +15,6 @@ from stable_baselines3.common.monitor import Monitor
 from tqdm.auto import tqdm
 
 
-def _init_metrics_test(env):
-    """
-    Private function for getting the initial distance to the target, and the initial time of the episode.
-
-    This function is called at the beginning of each episode during the testing process, so we can get the final metrics
-    obtained during the test after finishing each episode.
-
-    Args:
-        env (gym): Custom environment to get the metrics from.
-
-    Returns:
-        None
-    """
-    env.initial_target_distance=env.observation[0]
-
-
-def _get_metrics_test(env):
-    """
-    Private function for getting the all the desired metrics at the end of each episode, during the testing process.
-
-    Args:
-        env (gym): Custom environment to get the metrics from.
-
-    Returns:
-        initial_target_distance (float): Initial distance between the robot and the target.
-        reached_target_distance (float): Final distance between the robot and the target obtained at the end of the episode.
-        time_elapsed (float): Time counter to track the duration of the episode.
-        reward (float): Reward obtained at the end of the episode.
-        count (int): Total timesteps completed in the episode.
-        
-    """
-    env.reached_target_distance=env.unwrapped.observation[0]
-    return env.initial_target_distance,env.reached_target_distance,env.time_elapsed,env.reward, env.count, env.collision_flag, env.max_achieved, env.target_zone
-
-
-def calculate_episode_distance(trajs_folder, index):
-        """
-        Calculate the total distance traveled in a specific episode from its trajectory file.
-
-        Args:
-            trajs_folder (str): Path to the folder containing trajectory CSV files.
-            index (int): Index of the episode to identify the corresponding trajectory file 
-                        (e.g., "trajectory_<index>.csv").
-
-        Returns:
-            float: Total distance traveled during the specified episode, calculated as the sum 
-                of distances between successive positions in the trajectory.
-        """
-        current_traj_file = os.path.join(trajs_folder, f"trajectory_{index+1}.csv")
-        df_traj = pd.read_csv(current_traj_file)
-        x_positions = df_traj["x"].values
-        y_positions = df_traj["y"].values
-        step_distances = np.sqrt(np.diff(x_positions)**2 + np.diff(y_positions)**2)
-        distance_traveled = np.sum(step_distances)
-
-        return distance_traveled
-
-
-
-def calculate_average_distances(trajs_folder):
-        """
-        Calculate the average distance traveled per episode from the trajectory files.
-
-        Args:
-            trajs_folder (str): Path to the folder containing trajectory CSV files.
-
-        Returns:
-            float: Average distance traveled across all episodes.
-        """
-        traj_files = glob.glob(os.path.join(trajs_folder, "*.csv"))
-        total_distance = 0.0
-        count = 0
-        if not traj_files:
-            logging.warning(f"No trajectory files found in {trajs_folder}. Returning 0.0 as average distance.")
-            return 0.0
-        logging.info(f"Calculating average distance from {len(traj_files)} trajectory files in {trajs_folder}.")
-        # Iterate through each trajectory file and calculate the distance
-        # between successive positions
-        for traj_file in traj_files:
-            df_traj = pd.read_csv(traj_file)
-            x_positions = df_traj["x"].values
-            y_positions = df_traj["y"].values
-
-            # Calculate the distance between successive positions
-            step_distances = np.sqrt(np.diff(x_positions)**2 + np.diff(y_positions)**2)
-            logging.info(f"Step distances for {traj_file}: {np.sum(step_distances):.2f} m")
-            total_distance += np.sum(step_distances)
-            count += 1
-
-        return total_distance / count if count > 0 else 0.0
 
 
 def main(args):
@@ -222,7 +132,7 @@ def main(args):
             
             # Call init_metrics() for getting the initial time of the iteration
             # and the initial distance to the target
-            _init_metrics_test(rl_copp.env.envs[0].unwrapped)
+            utils.init_metrics_test(rl_copp.env.envs[0].unwrapped)
             
             # Reset variables to start the iteration
             terminated = False
@@ -253,7 +163,7 @@ def main(args):
             # Call get_metrics(), so we will have the total time of the iteration
             # and the final distance to the target
             
-            init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved, target_zone = _get_metrics_test(rl_copp.env.envs[0].unwrapped)
+            init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved, target_zone = utils.get_metrics_test(rl_copp.env.envs[0].unwrapped)
             
             if terminated:
                 if reward_target > 0:
@@ -267,7 +177,8 @@ def main(args):
             if rl_copp.args.save_traj:
                 # Traj file should be saved now (it's saved during the reset of the agent), 
                 # so we can calculate the distance traveled in the episode
-                episode_distance = calculate_episode_distance(trajs_folder, i)
+                traj_file = f"trajectory_{i+1}.csv"
+                episode_distance = utils.calculate_episode_distance(trajs_folder, traj_file)
             else:
                 episode_distance = 0.0
 

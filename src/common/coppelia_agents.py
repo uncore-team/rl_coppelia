@@ -144,7 +144,6 @@ class CoppeliaAgent:
             "scene_episode"
         )
         
-
         # For saving trajectory
         self.save_traj = False
         self.model_ids = []
@@ -283,6 +282,7 @@ class CoppeliaAgent:
         else:
             if self.episode_idx < len(self.action_times):
                 self.id_obstacle = 0
+
                 # CSV path
                 csv_folder = os.path.join(self.paths["scene_configs"], self.scene_to_load_folder)  
                 scene_path = utils.find_scene_csv_in_dir(csv_folder)
@@ -291,6 +291,21 @@ class CoppeliaAgent:
                     sys.exit()
 
                 df = pd.read_csv(scene_path)
+
+                # Obtener todas las filas que son targets
+                target_rows = df[df['type'] == 'target'].reset_index(drop=True)
+                num_targets = len(target_rows)
+
+                if num_targets == 0:
+                    logging.error("No targets found in the scene CSV.")
+                    sys.exit()
+
+                # Calcular qué target usar en este episodio
+                target_idx = self.episode_idx // (len(self.action_times) // num_targets)
+                target_idx = min(target_idx, num_targets - 1)  # proteger por si acaso
+
+                # Inicializar contador para saber qué target aplicar
+                current_target_idx = 0
 
                 for _, row in df.iterrows():
                     x, y = row['x'], row['y']
@@ -302,13 +317,46 @@ class CoppeliaAgent:
                         self.sim.setObjectOrientation(self.robot_baselink, -1, [0, 0, theta])
 
                     elif row['type'] == 'target':
-                        self.sim.setObjectPosition(self.target, -1, [x, y, 0])
+                        if current_target_idx == target_idx:
+                            self.sim.setObjectPosition(self.target, -1, [x, y, 0])
+                        current_target_idx += 1
 
                     elif row['type'] == 'obstacle':
-                        self.id_obstacle = self.id_obstacle + 1
+                        self.id_obstacle += 1
                         self.generate_obs_from_csv(row)
 
                 logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
+                logging.info(f"Episode {self.episode_idx}: Using target #{target_idx} with position {target_rows.iloc[target_idx][['x','y']].tolist()}")
+
+
+            # df = pd.read_csv(scene_path)
+
+            # if self.episode_idx < len(self.action_times):
+            #     self.id_obstacle = 0
+            #     # CSV path
+            #     csv_folder = os.path.join(self.paths["scene_configs"], self.scene_to_load_folder)  
+            #     scene_path = utils.find_scene_csv_in_dir(csv_folder)
+            #     if not os.path.exists(scene_path):
+            #         logging.error(f"[ERROR] CSV scene file not found: {scene_path}")
+            #         sys.exit()
+                
+            #     for _, row in df.iterrows():
+            #         x, y = row['x'], row['y']
+            #         z = 0.06969 if row['type'] == "robot" else 0.0
+
+            #         if row['type'] == 'robot':
+            #             self.sim.setObjectPosition(self.robot_baselink, -1, [x, y, z])
+            #             theta = float(row['theta']) if 'theta' in row and not pd.isna(row['theta']) else 0
+            #             self.sim.setObjectOrientation(self.robot_baselink, -1, [0, 0, theta])
+
+            #         elif row['type'] == 'target':
+            #             self.sim.setObjectPosition(self.target, -1, [x, y, 0])
+
+            #         elif row['type'] == 'obstacle':
+            #             self.id_obstacle = self.id_obstacle + 1
+            #             self.generate_obs_from_csv(row)
+
+            #     logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
 
 
         # Save current scene configuration for further analysis

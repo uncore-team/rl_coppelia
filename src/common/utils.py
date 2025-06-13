@@ -697,7 +697,24 @@ def update_and_copy_script(rl_copp_obj):
             amp_model_ids = None
         else:
             model_ids = rl_copp_obj.args.model_ids
+
+            # Get how many targets are in the scene
+            scene_configs_path = rl_copp_obj.paths["scene_configs"]
+            scene_path = os.path.join(scene_configs_path, rl_copp_obj.args.scene_to_load_folder)
+            scene_path_csv = find_scene_csv_in_dir(scene_path)
+            if not os.path.exists(scene_path_csv):
+                logging.error(f"[ERROR] CSV scene file not found: {scene_path_csv}")
+                sys.exit()
+            df = pd.read_csv(scene_path_csv)
+            num_targets = (df['type'] == 'target').sum()
+
+            # Create a list of model IDs, repeating each ID for the number of iterations specified
             amp_model_ids = [model_id for model_id in model_ids for _ in range(rl_copp_obj.args.iters_per_model)]
+            
+            # If the number of targets is greater than 1, repeat the model IDs to match the number of targets
+            amp_model_ids = amp_model_ids * num_targets
+
+            # Set the model IDs in the args
             rl_copp_obj.args.model_ids = amp_model_ids
             action_times= get_fixed_actimes(rl_copp_obj)
             print(action_times)
@@ -1933,6 +1950,100 @@ class CustomMetricsCallback(BaseCallback):
         return True
 
 
+# ------------------------------------
+# ------ Functions for testing ------
+# ------------------------------------
+
+
+def init_metrics_test(env):
+    """
+    Function for getting the initial distance to the target, and the initial time of the episode.
+
+    This function is called at the beginning of each episode during the testing process, so we can get the final metrics
+    obtained during the test after finishing each episode.
+
+    Args:
+        env (gym): Custom environment to get the metrics from.
+
+    Returns:
+        None
+    """
+    env.initial_target_distance=env.observation[0]
+
+
+def get_metrics_test(env):
+    """
+    Function for getting the all the desired metrics at the end of each episode, during the testing process.
+
+    Args:
+        env (gym): Custom environment to get the metrics from.
+
+    Returns:
+        initial_target_distance (float): Initial distance between the robot and the target.
+        reached_target_distance (float): Final distance between the robot and the target obtained at the end of the episode.
+        time_elapsed (float): Time counter to track the duration of the episode.
+        reward (float): Reward obtained at the end of the episode.
+        count (int): Total timesteps completed in the episode.
+        
+    """
+    env.reached_target_distance=env.unwrapped.observation[0]
+    return env.initial_target_distance,env.reached_target_distance,env.time_elapsed,env.reward, env.count, env.collision_flag, env.max_achieved, env.target_zone
+
+
+def calculate_episode_distance(trajs_folder, traj_file_name):
+    """
+    Calculate the total distance traveled in a specific episode from its trajectory file.
+
+    Args:
+        trajs_folder (str): Path to the folder containing trajectory CSV files.
+        traj_file_name (str): Name of the trajectory file (e.g., "trajectory_1.csv").
+
+    Returns:
+        float: Total distance traveled during the specified episode, calculated as the sum 
+               of distances between successive positions in the trajectory.
+    """
+    current_traj_file = os.path.join(trajs_folder, traj_file_name)
+    df_traj = pd.read_csv(current_traj_file)
+    x_positions = df_traj["x"].values
+    y_positions = df_traj["y"].values
+    step_distances = np.sqrt(np.diff(x_positions)**2 + np.diff(y_positions)**2)
+    distance_traveled = np.sum(step_distances)
+
+    return distance_traveled
+
+
+
+def calculate_average_distances(trajs_folder):
+        """
+        Calculate the average distance traveled per episode from the trajectory files.
+
+        Args:
+            trajs_folder (str): Path to the folder containing trajectory CSV files.
+
+        Returns:
+            float: Average distance traveled across all episodes.
+        """
+        traj_files = glob.glob(os.path.join(trajs_folder, "*.csv"))
+        total_distance = 0.0
+        count = 0
+        if not traj_files:
+            logging.warning(f"No trajectory files found in {trajs_folder}. Returning 0.0 as average distance.")
+            return 0.0
+        logging.info(f"Calculating average distance from {len(traj_files)} trajectory files in {trajs_folder}.")
+        # Iterate through each trajectory file and calculate the distance
+        # between successive positions
+        for traj_file in traj_files:
+            df_traj = pd.read_csv(traj_file)
+            x_positions = df_traj["x"].values
+            y_positions = df_traj["y"].values
+
+            # Calculate the distance between successive positions
+            step_distances = np.sqrt(np.diff(x_positions)**2 + np.diff(y_positions)**2)
+            logging.info(f"Step distances for {traj_file}: {np.sum(step_distances):.2f} m")
+            total_distance += np.sum(step_distances)
+            count += 1
+
+        return total_distance / count if count > 0 else 0.0
 
 # ------------------------------------
 # ------ Functions for plotting ------
@@ -1965,6 +2076,7 @@ def get_data_for_spider(csv_path, args, column_names):
     # Cargar el CSV en un DataFrame de pandas
     try:
         df = pd.read_csv(csv_path)
+        logging.info(f"CSV file loaded successfully from {csv_path}.")
 
     except Exception as e:
         logging.error(f"No csv file was found in {csv_path}. Exception: {e}")
@@ -1977,7 +2089,8 @@ def get_data_for_spider(csv_path, args, column_names):
     for id in args.model_ids:
         # Search rows in the first column which finish with the provided ID      
 
-        filter = df_filtered.iloc[:, 0].apply(lambda x: x.startswith(f'{args.robot_name}_model_{id}'))
+        pattern = re.compile(rf'^{re.escape(args.robot_name)}_model_{id}(?:_|$)')
+        filter = df_filtered.iloc[:, 0].apply(lambda x: bool(pattern.match(str(x))))
         filtered_rows = df_filtered[filter]
         
         # If no row is found, then assign None
@@ -1987,6 +2100,8 @@ def get_data_for_spider(csv_path, args, column_names):
             # Select the desired columns and calculte the mean
             data = filtered_rows[column_names].mean(axis=0)
             data_to_extract[id] = data
+
+        logging.info(f"Data extracted for ID {id}: {data_to_extract[id]}")
     
     return data_to_extract
 
@@ -2054,7 +2169,7 @@ def process_spider_data (df, tolerance=0.05):
     # Prepare the output: list of normalized data and names
     for id_, row in df.iterrows():
         action_time = row["Action time (s)"]
-        names.append(f"Model {action_time:.2f}s")
+        names.append(f"{action_time:.2f}s")
         data_list.append(df_normalized.loc[id_, labels].tolist())
 
     return data_list, names, labels
@@ -2164,8 +2279,8 @@ def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     df = pd.read_csv(file_path)
 
     # Limit max steps <= 200000 #TODO: remove this and do it automatically, by using the experiment with less steps as a limit
-    mask = df['Step'] <= 200000
-    df = df[mask]
+    # mask = df['Step'] <= 200000
+    # df = df[mask]
     
     # Prepare x axis depending on the selected option
     if x_axis == "WallTime":
@@ -2193,7 +2308,7 @@ def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     x_norm = (x_raw - np.min(x_raw)) / (np.max(x_raw) - np.min(x_raw))
     
     # As there can be some confusing data at the beggining, jsut skip the first start_fraction of the data
-    start_fraction=0.02  # For method 1, change this to 0.05 and uncomment method1 code (and comment method 2)
+    start_fraction=0.001  # For method 1, change this to 0.05 and uncomment method1 code (and comment method 2)
     start_idx = int(len(x_norm) * start_fraction)
     x_norm_window = x_norm[start_idx:]
     reward_window = reward[start_idx:]
@@ -2251,3 +2366,82 @@ def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     
     return convergence_point, reward_fit, x_raw, reward, reward_at_convergence
 
+
+def process_rl_exploitation_summary(summary_csv_path):
+    """
+    Processes a summary CSV of multiple RL exploitations, filters episodes with TimeSteps count == 1,
+    and computes a cleaned summary CSV.
+
+    Args:
+        summary_csv_path (str): Path to the original summary CSV file.
+    """
+    # Load the original summary CSV
+    summary_df = pd.read_csv(summary_csv_path)
+
+    # Prepare list to store cleaned results
+    cleaned_data = []
+
+    # Define the output CSV name
+    base_dir = os.path.dirname(summary_csv_path)
+    print(f"Base directory for cleaned summary: {base_dir}")
+    cleaned_summary_path = os.path.join(base_dir, "cleaned_summary.csv")
+
+    
+
+    for _, row in summary_df.iterrows():
+        exp_id = row["Exp_id"]
+        action_time = row["Action Time (s)"]
+
+        if exp_id is None or pd.isna(exp_id):
+            print("Warning: Exp_id is None or NaN. Skipping this row.")
+            continue
+        print(exp_id)
+
+        folder_name = str(exp_id).split('last')[0] + 'last_testing'
+        exp_path = os.path.join(base_dir, folder_name, exp_id)
+
+        if not os.path.isfile(exp_path):
+            print(f"Warning: File {exp_path} not found. Skipping.")
+            continue
+
+        # Load the exploitation CSV
+        exp_df = pd.read_csv(exp_path)
+
+        # Filter out episodes with TimeSteps count == 1
+        filtered_df = exp_df[exp_df["TimeSteps count"] > 1]
+
+        if filtered_df.empty:
+            print(f"Warning: No valid episodes in {exp_id}. Skipping.")
+            continue
+
+        # Compute metrics
+        avg_reward = filtered_df["Reward"].mean()
+        avg_time = filtered_df["Time (s)"].mean()
+        percentage_terminated = 100 * filtered_df["Terminated"].sum() / len(filtered_df)
+        num_collisions = filtered_df["Crashes"].sum()
+        collisions_percentage = 100 * num_collisions / len(filtered_df)
+        zone_1_pct = 100 * (filtered_df["Target zone"] == 1).sum() / len(filtered_df)
+        zone_2_pct = 100 * (filtered_df["Target zone"] == 2).sum() / len(filtered_df)
+        zone_3_pct = 100 * (filtered_df["Target zone"] == 3).sum() / len(filtered_df)
+        avg_distance = filtered_df["Distance traveled (m)"].mean()
+
+        # Append cleaned result
+        cleaned_data.append({
+            "Exp_id": exp_id,
+            "Action Time (s)": action_time,
+            "Avg reward": round(avg_reward,3),
+            "Avg time reach target": round(avg_time,3),
+            "Percentage terminated": round(percentage_terminated,3),
+            "Number of collisions": num_collisions,
+            "Collisions percentage": round(collisions_percentage,3),
+            "Target zone 1 (%)": round(zone_1_pct,3),
+            "Target zone 2 (%)": round(zone_2_pct,3),
+            "Target zone 3 (%)": round(zone_3_pct,3),
+            "Avg episode distance (m)": round(avg_distance,3)
+        })
+
+    # Save cleaned summary to CSV
+    cleaned_df = pd.DataFrame(cleaned_data)
+    cleaned_df.to_csv(cleaned_summary_path, index=False)
+
+    return cleaned_summary_path
