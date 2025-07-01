@@ -126,7 +126,7 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
     for data, name in zip(data_list, names):    # Plot each data set
         data = data + data[:1]  # Assure that we are closing the circle
         ax.plot(angles, data, linewidth=2, linestyle='solid', label=name)
-        ax.fill(angles, data, alpha=0.25)
+        ax.fill(angles, data, alpha=0.1)
 
     # Labels of the axis
     labels = [label.replace("_", "\n") for label in labels]  # Replace underscores with newlines for better readability
@@ -1058,6 +1058,7 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
         ax.axhline(i, color='lightgray', linewidth=0.5, zorder=0)
         ax.axvline(i, color='lightgray', linewidth=0.5, zorder=0)
 
+    target_counter = 0
     # Draw all the elements of the scene
     for _, row in df_scene.iterrows():
         x, y = row['x'], row['y']
@@ -1091,6 +1092,13 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
             for radius, color in target_rings:
                 circle = plt.Circle((x, y), radius, color=color, fill=True, alpha=0.6)
                 ax.add_patch(circle)
+            target_label = chr(ord('A') + target_counter)
+            if y < 0:
+                y_offset = -0.3
+            else:
+                y_offset = 0.48
+            ax.text(x, y + y_offset, f"{target_label}", fontsize=22, fontweight='bold', color='black', zorder=10, ha='center')
+            target_counter += 1
     
     traj_files = glob.glob(os.path.join(folder_path, "trajs", "trajectory_*.csv"))
 
@@ -1869,7 +1877,9 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
 
             tab20 = plt.cm.get_cmap('tab20', 20)
             set3 = plt.cm.get_cmap('Set3', 12)
-            colors = [tab20(i) for i in range(20)] + [set3(i) for i in range(4)]
+            set2 = plt.cm.get_cmap('Set2', 9)
+            accent = plt.cm.get_cmap('Accent', 8)   
+            colors = [tab20(i) for i in range(20)] + [set3(i) for i in range(8)] + [set2(i) for i in range(4)]
 
             sns.barplot(
                 data=zone_percents, 
@@ -1922,7 +1932,7 @@ def compare_models_boxplots(rl_copp_obj, model_ids):
             x_label_name = "Timestep (s)"
             
         current_ax.set_xlabel(x_label_name, fontsize=20, labelpad=10)  
-        current_ax.set_ylabel(y_label_name, fontsize=20, labelpad=10)  
+        current_ax.set_ylabel(y_label_name, fontsize=20, labelpad=4)  
         current_ax.tick_params(axis='both', which='major', labelsize=20)  
 
         current_ax.grid(True)
