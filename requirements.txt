@@ -91,7 +91,7 @@ tensorflow-estimator==2.13.0
 tensorflow-io-gcs-filesystem==0.34.0
 termcolor==2.4.0
 threadpoolctl==3.5.0
-torch==2.4.1
+torch==2.1.2
 tqdm==4.67.1
 triton==3.0.0
 typing_extensions==4.5.0

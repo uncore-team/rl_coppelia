@@ -5,9 +5,9 @@ setup(
     version="0.3",
     packages=find_packages(where="src"),
     package_dir={"": "src"},  # src is the root of the package
-    install_requires=[
-        "argparse", "stable_baselines3", "tensorboard", "PyQt5"
-    ],
+    # install_requires=[
+    #     "argcomplete", "stable_baselines3", "tensorboard", "PyQt5"
+    # ],
     entry_points={
         "console_scripts": [
             "uncore_rl=rl_coppelia.cli:main",
