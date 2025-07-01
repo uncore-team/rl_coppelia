@@ -10,8 +10,8 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "rl_coppelia=rl_coppelia.cli:main",
-            "rl_coppelia_gui=rl_coppelia.gui_rl_coppelia:main"
+            "uncore_rl=rl_coppelia.cli:main",
+            "uncore_rl_gui=rl_coppelia.gui_rl_coppelia:main"
         ]
     },
     include_package_data=True,
