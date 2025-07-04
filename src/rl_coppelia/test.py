@@ -193,9 +193,12 @@ def main(args):
             episode_distances_list.append(episode_distance)
             
             # Write a new row with the metrics in the csv file
-            metrics_writer.writerow([init_target_distance, final_target_distance, time_reach_target, reward_target,
-                                    target_zone, timesteps_count, terminated, truncated, collision_flag, max_achieved, 
-                                    episode_distance])
+            if timesteps_count == 1:    # discard the episode as the robot started on top of the target
+                logging.info(f"Episode {n_ep} is discarded, as it has only one timestep.")
+            else:
+                metrics_writer.writerow([init_target_distance, final_target_distance, time_reach_target, reward_target,
+                                        target_zone, timesteps_count, terminated, truncated, collision_flag, max_achieved, 
+                                        episode_distance])
             
     logging.info(f"Testing metrics has been saved in {experiment_csv_path}")
 

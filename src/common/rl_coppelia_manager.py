@@ -148,6 +148,11 @@ class RLCoppeliaManager():
         elif self.args.robot_name == "turtleBot":
             self.env = make_vec_env(TurtleBotEnv, n_envs=1, monitor_dir=self.log_monitor,
                             env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
+        
+        else:   # by default it uses the TurtleBot environment
+            self.env = make_vec_env(TurtleBotEnv, n_envs=1, monitor_dir=self.log_monitor,
+                            env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
+        
             
         logging.info(f"Environment for training created: {self.env}. Comms port: {self.free_comms_port}")  
         

@@ -78,7 +78,7 @@ def main(args):
     # )
 
     # Callback for logging custom metrics in Tensorboard
-    metrics_callback = utils.CustomMetricsCallback(rl_copp)
+    metrics_callback = utils.CustomMetricsCallback(rl_copp, total_timesteps=rl_copp.params_train["total_timesteps"])
 
     # Get the training algorithm from the parameters file
     try:

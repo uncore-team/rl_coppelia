@@ -1,19 +1,24 @@
 import contextlib
 import csv
 from datetime import datetime
+import glob
 import io
 import json
+import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QLabel, QCheckBox, QSpinBox, QFileDialog, QLabel,
-    QHBoxLayout, QToolTip, QDialog, QGroupBox, QMessageBox, QComboBox
+    QHBoxLayout, QToolTip, QDialog, QGroupBox, QMessageBox, QComboBox, QDoubleSpinBox
 )
 from PyQt5.QtCore import Qt
 import logging
+
+from matplotlib import pyplot as plt
 from common import utils
 from rl_coppelia import cli, train, test, plot, auto_training, auto_testing, retrain, sat_training
 from pathlib import Path
@@ -21,6 +26,14 @@ from PyQt5.QtCore import QTimer, QThread, pyqtSignal,QSize,QPoint,QEvent
 from PyQt5.QtWidgets import QProgressBar, QGridLayout, QHBoxLayout, QTextEdit, QSizePolicy, QScrollArea, QAbstractItemView,QListWidgetItem, QListWidget, QComboBox
 from PyQt5.QtGui import QIcon, QPixmap, QIntValidator, QDoubleValidator
 import pkg_resources
+from shutil import which
+import time
+import psutil
+import pandas as pd
+from matplotlib.patches import Circle
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+import numpy as np
+
 
 
 PLOT_TYPES = ["spider", "convergence-walltime", "convergence-simtime", "convergence-steps", "convergence-episodes", 
@@ -62,146 +75,182 @@ tooltip_text = """<b>Available Plot Types:</b><ul>
 
 
 class ManualParamsDialog(QDialog):
+    """
+    Dialog window for manually editing and saving robot training parameter files.
+
+    This interface allows users to edit default environment and training parameters,
+    modify them through input widgets, and save the result as a new JSON file.
+
+    Attributes:
+        params_saved (pyqtSignal): Signal emitted with the filename when a new param file is saved.
+    """
     params_saved = pyqtSignal(str)  # Signal to emit when parameters are saved
 
     def __init__(self, base_path, robot_name, parent=None):
+        """
+        Initializes the manual parameter definition dialog.
+
+        Args:
+            base_path (str): Path to the root directory of the project.
+            robot_name (str): Name of the robot whose parameters are being edited.
+            parent (QWidget, optional): Parent widget of the dialog. Defaults to None.
+        """
         super().__init__(parent)
         self.setWindowTitle("Manual parameter definition")
-        self.base_path = base_path
-        self.robot_name = robot_name
+        self.base_path = base_path  # Base path to access configuration files
+        self.robot_name = robot_name    # Robot identifier
 
-        self.default_path = os.path.join(self.base_path, "configs", "params_default_file.json")
-        self.target_dir = os.path.join(self.base_path, "configs")
-        os.makedirs(self.target_dir, exist_ok=True)
+        self.default_path = os.path.join(self.base_path, "configs", "params_default_file.json") # Path to default parameter file
+        self.target_dir = os.path.join(self.base_path, "configs")   # Directory to save new parameter files
+        os.makedirs(self.target_dir, exist_ok=True)     # Create the directory if it doesn't exist
 
-        with open(self.default_path, "r") as f:
+        with open(self.default_path, "r") as f:     # Load default parameters from JSON file
             self.default_data = json.load(f)
 
-        self.field_widgets = {}  # (section, key) -> widget
+        self.field_widgets = {}  # Maps (section, key) tuples to their associated input widgets
 
-        layout = QVBoxLayout()
-        # ["Parameters - Environment", "Parameters - Training", "Parameters - Testing"]:
-        for section in ["params_env", "params_train"]:
+        layout = QVBoxLayout()  # Main layout of the dialog
+        for section in ["params_env", "params_train"]:  # Add editable sections for environment and training
             box = self.build_section(section, self.default_data.get(section, {}))
             layout.addWidget(box)
 
-        self.file_name_input = QLineEdit()
-        self.file_name_input.setPlaceholderText("Enter name for new param file")
-        layout.addWidget(QLabel("New file name (without .json):"))
-        layout.addWidget(self.file_name_input)
+        self.file_name_input = QLineEdit()  # Input field for the new file name
+        self.file_name_input.setPlaceholderText("Enter name for new param file")  # Set placeholder text
+        layout.addWidget(QLabel("New file name (without .json):"))  # Label for file name input
+        layout.addWidget(self.file_name_input)  # Add input to layout
 
-        buttons_layout = QHBoxLayout()
-        buttons_layout.addStretch()
+        buttons_layout = QHBoxLayout()  # Layout for dialog buttons
+        buttons_layout.addStretch()  # Push buttons to the right
 
-        self.warning_label = QLabel("")
-        self.warning_label.setStyleSheet("color: red;")
-        layout.addWidget(self.warning_label)
+        self.warning_label = QLabel("")  # Label to show warnings (e.g., file exists)
+        self.warning_label.setStyleSheet("color: red;")  # Make warning text red
+        layout.addWidget(self.warning_label)  # Add warning label to main layout
 
+        apply_button = QPushButton("Apply")  # Button to confirm changes
+        apply_button.clicked.connect(self.apply_changes)  # Connect to apply_changes handler
 
-        apply_button = QPushButton("Apply")
-        apply_button.clicked.connect(self.apply_changes)
+        cancel_button = QPushButton("Cancel")  # Button to cancel dialog
+        cancel_button.clicked.connect(self.reject)  # Close dialog without saving
 
-        cancel_button = QPushButton("Cancel")
-        cancel_button.clicked.connect(self.reject)  # Close the dialog without saving
-
-        apply_button.setAutoDefault(False)
+        apply_button.setAutoDefault(False)  # Disable default button behavior
         cancel_button.setAutoDefault(False)
         apply_button.setDefault(False)
         cancel_button.setDefault(False)
 
-        buttons_layout.addWidget(cancel_button)
-        buttons_layout.addWidget(apply_button)
+        buttons_layout.addWidget(cancel_button)  # Add cancel button to layout
+        buttons_layout.addWidget(apply_button)  # Add apply button to layout
 
-        layout.addLayout(buttons_layout)
+        layout.addLayout(buttons_layout)  # Add button layout to main layout
 
-        self.setLayout(layout)
+        self.setLayout(layout)  # Set main layout for the dialog
+
 
     def build_section(self, section_name, fields):
+        """
+        Creates a QGroupBox containing labeled input fields for a parameter section.
+
+        Args:
+            section_name (str): Name of the section ('params_env' or 'params_train').
+            fields (dict): Dictionary with parameter keys and default values.
+
+        Returns:
+            QGroupBox: Group box containing the labeled inputs.
+        """
         if section_name == "params_env":
             section_name = "Parameters - Environment"
         elif section_name == "params_train":
             section_name = "Parameters - Training"
-        group = QGroupBox(section_name)
-        layout = QGridLayout()
-        layout.setHorizontalSpacing(25)  # Add horizontal spacing between columns
+        group = QGroupBox(section_name)  # Create container for the section
+        layout = QGridLayout()  # Use grid layout to align labels and fields
+        layout.setHorizontalSpacing(25)  # Add space between label and field columns
 
-        tooltips = self.get_param_tooltips()
+        tooltips = self.get_param_tooltips()  # Get tooltips for parameters
 
         row = 0
         col = 0
         for key, value in fields.items():
             label = QLabel(key)
-            label.setToolTip(tooltips.get(key, ""))
+            label.setToolTip(tooltips.get(key, ""))  # Show tooltip if available
 
             if isinstance(value, bool):
-                field = QCheckBox()
+                field = QCheckBox()  # Use checkbox for boolean parameters
                 field.setChecked(value)
             else:
-                field = QLineEdit(str(value))
+                field = QLineEdit(str(value))  # Use line edit for numeric or text inputs
                 if isinstance(value, int):
-                    field.setValidator(QIntValidator())
+                    field.setValidator(QIntValidator())  # Restrict input to integers
                 elif isinstance(value, float):
-                    field.setValidator(QDoubleValidator())
+                    field.setValidator(QDoubleValidator())  # Restrict input to floats
 
-            self.field_widgets[(section_name, key)] = field
+            self.field_widgets[(section_name, key)] = field  # Save widget reference for later
 
-            layout.addWidget(label, row, col * 2)
-            layout.addWidget(field, row, col * 2 + 1)
+            layout.addWidget(label, row, col * 2)  # Place label
+            layout.addWidget(field, row, col * 2 + 1)  # Place field next to label
 
             col += 1
-            if col == 2:
+            if col == 2:  # Wrap to next row after 2 columns
                 col = 0
                 row += 1
 
         group.setLayout(layout)
         return group
+    
 
     def apply_changes(self):
-        new_data = json.loads(json.dumps(self.default_data)) 
+        new_data = json.loads(json.dumps(self.default_data))  # Deep copy of original data
+
         for (section, key), widget in self.field_widgets.items():
             if section == "Parameters - Environment":
                 section = "params_env"
             elif section == "Parameters - Training":
                 section = "params_train"
+
             if isinstance(widget, QCheckBox):
-                value = widget.isChecked()
+                value = widget.isChecked()  # Get boolean value from checkbox
             else:
                 text = widget.text()
                 if text.strip() == "":
-                    continue
+                    continue  # Skip empty fields
                 original = self.default_data[section][key]
                 try:
                     if isinstance(original, int):
-                        value = int(text)
+                        value = int(text)  # Convert input to int if expected
                     elif isinstance(original, float):
-                        value = float(text)
+                        value = float(text)  # Convert input to float if expected
                     else:
-                        value = text
+                        value = text  # Leave as string
                 except ValueError:
-                    value = text
+                    value = text  # Fallback to string if conversion fails
 
-            new_data[section][key] = value
+            new_data[section][key] = value  # Update modified value
 
         name = self.file_name_input.text().strip()
         if not name:
-            QMessageBox.warning(self, "Missing name", "Please provide a name for the new parameters file.")
+            QMessageBox.warning(self, "Missing name", "Please provide a name for the new parameters file.")  # Show warning for missing filename
             return
 
         file_path = os.path.join(self.target_dir, f"{name}.json")
         if os.path.exists(file_path):
-            self.warning_label.setText(f"❌ File '{file_path}' already exists.")
+            self.warning_label.setText(f"❌ File '{file_path}' already exists.")  # Warn if file exists
             return
         else:
-            self.warning_label.setText("")  # Limpiar cualquier error anterior
+            self.warning_label.setText("")  # Clear previous warning
+
         try:
             with open(file_path, "w") as f:
-                json.dump(new_data, f, indent=4)
-            self.params_saved.emit(f"{name}.json")
-            self.accept()
+                json.dump(new_data, f, indent=4)  # Save parameters to JSON
+            self.params_saved.emit(f"{name}.json")  # Emit signal with filename
+            self.accept()  # Close the dialog
         except Exception as e:
-            QMessageBox.critical(self, "Save error", f"Could not save file: {e}")
+            QMessageBox.critical(self, "Save error", f"Could not save file: {e}")  # Show error if saving fails
 
     def get_param_tooltips(self):
+        """
+        Returns a dictionary mapping parameter keys to descriptive tooltips.
+
+        Returns:
+            dict: Tooltip strings for parameter input fields.
+        """
         return {
             "var_action_time_flag": "Add the action time as a learning variable for the agent, so it will be variable.",
             "fixed_actime": "Fixed duration (in seconds) for each action.",
@@ -235,6 +284,348 @@ class ManualParamsDialog(QDialog):
             "n_training_steps": "Steps before each training update.",
             "testing_iterations": "Number of testing episodes."
         }
+
+
+class RobotAngleSpinBox(QDoubleSpinBox):
+    def __init__(self, parent=None, on_commit=None):
+        super().__init__(parent)
+        self.on_commit = on_commit
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if self.on_commit:
+                self.on_commit(self.value())
+            self.clearFocus()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+
+class AutoClearFocusLineEdit(QLineEdit):
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.clearFocus()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def focusOutEvent(self, event):
+        self.clearFocus()
+        super().focusOutEvent(event)
+
+
+class CustomSceneDialog(QDialog):
+    def __init__(self, base_path, robot_name, parent=None, edit_mode=False):
+        super().__init__(parent)
+        self.setWindowTitle("Create Custom Scene")
+        self.base_path = base_path
+        self.robot_name = robot_name
+        self.scene_elements = []
+        self.scene_items = []  # (patch, data)
+        self.scene_elements.append(["robot", 0, 0, -1.1415]) 
+        self.edit_mode = edit_mode
+        self.parent = parent
+
+        # self.setFixedSize(650, 600)
+        self.setMinimumSize(600, 600)
+
+        # Main layout with padding
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10) 
+
+        # Upper layout: two columns
+        upper_layout = QHBoxLayout()
+
+        # Right column: scene controls
+        right_column = QVBoxLayout()
+        right_column.setSpacing(3)
+
+        # Scene name input
+        self.name_input = AutoClearFocusLineEdit()
+        self.name_input.setPlaceholderText("Enter scene folder name (no spaces)")
+        scene_name_block = QVBoxLayout()
+        
+        scene_name_block.setSpacing(0)
+        scene_name_block.addWidget(QLabel("Scene folder name:"))
+        scene_name_block.addWidget(self.name_input)
+        scene_name_block.setContentsMargins(0, 0, 0, 0)
+        right_column.addLayout(scene_name_block)
+
+        # Element to place input
+        self.element_type_combo = QComboBox()
+        self.element_type_combo.addItems(["target", "obstacle"])
+        element_block = QVBoxLayout()
+        
+        element_block.setSpacing(2)
+        element_block.addWidget(QLabel("Element to place:"))
+        element_block.addWidget(self.element_type_combo)
+        element_block.setContentsMargins(0, 10, 0, 0)
+        right_column.addLayout(element_block)
+
+        # Rotation controls
+        rotation_label = QLabel("Rotate the robot:")
+        rotation_layout = QHBoxLayout()
+        rotation_layout.setSpacing(6)
+
+        self.robot_orientation_input = RobotAngleSpinBox(on_commit=self.update_robot_orientation_from_enter)
+        self.robot_orientation_input.setDecimals(3)
+        self.robot_orientation_input.setSingleStep(0.1)
+        self.robot_orientation_input.setRange(-3.1416, 3.1416)
+        self.robot_orientation_input.setValue(-1.141)
+        self.robot_orientation_input.setSuffix(" rad")
+        self.robot_orientation_input.setFocusPolicy(Qt.ClickFocus)
+        self.robot_orientation_input.valueChanged.connect(self.update_robot_orientation_from_input)
+
+        self.rotate_left_button = QPushButton("⟲")
+        self.rotate_right_button = QPushButton("⟳")
+        self.rotate_left_button.setFixedWidth(30)
+        self.rotate_right_button.setFixedWidth(30)
+        self.rotate_left_button.setToolTip("Rotate 15° counter-clockwise")
+        self.rotate_right_button.setToolTip("Rotate 15° clockwise")
+        self.rotate_left_button.setFocusPolicy(Qt.NoFocus)
+        self.rotate_right_button.setFocusPolicy(Qt.NoFocus)
+        self.rotate_left_button.clicked.connect(lambda: self.rotate_robot(-0.2618))
+        self.rotate_right_button.clicked.connect(lambda: self.rotate_robot(0.2618))
+
+        rotation_layout.addWidget(rotation_label)
+        rotation_layout.addWidget(self.robot_orientation_input)
+        rotation_layout.addStretch()
+        rotation_layout.addWidget(self.rotate_left_button)
+        rotation_layout.addWidget(self.rotate_right_button)
+        rotation_layout.setContentsMargins(0, 15, 0, 0)  # Más espacio arriba
+
+        right_column.addLayout(rotation_layout)
+
+
+        # Left column: information
+        left_column = QVBoxLayout()
+        info_label = QLabel()
+        info_label.setWordWrap(True)
+        info_label.setText("""
+        <div style="text-align: justify;">
+        <b>Welcome to the Scene Editor!</b><br><br>
+        With this tool you can create or modify scenes by adding new <b>targets</b> and <b>obstacles</b>, and changing the <b>orientation of the robot</b>.<br><br>
+        It's easy to use: just select the type of object you want to place, and click anywhere on the map to position it. <br>
+        To remove an object, simply click on it again.<br><br>
+        Enjoy! 🛠️
+        </div>
+        """)
+        info_label.setStyleSheet("text-align: justify;")
+        left_column.addWidget(info_label)
+
+        # Add columns to the upper layout
+        upper_layout.addLayout(left_column)
+        upper_layout.addLayout(right_column)
+        upper_layout.setContentsMargins(0, 0, 0, 0) 
+
+        right_column.setContentsMargins(10, 0, 10, 0)  # left, top, right, bottom
+        left_column.setContentsMargins(10, 10, 10, 0) 
+
+        # Add upper layout to the main layout
+        main_layout.addLayout(upper_layout)
+
+
+        # Canvas for plotting the scene
+        self.figure, self.ax = plt.subplots()
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.installEventFilter(self)
+        self.ax.set_xlim(2.5, -2.5)
+        self.ax.set_ylim(-2.5, 2.5)
+        self.ax.set_aspect('equal')
+        self.ax.grid(True)
+        self.canvas.mpl_connect("button_press_event", self.handle_click)
+        main_layout.addWidget(self.canvas)
+
+        # Accept/Cancel buttons (aligned right, fixed width, spaced)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()  # Push buttons to the right
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedWidth(100)
+
+        self.accept_btn = QPushButton("Modify" if self.edit_mode else "Create")
+        self.accept_btn.setFixedWidth(100)
+
+        self.cancel_btn.clicked.connect(self.reject)
+        self.accept_btn.clicked.connect(self.accept)
+
+        btn_layout.addWidget(self.cancel_btn)
+        btn_layout.addSpacing(10)  # Space between buttons
+        btn_layout.addWidget(self.accept_btn)
+
+        main_layout.addLayout(btn_layout)
+
+        self.plot_scene()
+
+        self.installEventFilter(self)
+        self.name_input.setFocus()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress:
+            global_pos = event.globalPos()
+
+            # Forzar pérdida de foco si se hace clic fuera del spinbox
+            if not self.robot_orientation_input.geometry().contains(self.mapFromGlobal(global_pos)):
+                self.robot_orientation_input.clearFocus()
+
+            # Forzar pérdida de foco si se hace clic fuera del name_input
+            if not self.name_input.geometry().contains(self.mapFromGlobal(global_pos)):
+                self.name_input.clearFocus()
+
+        return super().eventFilter(obj, event)
+
+
+    def normalize_angle(self, theta):
+        """Wrap angle to [-π, π]."""
+        from math import pi
+        return (theta + pi) % (2 * pi) - pi
+    
+
+    def update_robot_orientation_from_enter(self, new_theta):
+        for elem in self.scene_elements:
+            if elem[0] == "robot":
+                elem[3] = new_theta
+                break
+        self.plot_scene()
+
+
+    def rotate_robot(self, delta):
+        for elem in self.scene_elements:
+            if elem[0] == "robot":
+                elem[3] = self.normalize_angle(elem[3] + delta)
+                self.robot_orientation_input.setValue(elem[3])
+                break
+        self.plot_scene()
+
+    def update_robot_orientation_from_input(self):
+        new_theta = self.robot_orientation_input.value()
+        for elem in self.scene_elements:
+            if elem[0] == "robot":
+                elem[3] = new_theta
+                break
+        self.plot_scene()
+
+
+    def handle_click(self, event):
+        if not event.inaxes:
+            return
+    
+        clicked_x, clicked_y = event.xdata, event.ydata
+        selected_type = self.element_type_combo.currentText()
+
+        # Try to delete an object if clicked near one (excluding robot)
+        for i, elem in enumerate(self.scene_elements):
+            if elem[0] != "robot":
+                ex, ey = elem[1], elem[2]
+                distance = np.sqrt((clicked_x - ex) ** 2 + (clicked_y - ey) ** 2)
+                if distance < 0.1:
+                    del self.scene_elements[i]
+                    self.plot_scene()
+                    return
+
+        self.scene_elements.append([selected_type, clicked_x, clicked_y])
+        self.plot_scene()
+
+    def plot_scene(self):
+        self.ax.clear()
+        self.scene_items.clear()
+        self.ax.set_xlim(2.5, -2.5)
+        self.ax.set_ylim(2.5, -2.5)
+        self.ax.grid(True)
+        
+
+        for elem in self.scene_elements:
+            if elem[0] == "robot":
+                circle = plt.Circle((elem[1], elem[2]), 0.35 / 2, color='black', label='robot', zorder=4)
+                self.ax.add_patch(circle)
+                self.ax.arrow(elem[1], elem[2], 0.3 * np.cos(elem[3]), 0.3 * np.sin(elem[3]), head_width=0.1, color='black')
+                self.scene_items.append((circle, {"type": elem[0], "x": elem[1], "y": elem[2], "theta": elem[3]}))
+            elif elem[0] == "target":
+                target_rings = [(0.5 / 2, 'blue'), (0.25 / 2, 'red'), (0.03 / 2, 'yellow')]
+                for radius, color in target_rings:
+                    circle = plt.Circle((elem[1], elem[2]), radius, color=color, fill=True, alpha=0.6)
+                    self.ax.add_patch(circle)
+                self.scene_items.append((circle, {"type": elem[0], "x": elem[1], "y": elem[2]}))
+
+            elif elem[0] == "obstacle":
+                circle = plt.Circle((elem[1], elem[2]), 0.25 / 2, color='gray', label='obstacle')
+                self.ax.add_patch(circle)
+                self.scene_items.append((circle, {"type": elem[0], "x": elem[1], "y": elem[2]}))
+
+        self.canvas.draw()
+    
+    def load_scene(self, folder_name):
+        """Load an existing scene from a CSV file."""
+        import pandas as pd
+
+        scene_path = os.path.join(self.base_path, "robots", self.robot_name, "scene_configs", folder_name, "scene.csv")
+        if not os.path.isfile(scene_path):
+            QMessageBox.warning(self, "File not found", f"Scene CSV not found: {scene_path}")
+            return
+
+        try:
+            df = pd.read_csv(scene_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to read scene CSV: {e}")
+            return
+
+        self.name_input.setText(folder_name)
+        self.scene_elements = []
+
+        for _, row in df.iterrows():
+            t = row["type"].strip().lower()
+            x = float(row["x"])
+            y = float(row["y"])
+            theta = float(row["theta"]) if t == "robot" and not pd.isna(row["theta"]) else None
+            if t == "robot":
+                self.scene_elements.append([t, x, y, theta])
+                self.robot_orientation_input.setValue(theta)
+            else:
+                self.scene_elements.append([t, x, y])
+
+        self.plot_scene()
+
+    def accept(self):
+        name = self.name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Missing name", "Please provide a scene folder name.")
+            return
+
+        # Actualizar elementos desde los patches
+        self.scene_elements = []
+        for _, data in self.scene_items:
+            elem_type = data["type"]
+            x = data["x"]
+            y = data["y"]
+            theta = data.get("theta", "")
+            self.scene_elements.append([elem_type, x, y, theta])
+
+        scene_dir = os.path.join(self.base_path, "robots", self.robot_name, "scene_configs", name)
+        os.makedirs(scene_dir, exist_ok=True)
+        csv_path = os.path.join(scene_dir, "scene.csv")
+
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["type", "x", "y", "theta"])
+            writer.writeheader()
+            for elem in self.scene_elements:
+                writer.writerow({
+                    "type": elem[0],
+                    "x": elem[1],
+                    "y": elem[2],
+                    "theta": elem[3] if elem[0] == "robot" else ""
+    })
+        self.selected_scene_folder = name
+        super().accept()
+        if self.edit_mode:
+            QMessageBox.information(self, "Scene modified", f"Scene '{name}' has been modified successfully.")
+            self.parent.logs_text.append(f"<span style='color:green;'> --- </span> Scene '{name}' has been modified successfully.")
+        else:
+            QMessageBox.information(self, "Scene created", f"Scene '{name}' has been created successfully.")
+            self.parent.logs_text.append(f"<span style='color:green;'> --- </span> Scene '{name}' has been created successfully.")
+
+    def get_selected_scene_folder(self):
+        return getattr(self, "selected_scene_folder", None)
+
 
 
 class EditParamsDialog(QDialog):
@@ -387,7 +778,7 @@ class EditParamsDialog(QDialog):
         return descriptions.get(key, key)
     
 
-class TestThread(QThread):
+class ProcessThread(QThread):
     progress_signal = pyqtSignal(int)  # Signal for updating progress bar
     finished_signal = pyqtSignal()    # Signal for indicating the process has finished
     error_signal = pyqtSignal(str)    # Signal for managing errors
@@ -404,7 +795,7 @@ class TestThread(QThread):
             self.process.terminate()
 
     def run(self):
-        """Execute each test in a separate thread, so the user can run multiple tests simultanously."""
+        """Execute each train/test in a separate thread, so the user can run multiple processes simultanously."""
         try:
             self.was_stopped_manually = False  # Reset flag
 
@@ -419,7 +810,7 @@ class TestThread(QThread):
 
             # Read the output of the process for updating the progress bar in real time
             for line in self.process.stdout:
-                # logging.debug(line.strip())  # Console debug
+                logging.debug(line.strip())  # Console debug
                 if "Testing Episodes" in line:
                     try:
                         match = re.search(r"(\d+)%", line)
@@ -430,6 +821,12 @@ class TestThread(QThread):
                             logging.warning(f"Could not parse progress from line: {line.strip()}")
                     except ValueError:
                         logging.warning(f"Could not parse progress from line: {line.strip()}")
+
+                if "Training Progress" in line:
+                    match = re.search(r"(\d+)%", line)
+                    if match:
+                        self.progress_signal.emit(int(match.group(1)))
+
 
             self.process.wait()
 
@@ -594,7 +991,17 @@ class MainApp(QMainWindow):
             robot_name = self.plot_robot_name_input.currentText()
             if robot_name and not robot_name.startswith("Select"):
                 self.update_model_ids_for_selected_robot()
-                self.populate_input_names(self.scene_to_load_folder_input, category="scene_trajs")
+                self.populate_input_names(self.plot_scene_to_load_folder_input, category="scene_configs")
+
+        elif current_tab == "Test scene":
+            robot_name = self.test_scene_robot_name_input.currentText()
+            if robot_name and not robot_name.startswith("Select"):
+                self.update_model_ids_for_selected_robot()
+                self.populate_input_names(self.test_scene_scene_to_load_folder_input, category="scene_configs")
+        elif current_tab == "Auto Training":
+            robot_name = self.auto_train_robot_name_input.currentText()
+            if robot_name and not robot_name.startswith("Select"):
+                self.populate_input_names(self.auto_train_session_name_input, category="session_folders")
 
 
 
@@ -821,10 +1228,12 @@ class MainApp(QMainWindow):
         # === Añadir pestañas ===
         self.tabs.addTab(self.create_train_tab(), "Train")
         self.tabs.addTab(self.create_test_tab(), "Test")
+        self.tabs.addTab(self.create_test_scene_tab(), "Test scene")
         self.tabs.addTab(self.create_plot_tab(), "Plot")
         self.tabs.addTab(self.create_auto_training_tab(), "Auto Training")
-        self.tabs.addTab(self.create_auto_testing_tab(), "Auto Testing")
-        self.tabs.addTab(self.create_retrain_tab(), "Retrain")
+        # self.tabs.addTab(self.create_auto_testing_tab(), "Auto Testing")
+        # self.tabs.addTab(self.create_retrain_tab(), "Retrain")
+        self.tabs.addTab(self.create_manage_tab(), "Manage")
 
         # === Conexión cambio de pestaña ===
         self.tabs.currentChanged.connect(self.on_tab_changed)
@@ -837,7 +1246,7 @@ class MainApp(QMainWindow):
     def create_styled_button(self, text: str, on_click: callable) -> QPushButton:
         """Create a consistently styled action button."""
         button = QPushButton(text)
-        button.setFixedSize(180, 50)
+        button.setFixedSize(220, 50)
         button.setStyleSheet("""
             QPushButton {
                 background-color: #007ACC;
@@ -952,10 +1361,13 @@ class MainApp(QMainWindow):
                 if not os.path.exists(scene_path):
                     warning_message = f"WARNING: {scene_path} does not exist. Please check the model name."
                     logging.warning(warning_message)
-                    self.test_scene_path_input.setText(warning_message)
+                    # self.test_scene_path_input.setText(warning_message)
+                    self.logs_text.append(f"<span style='color:orange;'>{warning_message}</span>")
                 else:
-                    logging.info(f"Scene file {scene_path} found for robot {robot_name}.")
+                    message = f"Scene file {scene_path} found for robot {robot_name}."
+                    logging.info(message)
                     self.test_scene_path_input.setText(scene_path)
+                    self.logs_text.append(f"<span style='color:green;'> --- </span> {message}")
 
                 # Construct the params file path
                 params_file_path = os.path.join(self.base_path, "robots", robot_name, "parameters_used", f"params_file_model_{self.experiment_id}.json")
@@ -963,10 +1375,13 @@ class MainApp(QMainWindow):
                 if not os.path.exists(params_file_path):
                     warning_message = f"WARNING: {params_file_path} does not exist. Please check the model name."
                     logging.warning(warning_message)
-                    self.test_params_file_input.setText(warning_message)
+                    # self.test_params_file_input.setText(warning_message)
+                    self.logs_text.append(f"<span style='color:orange;'>{warning_message}</span>")
                 else:
-                    logging.info(f"Params file {params_file_path} found for robot {robot_name}.")
+                    message = f"Params file {params_file_path} found for robot {robot_name}."
+                    logging.info(message)
                     self.test_params_file_input.setText(params_file_path)
+                    self.logs_text.append(f"<span style='color:green;'> --- </span> {message}")
                 
             else:
                 self.test_robot_name_input.setText("")  # Clear if format is invalid
@@ -1023,7 +1438,7 @@ class MainApp(QMainWindow):
                             return base_path
                             
         except Exception as e:
-            print(f"Error reading .bashrc: {e}")
+            logging.error(f"Error reading .bashrc: {e}")
             
         return None
     
@@ -1035,10 +1450,10 @@ class MainApp(QMainWindow):
         # If rl_coppelia path was found, then it will be used as main directory for searching files
         if rl_coppelia_path and os.path.exists(rl_coppelia_path):
             start_path = rl_coppelia_path
-            print(f"Starting file dialog in rl_coppelia directory: {start_path}")
+            logging.info(f"Starting file dialog in rl_coppelia directory: {start_path}")
         else:
             start_path = os.path.expanduser("~")
-            print(f"rl_coppelia path not found, starting in home directory: {start_path}")
+            logging.warning(f"rl_coppelia path not found, starting in home directory: {start_path}")
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
             "Select ZIP File", 
@@ -1048,7 +1463,6 @@ class MainApp(QMainWindow):
         
         if file_path:
             self.test_model_name_input.setText(file_path)
-            print(f"Selected file: {file_path}")
 
     def remove_zip_extension(self, file_path):
         """Remove the .zip extension from the file name if it exists."""
@@ -1229,10 +1643,10 @@ class MainApp(QMainWindow):
         params_layout.addWidget(self.edit_params_button)
 
         # Disable parallel mode (optional)
-        self.dis_parallel_mode_checkbox = QCheckBox("Disable Parallel Mode")
+        self.train_dis_parallel_mode_checkbox = QCheckBox("Disable Parallel Mode")
 
         # Disable GUI (optional)
-        self.no_gui_checkbox = QCheckBox("Disable GUI")
+        self.train_no_gui_checkbox = QCheckBox("Disable GUI")
 
         self.train_verbose_input = QSpinBox()
         self.train_verbose_input.setRange(-1, 4)
@@ -1241,8 +1655,8 @@ class MainApp(QMainWindow):
         form.addRow("Robot Name (required):", robot_row)
         form.addRow("Scene Path (optional):", self.train_scene_path_input)
         form.addRow("Params File:", params_file_row)
-        form.addRow("Options: ", self.dis_parallel_mode_checkbox)
-        form.addRow("", self.no_gui_checkbox)
+        form.addRow("Options: ", self.train_dis_parallel_mode_checkbox)
+        form.addRow("", self.train_no_gui_checkbox)
         form.addRow("Verbose Level (default: 1):", self.train_verbose_input)
 
         # Buttons
@@ -1287,8 +1701,11 @@ class MainApp(QMainWindow):
         # Model name (required)
         self.test_model_name_input = QLineEdit()
         self.test_model_name_input.setPlaceholderText("Select a ZIP file...")
-        browse_zip_button = QPushButton("Browse ZIP")
-        browse_zip_button.clicked.connect(self.browse_zip_file)
+        self.browse_zip_button = QPushButton("Browse ZIP")
+        self.browse_zip_button.setFixedHeight(24)
+        self.browse_zip_button.setStyleSheet("padding: 2px 8px; font-size: 10pt;")
+        self.browse_zip_button.clicked.connect(self.browse_zip_file)
+        
         self.test_model_name_input.textChanged.connect(self.update_test_inputs_when_model_name_introduced)  # Connect text change to update_robot_name
 
 
@@ -1331,8 +1748,19 @@ class MainApp(QMainWindow):
         
 
         # Add fields to the form
-        form.addRow("Model ZIP File (required):", self.test_model_name_input)
-        form.addRow("", browse_zip_button)
+        zip_row = QWidget()
+        zip_layout = QHBoxLayout()
+        zip_layout.setContentsMargins(0, 0, 0, 0)
+        zip_row.setLayout(zip_layout)
+
+        zip_layout.addWidget(self.test_model_name_input)
+        zip_layout.addWidget(self.browse_zip_button)
+
+        self.browse_zip_button.setFixedHeight(28)
+        self.browse_zip_button.setFixedWidth(100)
+        self.browse_zip_button.setStyleSheet("padding: 2px 8px; font-size: 10pt;")
+
+        form.addRow("Model ZIP File (required):", zip_row)
         form.addRow("Robot Name (optional):", self.test_robot_name_input)
         form.addRow("Scene Path (optional):", self.test_scene_path_input)
         form.addRow("Options: ", self.save_scene_checkbox)
@@ -1363,6 +1791,349 @@ class MainApp(QMainWindow):
 
         tab.setLayout(layout)
         return tab
+    
+
+    def handle_test_scene_robot_selection(self):
+        """Update model IDs and scene folders when a robot is selected in Test Scene tab."""
+        if self.robot_name and not self.robot_name.startswith("Select"):
+            self.populate_input_names(self.test_scene_scene_to_load_folder_input, category="scene_configs")
+
+    def handle_auto_train_robot_selection(self):
+        """Update session folders when a robot is selected in Auto train tab."""
+        self.robot_name = self.auto_train_robot_name_input.currentText()
+        if self.robot_name and not self.robot_name.startswith("Select"):
+            self.populate_input_names(self.auto_train_session_name_input, category="session_folders")
+
+
+    def handle_scene_folder_change(self, folder_name):
+        """
+        Called when the user selects a scene folder. Loads element info from CSV.
+        """
+        if folder_name == "Custom your scene":
+            robot_name = self.test_scene_robot_name_input.currentText().strip()
+            if not robot_name or robot_name.startswith("Select"):
+                self.logs_text.append("❌ Please select a robot before creating a custom scene.")
+                return
+
+            dialog = CustomSceneDialog(self.base_path, robot_name, self)
+            if dialog.exec_() == QDialog.Accepted:
+                created_folder = dialog.selected_scene_folder
+                self.populate_input_names(self.test_scene_scene_to_load_folder_input, "scene_configs")
+                index = self.test_scene_scene_to_load_folder_input.findText(created_folder)
+                if index >= 0:
+                    self.test_scene_scene_to_load_folder_input.setCurrentIndex(index)
+            return
+
+        if folder_name in ["Select a scene folder to load...", "Custom scene", "Scene configs directory not found", "No scene configs found"] or not folder_name: 
+            self.test_scene_scene_info_label.hide()
+            self.test_scene_view_scene_button.hide()
+            self.test_scene_scene_info_row.hide()
+            self.test_scene_edit_scene_button.hide()
+            self.test_scene_delete_scene_button.hide()
+
+            return
+
+        try:
+            scene_dir = os.path.join(self.base_path, "robots", self.robot_name, "scene_configs", folder_name)
+            csv_file = next(
+                (os.path.join(scene_dir, f) for f in os.listdir(scene_dir) if "scene" in f.lower() and f.endswith(".csv")),
+                None
+            )
+            if not csv_file:
+                self.test_scene_scene_info_label.setText("❌ No CSV found.")
+                self.test_scene_scene_info_label.show()
+                self.test_scene_view_scene_button.hide()
+                return
+
+            df = pd.read_csv(csv_file)
+            num_targets = (df["type"].str.lower() == "target").sum()
+            num_obstacles = (df["type"].str.lower() == "obstacle").sum()
+            self.test_scene_scene_info_label.setText(f"Scene contains: {num_targets} targets, {num_obstacles} obstacles")
+            self.test_scene_scene_info_label.show()
+            self.test_scene_view_scene_button.show()
+            self.test_scene_scene_info_row.show()
+
+            self.current_scene_csv_path = csv_file  # Save for preview
+
+            trajs_path = os.path.join(scene_dir, "trajs")
+
+            if os.path.isdir(trajs_path) and os.listdir(trajs_path):
+                warning = f"⚠️ {folder_name} folder already contains a 'trajs' directory with data. The test will overwrite existing trajectories."
+                logging.warning(warning)
+                self.logs_text.append(f"<span style='color:orange;'> --- {warning}</span>")
+            else:
+                message = f"✅ {folder_name} is ready for testing."
+                logging.info(message)
+                self.logs_text.append(f"<span style='color:green;'> --- </span> {message}")
+
+
+        except Exception as e:
+            logging.warning(f"Error loading scene info: {e}")
+            self.test_scene_scene_info_label.setText("❌ Error loading scene data")
+            self.test_scene_scene_info_label.show()
+            self.test_scene_view_scene_button.hide()
+
+        # Mostrar/ocultar botones según la selección
+        if folder_name and not folder_name.startswith("Select") and folder_name != "Custom scene":
+            self.test_scene_edit_scene_button.setVisible(True)
+            self.test_scene_delete_scene_button.setVisible(True)
+        else:
+            self.test_scene_edit_scene_button.setVisible(False)
+            self.test_scene_delete_scene_button.setVisible(False)
+
+
+    def handle_edit_scene(self):
+        folder_name = self.test_scene_scene_to_load_folder_input.currentText().strip()
+        if not folder_name or folder_name in ["Select a scene folder to load...", "Custom scene", "Scene configs directory not found", "No scene configs found"]:
+            return
+
+        dialog = CustomSceneDialog(self.base_path, self.robot_name, self, edit_mode=True)
+        dialog.load_scene(folder_name)  
+        if dialog.exec_() == QDialog.Accepted:
+            self.populate_input_names(self.test_scene_scene_to_load_folder_input, "scene_configs")
+            idx = self.test_scene_scene_to_load_folder_input.findText(folder_name)
+            if idx >= 0:
+                self.test_scene_scene_to_load_folder_input.setCurrentIndex(idx)
+
+    def handle_delete_scene(self):
+        folder_name = self.test_scene_scene_to_load_folder_input.currentText().strip()
+        if not folder_name or folder_name in ["Select a scene folder to load...", "Custom scene"]:
+            return
+
+        reply = QMessageBox.question(self, "Delete Scene", f"Are you sure you want to delete scene '{folder_name}'?", QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            scene_path = os.path.join(self.base_path, "robots", self.robot_name, "scene_configs", folder_name)
+            try:
+                shutil.rmtree(scene_path)
+                self.populate_input_names(self.test_scene_scene_to_load_folder_input, "scene_configs")
+                self.test_scene_scene_to_load_folder_input.setCurrentIndex(0)
+                message = f"Scene folder '{folder_name}' deleted successfully."
+                logging.info(message)
+                self.logs_text.append(f"<span style='color:green;'> --- {message}</span>")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Could not delete scene: {e}")
+
+    
+    def handle_show_scene_preview(self):
+        """Display the scene image when the user clicks the eye button."""
+        if hasattr(self, "current_scene_csv_path") and os.path.isfile(self.current_scene_csv_path):
+            self.show_scene_preview_dialog(self.current_scene_csv_path)
+
+
+
+    def plot_scene(self, csv_file):
+        """
+        Generate a scene visualization from a CSV and return the image path.
+
+        Args:
+            csv_file (str): Path to the scene CSV file.
+
+        Returns:
+            str: Path to the saved PNG image.
+        """
+        import pandas as pd
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import os
+
+        df = pd.read_csv(csv_file)
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+        robot = df[df["type"].str.lower() == "robot"]
+        targets = df[df["type"].str.lower() == "target"]
+        obstacles = df[df["type"].str.lower() == "obstacle"]
+
+        # Obstacles
+        for i, row in obstacles.iterrows():
+            circle = plt.Circle((row["x"], row["y"]), 0.25 / 2, color='gray', label='Obstacle')
+            ax.add_patch(circle)
+
+
+        # Targets
+        for label_idx, (_, row) in enumerate(targets.iterrows()):
+            x, y = row["x"], row["y"]
+            idx = chr(65 + label_idx)  # A, B, C...
+            ax.add_patch(Circle((x, y), 0.25, color="blue", alpha=0.3))   # Outer circle
+            ax.add_patch(Circle((x, y), 0.125, color="red", alpha=0.5))   # Middle circle
+            ax.add_patch(Circle((x, y), 0.015, color="yellow", alpha=0.8))  # Inner circle
+            ax.text(x, y - 0.1, idx, fontsize=14, fontweight="bold", ha="center")
+
+        # Robot
+        for _, row in robot.iterrows():
+            circle = plt.Circle((row["x"], row["y"]), 0.35 / 2, color='black', label='Robot', zorder=4)
+            ax.add_patch(circle)
+
+            # Indicate orientation using a triangle
+            if 'theta' in row:
+                theta = row['theta']
+                # Triangle dimensions
+                front_length = 0.15
+                side_offset = 0.08
+
+                # Front point
+                front = (row["x"] + front_length * np.cos(theta), row["y"] + front_length * np.sin(theta))
+                # Side points
+                left = (row["x"] + side_offset * np.cos(theta + 2.5), row["y"] + side_offset * np.sin(theta + 2.5))
+                right = (row["x"] + side_offset * np.cos(theta - 2.5), row["y"] + side_offset * np.sin(theta - 2.5))
+
+                triangle = plt.Polygon([front, left, right], color='white', zorder=4)
+                ax.add_patch(triangle)
+          
+        ax.set_aspect("equal")
+        ax.grid(True)
+        ax.set_xlabel("x (m)")
+        ax.set_ylabel("y (m)")
+        # Removed duplicated labels
+        handles, labels = ax.get_legend_handles_labels()
+        unique = dict(zip(labels, handles))
+        ax.legend(unique.values(), 
+                unique.keys(), 
+                loc="upper right", 
+                labelspacing=1.2
+                )
+        ax.set_xlim(2.5, -2.5)
+        ax.set_ylim(2.5, -2.5)
+        plt.tight_layout()
+
+        output_path = os.path.join("/tmp", "scene_preview.png")
+        plt.savefig(output_path)
+        plt.close()
+        return output_path
+
+    def show_scene_preview_dialog(self, csv_path):
+        """
+        Show a QDialog with the generated scene image.
+
+        Args:
+            csv_path (str): Path to the CSV scene file.
+        """
+        try:
+            from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout
+            from PyQt5.QtGui import QPixmap
+
+            img_path = self.plot_scene(csv_path)
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Scene Preview")
+            layout = QVBoxLayout()
+            label = QLabel()
+            label.setPixmap(QPixmap(img_path).scaledToWidth(600, Qt.SmoothTransformation))
+            layout.addWidget(label)
+            dialog.setLayout(layout)
+            dialog.exec_()
+        except Exception as e:
+            logging.error(f"Could not show scene preview: {e}")
+            self.logs_text.append(f"<span style='color:red;'>⚠️ Failed to show scene preview: {e}</span>")
+
+
+
+    def create_test_scene_tab(self):
+        """Tab for testing multiple models over a predefined scene (Test Scene mode)."""
+        tab = QWidget()
+        layout = QVBoxLayout()
+
+        # Form layout
+        form = QFormLayout()
+
+        # Robot name (combo)
+        self.test_scene_robot_name_input = QComboBox()
+        self.test_scene_robot_name_input.addItem("Select a robot...")
+        self.test_scene_robot_name_input.model().item(0).setEnabled(False)
+        self.populate_input_names(self.test_scene_robot_name_input, category="robot")
+        self.test_scene_robot_name_input.currentIndexChanged.connect(self.update_model_ids_for_selected_robot)
+
+        # self.test_scene_robot_name_input.currentTextChanged.connect(self.handle_test_scene_robot_selection)
+        form.addRow("Robot Name (required):", self.test_scene_robot_name_input)
+
+        # Model IDs (checkbox list)
+        self.test_scene_model_ids_input = QListWidget()
+        self.test_scene_model_ids_input.setFixedHeight(200)
+        self.test_scene_model_ids_input.setSelectionMode(QAbstractItemView.NoSelection)
+        form.addRow("Model IDs (required):", self.test_scene_model_ids_input)
+
+        # Scene folder
+        self.test_scene_scene_to_load_folder_input = QComboBox()
+        self.test_scene_scene_to_load_folder_input.currentTextChanged.connect(self.handle_scene_folder_change) 
+        
+        # Botones de acción junto al combo
+        self.test_scene_edit_scene_button = QPushButton()
+        self.test_scene_edit_scene_button.setIcon(QIcon(pkg_resources.resource_filename("rl_coppelia", "assets/edit_icon.png")))
+        self.test_scene_edit_scene_button.setToolTip("Edit selected scene")
+        self.test_scene_edit_scene_button.setFixedSize(24, 24)
+        self.test_scene_edit_scene_button.setVisible(False)
+        self.test_scene_edit_scene_button.clicked.connect(self.handle_edit_scene)
+
+        self.test_scene_delete_scene_button = QPushButton()
+        self.test_scene_delete_scene_button.setIcon(QIcon(pkg_resources.resource_filename("rl_coppelia", "assets/delete_icon.png")))
+        self.test_scene_delete_scene_button.setToolTip("Delete selected scene")
+        self.test_scene_delete_scene_button.setFixedSize(24, 24)
+        self.test_scene_delete_scene_button.setVisible(False)
+        self.test_scene_delete_scene_button.clicked.connect(self.handle_delete_scene)
+
+        # Layout horizontal para la fila
+        self.test_scene_scene_folder_row = QHBoxLayout()
+        self.test_scene_scene_folder_row.addWidget(self.test_scene_scene_to_load_folder_input)
+        self.test_scene_scene_folder_row.addWidget(self.test_scene_edit_scene_button)
+        self.test_scene_scene_folder_row.addWidget(self.test_scene_delete_scene_button)
+
+        form.addRow("Scene Folder:", self.test_scene_scene_folder_row)
+
+        # Label for scene summary
+        self.test_scene_scene_info_label = QLabel()
+        self.test_scene_scene_info_label.hide()  # Hidden by default
+
+        # Button to show scene preview
+        self.test_scene_view_scene_button = QPushButton("Check scene!")
+        self.test_scene_view_scene_button.setToolTip("Show scene preview")
+        self.test_scene_view_scene_button.clicked.connect(self.handle_show_scene_preview)
+        self.test_scene_view_scene_button.hide()
+
+        # Fila combinada
+        self.test_scene_scene_info_row = QWidget()
+        self.test_scene_scene_info_layout = QHBoxLayout()
+        self.test_scene_scene_info_layout.setContentsMargins(0, 0, 0, 0)
+        self.test_scene_scene_info_row.setLayout(self.test_scene_scene_info_layout)
+        self.test_scene_scene_info_layout.addWidget(self.test_scene_scene_info_label)
+        self.test_scene_scene_info_layout.addStretch()
+        self.test_scene_scene_info_layout.addWidget(self.test_scene_view_scene_button)
+        form.addRow("", self.test_scene_scene_info_row)
+        self.test_scene_scene_info_row.hide() 
+
+        # Iterations per model
+        self.test_scene_iters_input = QSpinBox()
+        self.test_scene_iters_input.setRange(1, 9999)
+        self.test_scene_iters_input.setValue(10)
+        form.addRow("Iterations per model (default 10):", self.test_scene_iters_input)
+
+        # Verbose
+        self.test_scene_verbose_input = QSpinBox()
+        self.test_scene_verbose_input.setRange(0, 3)
+        self.test_scene_verbose_input.setValue(1)
+        form.addRow("Verbose Level (default: 1):", self.test_scene_verbose_input)
+
+        # Options
+        self.test_scene_no_gui_checkbox = QCheckBox("Disable GUI")
+        form.addRow("Options:", self.test_scene_no_gui_checkbox)
+
+        # Start button
+        test_scene_button = self.create_styled_button("Test Scene", self.start_test_scene)
+
+        # Center layout
+        button_layout = QVBoxLayout()
+        button_layout.addStretch()
+
+        centered_h = QHBoxLayout()
+        centered_h.addStretch()
+        centered_h.addWidget(test_scene_button)
+        centered_h.addStretch()
+
+        button_layout.addLayout(centered_h)
+        button_layout.addStretch()
+
+        layout.addLayout(form)
+        layout.addLayout(button_layout)
+
+        tab.setLayout(layout)
+        return tab
 
     
 
@@ -1375,7 +2146,7 @@ class MainApp(QMainWindow):
             robot_name = self.plot_robot_name_input.currentText()
             if robot_name != "Select a robot...":
                 self.robot_name = robot_name  
-                self.populate_input_names(self.scene_to_load_folder_input, category="scene_trajs")
+                self.populate_input_names(self.plot_scene_to_load_folder_input, category="scene_configs")
             self.scene_folder_row.show()
         else:
             self.scene_folder_row.hide()
@@ -1433,8 +2204,8 @@ class MainApp(QMainWindow):
         self.scene_folder_row.setLayout(scene_form_layout)
 
         # Combo
-        self.scene_to_load_folder_input = QComboBox()
-        scene_form_layout.addRow("Scene Folder:", self.scene_to_load_folder_input)
+        self.plot_scene_to_load_folder_input = QComboBox()
+        scene_form_layout.addRow("Scene Folder:", self.plot_scene_to_load_folder_input)
 
         self.scene_folder_row.hide()
 
@@ -1446,7 +2217,7 @@ class MainApp(QMainWindow):
         form.addRow(plot_label_with_icon, grid_widget)
         form.addRow(self.scene_folder_row)
 
-        self.update_model_ids_placeholder("Select a robot first")
+        self.update_input_placeholder(self.plot_model_ids_input, "Select a robot first")
 
         # Buttons
         plot_button = self.create_styled_button("Generate Plots", self.start_plot)
@@ -1470,102 +2241,135 @@ class MainApp(QMainWindow):
         return tab
     
 
-    def update_model_ids_placeholder(self, text):
-        """Show a placeholder item in the model IDs list."""
-        self.plot_model_ids_input.clear()
-        placeholder = QListWidgetItem(text)
-        placeholder.setFlags(Qt.NoItemFlags)
-        placeholder.setForeground(Qt.gray)
-        self.plot_model_ids_input.addItem(placeholder)
-
-    def update_scene_folder_options(self):
-        folder_path = os.path.join(self.base_path, "robots", self.robot_name, "scene_configs")
-        self.scene_to_load_folder_input.clear()
-
-        if not os.path.isdir(folder_path):
-            self.scene_to_load_folder_input.addItem("No folders found")
-            self.scene_to_load_folder_input.setEnabled(False)
+    def update_input_placeholder(self, widget, text):
+        """
+        Show a placeholder in a QListWidget or QComboBox.
+        
+        Args:
+            widget (QListWidget or QComboBox): The target input widget.
+            text (str): Placeholder message to show.
+        """
+        if widget is None:
+            logging.warning("No widget provided for placeholder update.")
             return
 
-        folders = sorted([f for f in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, f))])
-        if not folders:
-            self.scene_to_load_folder_input.addItem("No folders found")
-            self.scene_to_load_folder_input.setEnabled(False)
+        from PyQt5.QtWidgets import QListWidget, QComboBox
+
+        if isinstance(widget, QListWidget):
+            widget.clear()
+            placeholder = QListWidgetItem(text)
+            placeholder.setFlags(Qt.NoItemFlags)
+            placeholder.setForeground(Qt.gray)
+            widget.addItem(placeholder)
+
+        elif isinstance(widget, QComboBox):
+            widget.clear()
+            widget.addItem(text)
+            widget.setEnabled(False)
+            widget.model().item(0).setEnabled(False)
+
         else:
-            self.scene_to_load_folder_input.addItem("Select a folder...")
-            self.scene_to_load_folder_input.addItems(folders)
-            self.scene_to_load_folder_input.setEnabled(True)
+            logging.warning(f"Unsupported widget type: {type(widget)}")
 
 
     def update_model_ids_for_selected_robot(self):
-        """Update the avaliable models accordingly to the selected robot."""
-        robot_name = self.plot_robot_name_input.currentText()
-        if robot_name.startswith("Select"):
-            self.update_model_ids_placeholder("Select a robot first")
-            return
+        """Update the available models based on the selected robot."""
+        current_tab = self.tabs.tabText(self.tabs.currentIndex())
+        
+        if current_tab == "Plot":
+            self.robot_name = self.plot_robot_name_input.currentText()
+            target_list_widget = self.plot_model_ids_input
+        elif current_tab == "Test scene":
+            self.robot_name = self.test_scene_robot_name_input.currentText()
+            target_list_widget = self.test_scene_model_ids_input
+        else:
+            logging.warning(f"Unsupported tab: {current_tab}")
+            return  # Unsupported tab
 
-        model_dir = os.path.join(self.base_path, "robots", robot_name, "models")
-        if not os.path.isdir(model_dir):
-            self.update_model_ids_placeholder("No models found for this robot")
-            return
+        if self.robot_name.startswith("Select"):
+            if current_tab == "Plot":
+                self.update_input_placeholder(self.plot_model_ids_input, "Select a robot first")
+            elif current_tab == "Test scene":
+                self.update_input_placeholder(self.test_scene_model_ids_input, "Select a robot first")
+        
+        else:
 
-        # Load action times from train_records.csv file
-        action_times = {}
-        csv_path = os.path.join(self.base_path, "robots", robot_name, "training_metrics", "train_records.csv")
-        if os.path.isfile(csv_path):
-            with open(csv_path, newline="") as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    model_name = row.get("Exp_id") 
-                    action_time = row.get("Action time (s)")
-                    if model_name and action_time:
-                        action_times[model_name.strip()] = action_time.strip()
+            model_dir = os.path.join(self.base_path, "robots", self.robot_name, "models")
+            if not os.path.isdir(model_dir):
+                if current_tab == "Plot":
+                    self.update_input_placeholder(self.plot_model_ids_input, "No models found for this robot")
+                elif current_tab == "Test scene":
+                    self.update_input_placeholder(self.test_scene_model_ids_input, "No models found for this robot")
+            
+            else:
 
-        # Search valid models
-        model_ids = []
-        for entry in os.listdir(model_dir):
-            subdir_path = os.path.join(model_dir, entry)
-            if os.path.isdir(subdir_path):
-                match = re.match(rf"{robot_name}_model_(\d+)", entry)
-                if match:
-                    model_id = match.group(1)
-                    expected_file = f"{robot_name}_model_{model_id}_last.zip"
-                    expected_path = os.path.join(subdir_path, expected_file)
-                    if os.path.isfile(expected_path):
-                        model_ids.append(model_id)
+                # Load action times from train_records.csv file
+                action_times = {}
+                csv_path = os.path.join(self.base_path, "robots", self.robot_name, "training_metrics", "train_records.csv")
+                if os.path.isfile(csv_path):
+                    with open(csv_path, newline="") as csvfile:
+                        reader = csv.DictReader(csvfile)
+                        for row in reader:
+                            model_name = row.get("Exp_id") 
+                            action_time = row.get("Action time (s)")
+                            if model_name and action_time:
+                                action_times[model_name.strip()] = action_time.strip()
 
-        if not model_ids:
-            self.update_model_ids_placeholder("No valid models found")
-            return
+                # Find valid model IDs
+                model_ids = []
+                for entry in os.listdir(model_dir):
+                    subdir_path = os.path.join(model_dir, entry)
+                    if os.path.isdir(subdir_path):
+                        match = re.match(rf"{self.robot_name}_model_(\d+)", entry)
+                        if match:
+                            model_id = match.group(1)
+                            expected_file = f"{self.robot_name}_model_{model_id}_last.zip"
+                            expected_path = os.path.join(subdir_path, expected_file)
+                            if os.path.isfile(expected_path):
+                                model_ids.append(model_id)
 
-        # Show checkboxes with models and their action times
-        self.plot_model_ids_input.clear()
-        for model_id in sorted(model_ids, key=int):
-            full_model_name = f"{robot_name}_model_{model_id}"
-            time_str = action_times.get(full_model_name, "n/a")
+                if not model_ids:
+                    if current_tab == "Plot":
+                        self.update_input_placeholder(self.plot_model_ids_input, "No valid models found")
+                    elif current_tab == "Test scene":
+                        self.update_input_placeholder(self.test_scene_model_ids_input, "No valid models found")
+                
+                else:
 
-            item = QListWidgetItem()
-            item.setSizeHint(QSize(0, 20))
+                    # Update target QListWidget with checkboxes and info
+                    target_list_widget.clear()
+                    for model_id in sorted(model_ids, key=int):
+                        full_model_name = f"{self.robot_name}_model_{model_id}"
+                        time_str = action_times.get(full_model_name, "n/a")
 
-            widget = QWidget()
-            layout = QHBoxLayout(widget)
-            layout.setContentsMargins(0, 0, 0, 0)
+                        item = QListWidgetItem()
+                        item.setSizeHint(QSize(0, 20))
 
-            checkbox = QCheckBox()
-            checkbox.setProperty("model_id", model_id)
-            checkbox.setText(model_id)
-            layout.addWidget(checkbox)
+                        widget = QWidget()
+                        layout = QHBoxLayout(widget)
+                        layout.setContentsMargins(0, 0, 0, 0)
 
-            label = QLabel(f"<span style='color:gray;'>Action time: {time_str}s</span>")
-            label.setTextFormat(Qt.RichText)
-            layout.addWidget(label)
+                        checkbox = QCheckBox()
+                        checkbox.setProperty("model_id", model_id)
+                        checkbox.setText(model_id)
+                        layout.addWidget(checkbox)
 
-            layout.addStretch()
+                        label = QLabel(f"<span style='color:gray;'>Action time: {time_str}s</span>")
+                        label.setTextFormat(Qt.RichText)
+                        layout.addWidget(label)
 
-            self.plot_model_ids_input.addItem(item)
-            self.plot_model_ids_input.setItemWidget(item, widget)
+                        layout.addStretch()
 
-        self.handle_plot_type_change()
+                        target_list_widget.addItem(item)
+                        target_list_widget.setItemWidget(item, widget)
+
+        # Update scene folder options if necessary
+        if current_tab == "Plot":
+            self.handle_plot_type_change()
+        elif current_tab == "Test scene":
+            self.handle_test_scene_robot_selection()
+        elif current_tab == "Auto traininig":
+            self.handle_auto_train_robot_selection()
 
 
     def populate_robot_names(self):
@@ -1616,13 +2420,15 @@ class MainApp(QMainWindow):
 
     def populate_input_names(self, input_widget, category):
         """Load available <category> names into a dropdown menu."""
+
         if category == "robot":
             search_dir = os.path.join(self.base_path, "robots")
             default_text = "Select a robot..."
             warning_text = "Robots directory not found at: "
-        elif category == "scene_trajs":
+        elif category == "scene_configs":
             if not hasattr(self, "robot_name") or not self.robot_name:
-                logging.warning("Robot name not set when loading scene_trajs.")
+                self.logs_text.append("<span style='color:red;'>DEBUG: robot_name no estaba definido al cargar escena.</span>")
+                logging.warning("Robot name not set when loading scene_configs.")
                 return
             search_dir = os.path.join(self.base_path, "robots", self.robot_name, "scene_configs")
             default_text = "Select a scene folder to load..."
@@ -1631,6 +2437,15 @@ class MainApp(QMainWindow):
             search_dir = os.path.join(self.base_path, "configs")
             default_text = "Select a parameters file..."
             warning_text = "Configs directory not found at: "
+
+        elif category == "session_folders":
+            if not hasattr(self, "robot_name") or not self.robot_name:
+                self.logs_text.append("<span style='color:red;'>DEBUG: robot_name no estaba definido al cargar session_folders.</span>")
+                logging.warning("Robot name not set when loading session_folders.")
+                return
+            search_dir = os.path.join(self.base_path, "robots", self.robot_name, "auto_trainings")
+            default_text = "Select a session folder for auto training..."
+            warning_text = "Session folders for auto training directory not found at: "
             
 
         else:
@@ -1663,39 +2478,112 @@ class MainApp(QMainWindow):
                 input_widget.addItems(possible_names)
                 input_widget.setCurrentIndex(0)
                 logging.info(f"{category} --> Folders found: {possible_names}")
+                if possible_names is None or len(possible_names) == 0:
+                    if category == "scene_configs":
+                        self.update_input_placeholder(input_widget, "No scene configs found")
+                    elif category == "robot":
+                        self.update_input_placeholder(input_widget, "No robots found")
+                    elif category == "session_folders":
+                        self.update_input_placeholder(input_widget, "No session folders found")
+                else:
+                    input_widget.setEnabled(True)
+
         else:
             logging.warning(warning_text + search_dir)
-
+            self.update_input_placeholder(input_widget, "Scene configs directory not found")
+            
         if preserve_manual:
             input_widget.insertSeparator(input_widget.count())
             input_widget.addItem("Manual parameters")
             input_widget.setCurrentIndex(0)
 
+        if category == "scene_configs":
+            input_widget.insertSeparator(input_widget.count())
+            input_widget.addItem("Custom your scene")
+
+
+    def handle_auto_train_session_name_change(self):
+        """Check if a session folder for auto training exists, and if it contains json files."""
+        if self.auto_train_session_name_input:
+            if not (self.auto_train_session_name_input.currentText().strip().startswith("Select") or self.auto_train_session_name_input.currentText().strip().startswith("Scene")):
+                session_name = self.auto_train_session_name_input.currentText()
+                # Get the directory containing the parameter files for the session.
+                session_dir = os.path.join(self.base_path, "robots", self.robot_name, "auto_trainings", session_name)
+                    
+                # Create the directory if it doesn't exist
+                os.makedirs(session_dir, exist_ok=True)
+
+                # Check if the directory is empty
+                if not (session_name.strip().startswith("Select") or session_name.strip().startswith("Scene")):
+                    if not os.listdir(session_dir):
+                        warning = f"ERROR: The directory {session_dir} is empty. Please add the desired param.json files for training."
+                        logging.critical(warning)
+                        self.logs_text.append(f"<span style='color:red;'> --- {warning}</span>")
+                        return
+                    else:
+                        # Search all the json files inside the provided folder.
+                        param_files = glob.glob(os.path.join(session_dir, "*.json"))
+                        message = f"Found {len(param_files)} parameter files in {session_dir}."
+                        logging.info(message)
+                        self.logs_text.append(f"<span style='color:green;'> --- </span>{message}")
+    
 
     def create_auto_training_tab(self):
         """Tab for auto training configuration."""
         tab = QWidget()
         layout = QVBoxLayout()
 
-        # Form for auto training parameters
         form = QFormLayout()
-        self.auto_train_session_name_input = QLineEdit()
-        self.auto_train_robot_name_input = QLineEdit()
-        self.auto_train_workers_input = QSpinBox()
-        self.auto_train_workers_input.setRange(1, 10)
 
-        form.addRow("Session Name:", self.auto_train_session_name_input)
-        form.addRow("Robot Name:", self.auto_train_robot_name_input)
-        form.addRow("Max Workers:", self.auto_train_workers_input)
+        # Robot name (combo)
+        self.auto_train_robot_name_input = QComboBox()
+        self.auto_train_robot_name_input.addItem("Select a robot...")
+        self.auto_train_robot_name_input.model().item(0).setEnabled(False)
+        self.populate_input_names(self.auto_train_robot_name_input, category="robot")
+        self.auto_train_robot_name_input.currentIndexChanged.connect(self.handle_auto_train_robot_selection)
+        form.addRow("Robot Name (required):", self.auto_train_robot_name_input)
 
-        # Buttons
-        auto_train_button = QPushButton("Start Auto Training")
-        auto_train_button.clicked.connect(self.start_auto_training)
+        # Session Name (required)
+        self.auto_train_session_name_input = QComboBox()
+        self.auto_train_session_name_input.currentTextChanged.connect(self.handle_auto_train_session_name_change) 
+        form.addRow("Session Name (required):", self.auto_train_session_name_input)
+
+        # Disable parallel mode (optional)
+        self.auto_train_disable_parallel_checkbox = QCheckBox("Disable Parallel Mode")
+        form.addRow("Options: ", self.auto_train_disable_parallel_checkbox)
+
+        # Max workers (optional, only relevant if parallel mode is active)
+        self.auto_train_max_workers_input = QSpinBox()
+        self.auto_train_max_workers_input.setRange(1, 10)
+        self.auto_train_max_workers_input.setValue(3)
+        form.addRow("Max Workers (default: 3):", self.auto_train_max_workers_input)
+
+        # Verbose level
+        self.auto_train_verbose_input = QSpinBox()
+        self.auto_train_verbose_input.setRange(0, 3)
+        self.auto_train_verbose_input.setValue(1)
+        form.addRow("Verbose Level (default: 1)):", self.auto_train_verbose_input)
+
+        # Start button
+        auto_train_button = self.create_styled_button("Start Auto Training", self.start_auto_training)
+
+        # Layout centrado
+        button_layout = QVBoxLayout()
+        button_layout.addStretch()
+
+        centered_h = QHBoxLayout()
+        centered_h.addStretch()
+        centered_h.addWidget(auto_train_button)
+        centered_h.addStretch()
+
+        button_layout.addLayout(centered_h)
+        button_layout.addStretch()
+
         layout.addLayout(form)
-        layout.addWidget(auto_train_button)
-
+        layout.addLayout(button_layout)
         tab.setLayout(layout)
         return tab
+
 
     def create_auto_testing_tab(self):
         """Tab for auto testing configuration."""
@@ -1744,6 +2632,144 @@ class MainApp(QMainWindow):
 
         tab.setLayout(layout)
         return tab
+    
+
+    def create_manage_tab(self):
+        """
+        Create the 'Manage' tab to view and administer robots and their trained models.
+        """
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Main horizontal layout
+        main_layout = QHBoxLayout()
+
+        # --- Left: List of robots ---
+        robot_panel = QVBoxLayout()
+        robot_label = QLabel("Available Robots:")
+        self.robot_list = QListWidget()
+        self.robot_list.itemSelectionChanged.connect(self.handle_robot_selected_in_manage_tab)
+
+        self.delete_robot_button = QPushButton("Delete Robot")
+        self.delete_robot_button.setIcon(QIcon.fromTheme("edit-delete"))
+        self.delete_robot_button.clicked.connect(self.handle_delete_robot)
+        self.delete_robot_button.setEnabled(False)
+
+        robot_panel.addWidget(robot_label)
+        robot_panel.addWidget(self.robot_list)
+        robot_panel.addWidget(self.delete_robot_button)
+
+        # --- Right: Models for selected robot ---
+        model_panel = QVBoxLayout()
+        model_label = QLabel("Models for selected robot:")
+        self.model_list = QListWidget()
+        self.model_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+
+        self.delete_model_button = QPushButton("Delete Selected Model(s)")
+        self.delete_model_button.setIcon(QIcon.fromTheme("edit-delete"))
+        self.delete_model_button.clicked.connect(self.handle_delete_models)
+        self.delete_model_button.setEnabled(False)
+
+        model_panel.addWidget(model_label)
+        model_panel.addWidget(self.model_list)
+        model_panel.addWidget(self.delete_model_button)
+
+        # Add both panels to the main layout
+        main_layout.addLayout(robot_panel, 1)
+        main_layout.addLayout(model_panel, 2)
+
+        layout.addLayout(main_layout)
+        tab.setLayout(layout)
+
+        self.populate_robot_list()
+        return tab
+
+    def populate_robot_list(self):
+        """Populate the list of available robots."""
+        self.robot_list.clear()
+        robots_path = os.path.join(self.base_path, "robots")
+        if not os.path.exists(robots_path):
+            return
+        for robot in sorted(os.listdir(robots_path)):
+            robot_dir = os.path.join(robots_path, robot)
+            if os.path.isdir(robot_dir):
+                self.robot_list.addItem(robot)
+
+    def handle_robot_selected_in_manage_tab(self):
+        """When a robot is selected, populate its models."""
+        selected_items = self.robot_list.selectedItems()
+        self.model_list.clear()
+        self.delete_robot_button.setEnabled(bool(selected_items))
+        self.delete_model_button.setEnabled(False)
+
+        if not selected_items:
+            return
+
+        robot_name = selected_items[0].text()
+        models_dir = os.path.join(self.base_path, "robots", robot_name, "models")
+
+        if not os.path.exists(models_dir):
+            return
+
+        for root, _, files in os.walk(models_dir):
+            for f in sorted(files):
+                if f.endswith(".zip"):
+                    rel_path = os.path.relpath(os.path.join(root, f), models_dir)
+                    self.model_list.addItem(rel_path)
+
+        self.model_list.itemSelectionChanged.connect(lambda: self.delete_model_button.setEnabled(bool(self.model_list.selectedItems())))
+
+    def handle_delete_robot(self):
+        """Delete the selected robot folder after confirmation."""
+        selected_items = self.robot_list.selectedItems()
+        if not selected_items:
+            return
+
+        robot_name = selected_items[0].text()
+        reply = QMessageBox.question(self, "Confirm Deletion", f"Are you sure you want to delete the robot '{robot_name}' and all its data?", QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            robot_path = os.path.join(self.base_path, "robots", robot_name)
+            try:
+                shutil.rmtree(robot_path)
+                self.logs_text.append(f"<span style='color:red;'> --- Robot '{robot_name}' deleted.</span>")
+            except Exception as e:
+                logging.warning(f"Failed to delete robot '{robot_name}': {e}")
+                self.logs_text.append(f"<span style='color:red;'> --- Error deleting robot '{robot_name}'.</span>")
+            self.populate_robot_list()
+            self.model_list.clear()
+            self.delete_robot_button.setEnabled(False)
+            self.delete_model_button.setEnabled(False)
+
+    def handle_delete_models(self):
+        """Delete selected models for the selected robot."""
+        robot_items = self.robot_list.selectedItems()
+        model_items = self.model_list.selectedItems()
+        if not robot_items or not model_items:
+            return
+
+        robot_name = robot_items[0].text()
+        model_names = [item.text() for item in model_items]
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to delete the selected model(s):\n{', '.join(model_names)}",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            deleted = 0
+            for model_name in model_names:
+                model_path = os.path.join(self.base_path, "robots", robot_name, "models", model_name)
+                try:
+                    os.remove(model_path)
+                    deleted += 1
+                except Exception as e:
+                    logging.warning(f"Failed to delete model '{model_name}': {e}")
+            self.logs_text.append(f"<span style='color:red;'> --- Deleted {deleted} model(s) from '{robot_name}'.</span>")
+            self.handle_robot_selected_in_manage_tab()
+
+
 
     def browse_scene(self):
         """Open a file dialog to select a scene file."""
@@ -1755,31 +2781,108 @@ class MainApp(QMainWindow):
     def start_train(self):
 
         """Start the training process."""
-        if self.train_robot_name_combo.currentText() == "Create a new one":
+        if self.train_robot_name_combo.currentText() == "Create a new one!":
             robot_name = self.train_new_robot_name_input.text().strip()
         else:
             robot_name = self.train_robot_name_combo.currentText()
 
+        process_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        terminal_title = f"CoppeliaTerminal_{process_timestamp}"
+
         args = [
             "rl_coppelia", "train",
             "--robot_name", robot_name,
-            "--iterations", str(self.test_iterations_input.value()),
-            "--verbose", str(self.verbose_input.value())
+            "--timestamp", str(process_timestamp),
+            "--verbose", str(self.train_verbose_input.value())
         ]
-        
+
+        if self.train_params_file_input.currentText():
+            params_filename = self.train_params_file_input.currentText().split()[0]
+            if params_filename != "Select":
+                params_fullpath = os.path.join(self.base_path, "configs", params_filename)
+                args += ["--params_file", params_fullpath]
+        if self.train_dis_parallel_mode_checkbox.isChecked():
+            args.append("--dis_parallel_mode")
+        if self.train_no_gui_checkbox.isChecked():
+            args.append("--no_gui")
+            
         logging.info(f"Starting training with args: {args}")
-        train.main(args)
 
 
-    def stop_specific_test(self, test_thread, process_widget):
-        """Stop an individual test process and remove its widget."""
-        if test_thread.isRunning():
-            test_thread.stop()
-            logging.info("Stopping test thread...")
+        # Crear thread
+        train_thread = ProcessThread(args) 
+        train_thread.terminal_title = terminal_title
 
-        if hasattr(test_thread, 'terminal_title'):
-            logging.info(f"Closing terminal: {test_thread.terminal_title}")
-            subprocess.run(['wmctrl', '-c', test_thread.terminal_title], check=False)
+        # Crear widget visual del proceso
+        process_widget = QWidget()
+        process_layout = QVBoxLayout()
+        process_widget.setLayout(process_layout)
+
+        process_widget.process_type = "Train"
+        process_widget.timestamp = process_timestamp
+        process_widget.model_name = robot_name
+
+        info_label = QLabel(f"<b>Train</b> — {process_timestamp}")
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, 100)
+        progress_bar.setValue(0)
+        stop_button = QPushButton("Stop")
+        stop_button.clicked.connect(lambda: self.stop_specific_process(train_thread, process_widget))
+
+        process_layout.addWidget(info_label)
+        process_layout.addWidget(progress_bar)
+        process_layout.addWidget(stop_button)
+
+        self.processes_container.addWidget(process_widget)
+        self.update_processes_label()
+
+        # Conectar señales
+        train_thread.progress_signal.connect(progress_bar.setValue)
+        train_thread.finished_signal.connect(lambda: self.on_process_finished(process_widget))
+        train_thread.error_signal.connect(lambda msg: self.on_process_error(msg, process_widget))
+
+        train_thread.start()
+
+        # Deactivate 'Start training' button for few seconds
+        button = self.sender()
+        if isinstance(button, QPushButton):
+            self.disable_button_with_countdown(button, seconds=20)
+        
+        stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        start_message = f"<span style='color:green;'> --- </span>Training process started successfully at <b>{stop_time}</b>."
+        self.logs_text.append(start_message)
+
+
+
+    def stop_specific_process(self, process_thread, process_widget):
+        """Stop an individual train/test process and remove its widget."""
+        if process_thread.isRunning():
+            process_thread.stop()
+            logging.info("Stopping thread...")
+
+        if hasattr(process_thread, 'terminal_title'):
+            logging.info(f"Closing terminal: {process_thread.terminal_title}")
+            try:
+                subprocess.run(["wmctrl", "-c", process_thread.terminal_title], check=True)
+            except subprocess.CalledProcessError as e:
+                logging.warning(f"⚠️ wmctrl could not close the terminal: {e}")
+
+                try: 
+                    logging.info("Trying to close terminal by PID...")
+                    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                        if 'gnome-terminal' in proc.info['name'] or 'gnome-terminal' in ' '.join(proc.info['cmdline']):
+                            cmdline = ' '.join(proc.info['cmdline'])
+                            if process_thread.terminal_title in cmdline:
+                                try:
+                                    proc.terminate()
+                                    proc.wait(timeout=5)
+                                    logging.info(f"Terminal '{process_thread.terminal_title}' closed by PID {proc.pid}")
+                                    return True
+                                except Exception as e:
+                                    logging.warning(f"Failed to close terminal '{process_thread.terminal_title}': {e}")
+                    logging.warning(f"No terminal found with title containing '{process_thread.terminal_title}'")
+                except Exception as e:
+                    logging.error(f"Error while trying to close terminal: {e}") 
 
         # Log parada manual
         process_type = getattr(process_widget, 'process_type', 'Unknown')
@@ -1881,7 +2984,7 @@ class MainApp(QMainWindow):
         logging.info(f"Starting testing with args: {args}")
 
         # Create test thread
-        test_thread = TestThread(args)
+        test_thread = ProcessThread(args)
         test_thread.terminal_title = terminal_title
 
         # Create a widget for the process
@@ -1899,7 +3002,7 @@ class MainApp(QMainWindow):
         progress_bar.setRange(0, 100)
         progress_bar.setValue(0)
         stop_button = QPushButton("Stop")
-        stop_button.clicked.connect(lambda: self.stop_specific_test(test_thread, process_widget))
+        stop_button.clicked.connect(lambda: self.stop_specific_process(test_thread, process_widget))
 
         process_layout.addWidget(info_label)
         process_layout.addWidget(progress_bar)
@@ -1920,6 +3023,91 @@ class MainApp(QMainWindow):
         if isinstance(button, QPushButton):
             self.disable_button_with_countdown(button, seconds=8)
 
+    def start_test_scene(self):
+        """Start the test_scene process using selected models and scene folder."""
+        robot_name = self.test_scene_robot_name_input.currentText().strip()
+        if robot_name == "Select a robot...":
+            self.logs_text.append("<span style='color:orange;'>⚠️ Please select a robot name.</span>")
+            return
+
+        # Leer modelos seleccionados
+        selected_model_ids = []
+        for i in range(self.test_scene_model_ids_input.count()):
+            item = self.test_scene_model_ids_input.item(i)
+            widget = self.test_scene_model_ids_input.itemWidget(item)
+            if widget:
+                checkbox = widget.findChild(QCheckBox)
+                if checkbox and checkbox.isChecked():
+                    selected_model_ids.append(checkbox.text().strip())
+
+        if not selected_model_ids:
+            self.logs_text.append("<span style='color:orange;'>⚠️ Please select at least one model ID.</span>")
+            return
+
+        # Leer carpeta de escena
+        scene_folder = self.test_scene_scene_to_load_folder_input.currentText().strip()
+        if not scene_folder or scene_folder.startswith("Select"):
+            self.logs_text.append("<span style='color:orange;'>⚠️ Please select a scene folder.</span>")
+            return
+
+        iters = self.test_scene_iters_input.value()
+        verbose = self.test_scene_verbose_input.value()
+        no_gui = self.test_scene_no_gui_checkbox.isChecked()
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        terminal_title = f"TestSceneTerminal_{timestamp}"
+
+        args = [
+            "rl_coppelia", "test_scene",
+            "--robot_name", robot_name,
+            "--model_ids", *selected_model_ids,
+            "--scene_to_load_folder", scene_folder,
+            "--iters_per_model", str(iters),
+            "--timestamp", str(timestamp),
+            "--verbose", str(verbose)
+        ]
+        if no_gui:
+            args.append("--no_gui")
+
+        # Crear y configurar el thread
+        thread = ProcessThread(args)
+        thread.terminal_title = terminal_title
+
+        # Crear bloque visual
+        process_widget = QWidget()
+        layout = QVBoxLayout(process_widget)
+
+        process_widget.process_type = "Test Scene"
+        process_widget.timestamp = timestamp
+        process_widget.model_name = robot_name
+
+        info_label = QLabel(f"<b>Test Scene</b> — {timestamp}")
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, 100)
+        progress_bar.setValue(0)
+        stop_button = QPushButton("Stop")
+        stop_button.clicked.connect(lambda: self.stop_specific_process(thread, process_widget))
+
+        layout.addWidget(info_label)
+        layout.addWidget(progress_bar)
+        layout.addWidget(stop_button)
+
+        self.processes_container.addWidget(process_widget)
+        self.update_processes_label()
+
+        # Conectar señales
+        thread.progress_signal.connect(progress_bar.setValue)
+        thread.finished_signal.connect(lambda: self.on_process_finished(process_widget))
+        thread.error_signal.connect(lambda msg: self.on_process_error(msg, process_widget))
+
+        thread.start()
+
+        # Desactivar el botón unos segundos
+        button = self.sender()
+        if isinstance(button, QPushButton):
+            self.disable_button_with_countdown(button, seconds=8)
+
+        self.logs_text.append(f"<span style='color:green;'> --- Starting Test Scene at {timestamp}</span>")
 
 
     def start_plot(self):
@@ -1964,7 +3152,7 @@ class MainApp(QMainWindow):
         ]
 
         if "plot_scene_trajs" in selected_types:  
-            scene_folder = self.scene_to_load_folder_input.currentText()
+            scene_folder = self.plot_scene_to_load_folder_input.currentText()
             if scene_folder and scene_folder != "Select a folder...":
                 args.extend(["--scene_to_load_folder", scene_folder])
 
@@ -1988,13 +3176,71 @@ class MainApp(QMainWindow):
 
     def start_auto_training(self):
         """Start auto training."""
-        args = {
-            "session_name": self.auto_train_session_name_input.text(),
-            "robot_name": self.auto_train_robot_name_input.text(),
-            "max_workers": self.auto_train_workers_input.value(),
-        }
+        session_name = self.auto_train_session_name_input.currentText().strip()
+        robot_name = self.auto_train_robot_name_input.currentText().strip()
+        dis_parallel = self.auto_train_disable_parallel_checkbox.isChecked()
+        max_workers = self.auto_train_max_workers_input.value()
+        verbose = self.auto_train_verbose_input.value()
+
+        if not session_name or not robot_name:
+            self.logs_text.append("<span style='color:orange;'>⚠️ Please provide both session and robot names.</span>")
+            return
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        terminal_title = f"AutoTrain_{timestamp}"
+
+        args = [
+            "rl_coppelia", "auto_training",
+            "--session_name", session_name,
+            "--robot_name", robot_name,
+            "--max_workers", str(max_workers),
+            "--timestamp", str(timestamp),
+            "--verbose", str(verbose)
+        ]
+        if dis_parallel:
+            args.append("--dis_parallel_mode")
+
         logging.info(f"Starting auto training with args: {args}")
-        auto_training.main(args)
+
+        thread = ProcessThread(args)
+        thread.terminal_title = terminal_title
+
+        # Widget visual
+        process_widget = QWidget()
+        layout = QVBoxLayout()
+        process_widget.setLayout(layout)
+
+        process_widget.process_type = "Auto Train"
+        process_widget.timestamp = timestamp
+        process_widget.model_name = robot_name
+
+        info_label = QLabel(f"<b>Auto Train</b> — {timestamp}")
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, 100)
+        progress_bar.setValue(0)
+        stop_button = QPushButton("Stop")
+        stop_button.clicked.connect(lambda: self.stop_specific_process(thread, process_widget))
+
+        layout.addWidget(info_label)
+        layout.addWidget(progress_bar)
+        layout.addWidget(stop_button)
+
+        self.processes_container.addWidget(process_widget)
+        self.update_processes_label()
+
+        thread.progress_signal.connect(progress_bar.setValue)
+        thread.finished_signal.connect(lambda: self.on_process_finished(process_widget))
+        thread.error_signal.connect(lambda msg: self.on_process_error(msg, process_widget))
+
+        thread.start()
+
+        # Disable button for cooldown
+        button = self.sender()
+        if isinstance(button, QPushButton):
+            self.disable_button_with_countdown(button, seconds=8)
+
+        self.logs_text.append(f"<span style='color:green;'> --- Starting Auto Training at {timestamp}</span>")
+
 
     def start_auto_testing(self):
         """Start auto testing."""

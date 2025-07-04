@@ -98,6 +98,7 @@ typing_extensions==4.5.0
 tzdata==2025.1
 urllib3==2.2.3
 Werkzeug==3.0.6
+wmctrl
 wrapt==1.17.2
 zipp==3.20.2
 zmq==0.0.0

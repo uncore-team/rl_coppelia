@@ -76,6 +76,8 @@ def sysCall_thread():
         elif robot_name == "burgerBot":
             agent = BurgerBotAgent(sim, params_env, paths, file_id, comms_port=comms_port)
             agent.robot_baselink = agent.robot
+        else:   # by default it will use the TurtleBot configuration
+            agent = TurtleBotAgent(sim, params_env, paths, file_id, comms_port=comms_port)
         logging.info("Agent initialized")
 
         agent.scene_to_load_folder = scene_to_load_folder

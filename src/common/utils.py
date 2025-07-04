@@ -51,7 +51,7 @@ def initial_warnings(self):
     
     if hasattr(self.args, "params_file") and not self.args.params_file:
         if self.args.command == 'train':
-            self.args.params_file = os.path.join(self.base_path, "configs", "params_file.json")
+            self.args.params_file = os.path.join(self.base_path, "configs", "params_default_file.json")
         logging.warning("WARNING: '--params_file' was not specified, so default file will be used.")
 
     if hasattr(self.args, "model_name") and not self.args.model_name:  
@@ -1432,8 +1432,11 @@ def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
     if args.robot_name:
         cmd.extend(["--robot_name", args.robot_name])
 
+    if args.timestamp:
+        cmd.extend(["--timestamp", args.timestamp])
+
     # Add the iterations
-    if args.iterations:
+    if hasattr(args, "iterations") and args.iterations is not None:
         cmd.extend(["--iterations", str(args.iterations)])
 
     # Add the verbose mode
@@ -1892,7 +1895,7 @@ def get_base_env(vec_env):
 
 
 class CustomMetricsCallback(BaseCallback):
-    def __init__(self, rl_copp, episodes_offset=0, sim_time_offset=0, eval_freq=4, verbose=0):
+    def __init__(self, rl_copp, total_timesteps, episodes_offset=0, sim_time_offset=0, eval_freq=4, verbose=0):
         super().__init__(verbose)
         self.rl_copp = rl_copp 
         self.eval_freq = eval_freq
@@ -1900,6 +1903,7 @@ class CustomMetricsCallback(BaseCallback):
         self.episode_count = 0
         self.episodes_offset = episodes_offset
         self.sim_time_offset = sim_time_offset
+        self.total_timesteps= total_timesteps
 
         # Get base env
         self.base_env = get_base_env(self.rl_copp.env)
@@ -1907,6 +1911,7 @@ class CustomMetricsCallback(BaseCallback):
 
 
     def _on_step(self) -> bool:
+        
         # Log in TensorBoard
         
         
@@ -1932,6 +1937,9 @@ class CustomMetricsCallback(BaseCallback):
             raise RuntimeError("Logger not initialized CustomMetricsCallback")
 
         if self.episode_count != self.last_logged_episode and self.episode_count % self.eval_freq == 0:
+            progress = int((self.num_timesteps / self.total_timesteps) * 100)
+            print(f"Training Progress: {progress}%")
+
             # Logging into tensorboard
             logging.info(f"Logging custom metrics at timestep {self.num_timesteps}")
             self.logger.record("custom/sim_time", current_sim_time, self.num_timesteps)
@@ -2045,9 +2053,13 @@ def calculate_average_distances(trajs_folder):
 
         return total_distance / count if count > 0 else 0.0
 
+
+# ------------------------------------
 # ------------------------------------
 # ------ Functions for plotting ------
 # ------------------------------------
+# ------------------------------------
+
 
 def get_data_for_spider(csv_path, args, column_names):
     """
@@ -2220,6 +2232,59 @@ def plot_multiple_spider(data_list, labels, names, title='Models Comparison'):
     plt.show()
 
 
+def moving_average(data, window_size=10):
+    """
+    Applies a moving average filter to smooth the data.
+
+    Args:
+        data (array-like): Sequence of numeric values to be smoothed.
+        window_size (int): Number of points to include in each averaging window.
+
+    Returns:
+        np.ndarray: The smoothed data as a NumPy array.
+    """
+    return pd.Series(data).rolling(window=window_size, center=True).mean().to_numpy()
+
+
+def get_color_map(n_colors):
+    """
+    Returns a list of colors using tab20 first, then filling with tab20b and tab20c if needed.
+
+    Args:
+        n_colors (int): Total number of colors needed.
+
+    Returns:
+        list: List of RGBA tuples.
+    """
+    tab20 = plt.cm.get_cmap('tab20')
+    tab20b = plt.cm.get_cmap('tab20b')
+    tab20c = plt.cm.get_cmap('tab20c')
+
+    colors = [tab20(i) for i in range(20)]  # First 20 from tab20
+
+    extra_needed = max(0, n_colors - 15)
+    half = (extra_needed + 1) // 2  # Divide extras equally (first goes to tab20b)
+
+    colors += [tab20b(i) for i in range(half)]
+    colors += [tab20c(i) for i in range(extra_needed - half)]
+
+    return colors[:n_colors]
+
+
+def get_legend_columns(n_models, items_per_column=4):
+    """
+    Computes the number of columns for the legend based on the number of models.
+
+    Args:
+        n_models (int): Total number of models (legend items).
+        items_per_column (int): Maximum number of items per column.
+
+    Returns:
+        int: Recommended number of legend columns.
+    """
+    return max(1, (n_models + items_per_column - 1) // items_per_column)
+
+
 def exponential_model(t, A, k, B):
     """
     Exponential model for modelling a first order system shifted in the y axis.
@@ -2255,6 +2320,77 @@ def delayed_exponential_derivative(x, A, k, B, delay):
     result[mask] = 0
     result[~mask] = A * k * np.exp(-k * (x[~mask] - delay))
     return result
+
+
+def plot_metric_boxplot_by_timestep(df, metric, ylabel, color='#2678b0'):
+    """
+    Plot a boxplot for a continuous metric with the X-axis showing the actual timestep (float),
+    ordered numerically.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing all models' testing results.
+        metric (str): Name of the metric to be plotted (must be a column in `df`).
+        ylabel (str): Label for the Y-axis.
+        color (str): Color used for the boxplot fill.
+    """
+    # Extract unique models (e.g., '0.4s') and corresponding timestep values
+    unique_models = sorted(df["Model"].unique(), key=lambda x: float(x.replace('s', '')))
+    timesteps_ordered = [float(model.replace('s', '')) for model in unique_models]
+
+    box_data = []
+    valid_timesteps = []
+
+    for i, model in enumerate(unique_models):
+        model_data = df[df["Model"] == model][metric].values
+        clean_data = model_data[np.isfinite(model_data)]
+        if len(clean_data) > 0:
+            box_data.append(clean_data)
+            valid_timesteps.append(timesteps_ordered[i])
+
+    if not box_data:
+        logging.warning(f"[!] No valid data found for metric '{metric}'")
+        return
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    box_width = min(np.diff(valid_timesteps)) * 0.7 if len(valid_timesteps) > 1 else 0.1
+    bp = ax.boxplot(box_data, positions=valid_timesteps, widths=box_width, patch_artist=True)
+
+    # Customize box appearance
+    for patch in bp['boxes']:
+        patch.set_facecolor(color)
+        patch.set_edgecolor('black')
+        patch.set_alpha(1)
+
+    for whisker in bp['whiskers']:
+        whisker.set_color('black')
+        whisker.set_linewidth(1)
+
+    for cap in bp['caps']:
+        cap.set_color(color)
+        cap.set_linewidth(1)
+
+    for median in bp['medians']:
+        median.set_color('#fe7c2b')
+        median.set_linewidth(1)
+
+    for flier in bp['fliers']:
+        flier.set(marker='o', color='black', alpha=0.3)
+
+    # X-axis configuration
+    ax.set_xticks(valid_timesteps)
+    ax.set_xlim(min(valid_timesteps) - 0.2, max(valid_timesteps) + 0.1)
+    ax.set_xticklabels([f"{t}" for t in valid_timesteps], fontsize=14, rotation=90)
+
+    # Labels and grid
+    ax.set_xlabel("Timestep (s)", fontsize=20, labelpad=10)
+    ax.set_ylabel(ylabel, fontsize=20, labelpad=10)
+    ax.tick_params(axis='both', which='major', labelsize=16)
+    ax.grid(True)
+    plt.tight_layout()
+
+    return fig, ax
+
 
 
 def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
@@ -2367,6 +2503,82 @@ def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     return convergence_point, reward_fit, x_raw, reward, reward_at_convergence
 
 
+def plot_metrics_comparison_smooth_with_original_deprecated(rl_copp_obj, metric, title="Comparison"):
+    """
+    Plot both raw and smoothed metric curves of multiple models for visual comparison.
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class for managing paths and arguments.
+        metric (str): The metric to be plotted ("rewards" or "episodes_length").
+        title (str): Title of the plot.
+    """
+    smooth_flag = True
+    smooth_level = 50  # Size of moving average window
+
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path, "train_records.csv")
+    timestep_to_data = {}
+
+    for model_index in range(len(rl_copp_obj.args.model_ids)):
+        model_id = rl_copp_obj.args.model_ids[model_index]
+        file_pattern = f"{rl_copp_obj.args.robot_name}_model_{model_id}_*.csv"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "training_metrics", file_pattern))
+
+        if not files:
+            logging.warning(f"No CSV found for model {model_id}. Skipping.")
+            continue
+
+        try:
+            df = pd.read_csv(files[0])
+        except Exception as e:
+            logging.error(f"Could not read file for model {model_id}. Error: {e}")
+            continue
+
+        model_name = f"{rl_copp_obj.args.robot_name}_model_{model_id}"
+        timestep = get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")
+
+        steps = df['Step'].values
+        if metric == "rewards":
+            data = df['rollout/ep_rew_mean'].values
+        elif metric == "episodes_length":
+            data = df['rollout/ep_len_mean'].values
+        else:
+            logging.error(f"Unknown metric: {metric}")
+            return
+
+        smoothed_data = moving_average(data, window_size=smooth_level) if smooth_flag else data
+        smoothed_steps = steps[:len(smoothed_data)]
+
+        if timestep not in timestep_to_data:
+            timestep_to_data[timestep] = []
+
+        timestep_to_data[timestep].append((steps, data, smoothed_steps, smoothed_data))
+
+    color_map = plt.cm.get_cmap("tab10", len(timestep_to_data))
+    plt.figure(figsize=(13, 10))
+
+    for idx, (timestep, series_list) in enumerate(timestep_to_data.items()):
+        for steps, raw_data, smooth_steps, smooth_data in series_list:
+            color = color_map(idx)
+            plt.plot(steps, raw_data, label=f"Raw Model {timestep}s", linestyle=':', alpha=0.5, color=color)
+            plt.plot(smooth_steps, smooth_data, label=f"Smoothed Model {timestep}s", linestyle='-', linewidth=2, color=color)
+
+    plt.xlabel('Steps', fontsize=20)
+    plt.ylabel(metric.capitalize(), fontsize=20)
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+    plt.legend(fontsize=14, ncol=2)
+    plt.grid(True)
+    plt.tight_layout()
+
+    if rl_copp_obj.args.save_plots:
+        filename = f"metrics_comparison_{metric}.png"
+        plt.savefig(filename)
+        plt.close()
+    else:
+        plt.show()
+
+
 def process_rl_exploitation_summary(summary_csv_path):
     """
     Processes a summary CSV of multiple RL exploitations, filters episodes with TimeSteps count == 1,
@@ -2445,3 +2657,178 @@ def process_rl_exploitation_summary(summary_csv_path):
     cleaned_df.to_csv(cleaned_summary_path, index=False)
 
     return cleaned_summary_path
+
+
+
+# ------------------------------------
+# ------------------------------------
+# ------- Deprecated functions -------
+# ------------------------------------
+# ------------------------------------
+
+
+def plot_histogram_deprecated (rl_copp_obj, model_index, mode, n_bins = 21, title = "Histogram for "):
+    """
+    Plots a histogram to visualize model behavior metrics such as speed distributions.
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Manager object holding paths and CLI arguments.
+        model_index (int): Index of the model in the list to be analyzed.
+        mode (str): Type of data to plot. Currently supports "speeds".
+        n_bins (int): Number of bins for the histogram.
+        title (str): Prefix for the plot title.
+    """
+    
+    # Get the training csv path for later getting the action times from there
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
+    hist_data = []
+
+    if mode == "speeds":
+        # Build path to the CSV file containing speed data from testing
+        model_id = rl_copp_obj.args.model_ids[model_index]
+        robot = rl_copp_obj.args.robot_name
+        file_pattern = f"{robot}_model_{model_id}_*_otherdata_*.csv"
+        subfolder_pattern = f"{robot}_model_{model_id}_*_testing"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", robot, "testing_metrics", subfolder_pattern, file_pattern))
+        
+        if not files:
+            logging.error(f"No testing data files found for model index {model_index}.")
+            raise FileNotFoundError(f"No testing data files found for model index {model_index} in {os.path.join(rl_copp_obj.base_path, 'robots', robot, 'testing_metrics', subfolder_pattern)}")
+        
+        # Read CSV
+        df = pd.read_csv(files[0])
+        data_keys = ['Angular speed', 'Linear speed']
+        data_keys_units = ["rad/s", "m/s"]
+        bin_min = [-0.5, 0.1]
+        bin_max = [0.5, 0.5]
+    else:
+        logging.error(f"Specified graphs mode doesn't exist: {mode}")
+        raise ValueError(f"Invalid mode specified: {mode}")
+
+    for key in data_keys:
+        hist_data.append(df[key])
+
+    for i in range(len(data_keys)):
+        logging.debug(f"{data_keys[i]} stats:")
+        logging.debug(f"Mean: {hist_data[i].mean():.4f}")
+        logging.debug(f"Median: {hist_data[i].median():.4f}")
+        logging.debug(f"Standard deviation: {hist_data[i].std():.4f}")
+        logging.debug(f"Min: {hist_data[i].min():.4f}")
+        logging.debug(f"Max: {hist_data[i].max():.4f}")
+
+        # Get timestep to include in plot title
+        model_name = f"{robot}_model_{model_id}"
+        timestep = (get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+
+        # Configure the histogram
+        plt.figure(figsize=(10, 6))
+
+        # Create bin equally spaced between the specified limits
+        bins = np.linspace(bin_min[i], bin_max[i], n_bins)  # 21 bins for having 20 intervals
+
+        # Create the histogram
+        plt.hist(hist_data[i], bins=bins, color='skyblue', edgecolor='black', alpha=0.7)
+
+        # Plot configuration
+        plt.title(title + data_keys[i] + ": Model " + str(timestep) + "s", fontsize=14)
+        plt.xlabel(f"{data_keys[i]} ({data_keys_units[i]})", fontsize=12)
+        plt.ylabel('Frequence', fontsize=12)
+        plt.grid(axis='y', alpha=0.75)
+        plt.xlim(bin_min[i]-0.05, bin_max[i]+0.05)
+        # plt.legend()        
+
+        # Show the histogram
+        plt.tight_layout()
+        plt.show()
+
+
+def plot_bars_deprecated(rl_copp_obj, model_index, mode, title="Target Zone Distribution: "):
+    """
+    Creates a bar chart showing the frequency distribution of discrete values (e.g., target zones).
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Object containing base paths and CLI arguments.
+        model_index (int): Index of the model to analyze.
+        mode (str): Type of data to plot (e.g., "target_zones").
+        title (str): Title prefix for the chart.
+    """
+    model_id = rl_copp_obj.args.model_ids[model_index]
+    robot_name = rl_copp_obj.args.robot_name
+
+    # Get CSV path
+    file_pattern = f"{robot_name}_model_{model_id}_*_test_*.csv"
+    subfolder_pattern = f"{robot_name}_model_{model_id}_*_testing"
+    files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", robot_name, "testing_metrics", subfolder_pattern, file_pattern))
+    
+    if not files:
+        logging.error(f"No testing data files found for model index {model_index}.")
+        raise FileNotFoundError(f"No testing data files found for model index {model_index} in {os.path.join(rl_copp_obj.base_path, 'robots', robot_name, 'testing_metrics', subfolder_pattern)}")
+        
+
+    # Read CSV file
+    df = pd.read_csv(files[0])
+
+    if mode != "target_zones":
+        logging.error(f"Unsupported bar plot mode: {mode}")
+        raise ValueError(f"Invalid mode specified: {mode}")
+    
+    data_keys = ['Target zone']
+    possible_values = [1, 2, 3]
+    labels = ['Target zone 1', 'Target zone 2', 'Target zone 3']
+
+    # For each key (although right now the function only works for 'Target zone')
+    for key in data_keys:
+        data = []
+        data = (df[key])
+    
+        # Count all the samples and calculate percentages
+        counts = data.value_counts().reindex(possible_values, fill_value=0)
+        total_episodes = len(data)
+        percentages = (counts / total_episodes) * 100
+        
+        # Log statistics
+        logging.debug(f"{key} stats:")
+        logging.debug(f"Total episodes: {total_episodes}")
+        for j in possible_values:
+            count = counts.get(j, 0)
+            percentage = percentages.get(j, 0)
+            logging.debug(f"Zone {j}: {count} episodes ({percentage:.2f}%)")
+        
+        # Get timestep value of the selected model
+        train_records_csv_name = os.path.join(rl_copp_obj.paths["training_metrics"], "train_records.csv")
+        model_name = f"{robot_name}_model_{model_id}"
+        timestep = get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")
+        
+        # Create the figure
+        plt.figure(figsize=(10, 6))      
+        
+        # Create bars graph
+        bars = plt.bar(labels, counts, color=['skyblue', 'lightgreen', 'salmon'], 
+                    edgecolor='black', alpha=0.7)
+        
+        # Add labels
+        for bar, count, percentage in zip(bars, counts, percentages):
+            plt.text(
+                bar.get_x() + bar.get_width()/2, 
+                bar.get_height() + 0.5,
+                f'{count}\n({percentage:.1f}%)',
+                ha='center', va='bottom'
+            )
+        
+        # Plot configuration
+        plt.title(f"{title}Model {timestep}s", fontsize=14)
+        plt.xlabel('Target Zone', fontsize=12)
+        plt.ylabel('Frequence (number of episodes)', fontsize=12)
+        plt.grid(axis='y', alpha=0.3)
+        max_count = counts.max()
+        plt.ylim(0, max_count * 1.15)  # 15% aditional space
+        plt.tight_layout()
+
+        # Save or show
+        if rl_copp_obj.args.save_plots:
+            filename = f"bars_{key}.png"
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
