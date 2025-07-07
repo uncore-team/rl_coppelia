@@ -7,22 +7,28 @@ License: GNU General Public License v3.0
 
 Description:
     This script manages the execution of a special training mode for robots in a CoppeliaSim 
-    environment. It automates the generation of parameter files, the execution of training 
-    runs (either sequentially or in parallel), and logs the results into a summary CSV file.
+    environment. It automates the discovery of configuration files (JSON), and executes 
+    multiple training sessions accordingly. The method is useful for testing different 
+    training configurations efficiently and reproducibly.
 
-    Executes multiple training runs using pre-defined parameter files. This method allows the 
-    user to test multiple settings just by preparing some json files. The code will automatically
-    execute a training per param.json file.
+    Executes multiple training runs using pre-defined parameter files located inside a session
+    directory. Supports both sequential and parallel execution, and stores the results in a
+    summary CSV file.
 
 Usage:
-    rl_coppelia auto_training --robot_name <robot_name> --session_name <session_name> 
-                               [--parallel_mode] [--max_workers <num>] [--base_params_file <path>]
-
+    rl_coppelia auto_training --robot_name <robot_name> --session_name <session_name>
+                               [--dis_parallel_mode] 
+                               [--max_workers <num>] 
+                               [--timestamp <timestamp>] 
+                               [--verbose <0|1|2|3>]
 
 Features:
-    - Automatically creates required directories if they do not exist.
-    - Runs training sessions either sequentially or in parallel with a delay between submissions.
-    - Saves a summary of training results in a CSV file.
+    - Automatically detects and loads all param.json files from the session directory.
+    - Supports parallel or sequential training execution based on user preference.
+    - Applies configurable delay between process submissions to avoid collisions.
+    - Tracks and stores the status and duration of each training in a CSV file.
+    - Ensures reproducibility by preserving training metadata and timestamps.
+    - Helps benchmark different training settings easily in batch mode.
 """
 
 import csv

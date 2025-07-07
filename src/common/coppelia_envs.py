@@ -1,11 +1,8 @@
 import logging
 import math
-import os
-import sys
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-
 from spindecoupler import RLSide  # type: ignore
 
 
@@ -311,98 +308,6 @@ class CoppeliaEnv(gym.Env):
             return 0
         
 
-    # def _calculate_reward(self):
-    #     """
-    #     Private method to calculate the reward based on distance.
-
-    #     Args: None
-
-    #     Returns:
-    #         reward (float): The computed reward.
-    #     """
-    #     laser_obs = list(self.observation.values())[-4:]
-    #     distance = self.observation["distance"]
-
-    #     if self.params_env["finish_episode_flag"]:
-    #         if self.action_dic["finish_flag"]<0.5:
-    #             logging.info("Agent self truncated.")
-    #             self.truncated = True
-    #             if distance>self.params_env["dist_thresh_finish_flag"]:
-    #                 return self.params_env["finish_flag_penalty"]
-    #             else:
-    #                 return 0
-
-    #     if np.min(laser_obs)<self.params_env["max_crash_dist"]:
-    #         logging.info("Crashed")
-    #         self.terminated=True
-    #         return self.params_env["crash_penalty"]
-
-    #     if distance < self.params_env["reward_dist_3"]:
-    #         self.terminated = True
-    #         return self.params_env["reward_3"]
-    #     elif distance < self.params_env["reward_dist_2"]:
-    #         self.terminated = True
-    #         return self.params_env["reward_2"]
-    #     elif distance < self.params_env["reward_dist_1"]:
-    #         self.terminated = True
-    #         return self.params_env["reward_1"]
-    #     elif distance > self.params_env["max_dist"] or self.time_elapsed > self.params_env["max_time"]:
-    #         self.terminated = True
-    #         logging.info("Max dist or max time achieved")
-    #         return self.params_env["overlimit_penalty"]
-    #     else:
-    #         self.terminated = False
-    #         self.truncated = False
-    #         return 0
-        
-        
-
-# def _calculate_reward(self):
-#         """
-#         Private method to calculate the reward based on distance.
-
-#         Args: None
-
-#         Returns:
-#             reward (float): The computed reward.
-#         """
-#         laser_obs = list(self.observation.values())[-4:]
-#         distance = self.observation["distance"]
-
-#         if self.params_env["finish_episode_flag"]:
-#             if self.action_dic["finish_flag"]<0.5:
-#                 logging.info("Agent self truncated.")
-#                 self.truncated = True
-#                 if distance>self.params_env["dist_thresh_finish_flag"]:
-#                     return self.params_env["finish_flag_penalty"]
-#                 else:
-#                     return 0
-
-#         if np.min(laser_obs)<self.params_env["max_crash_dist"]:
-#             logging.info("Crashed")
-#             self.truncated=True
-#             return self.params_env["crash_penalty"]
-
-#         if distance < self.params_env["reward_dist_3"]:
-#             self.terminated = True
-#             return self.params_env["reward_3"]
-#         elif distance < self.params_env["reward_dist_2"]:
-#             self.terminated = True
-#             return self.params_env["reward_2"]
-#         elif distance < self.params_env["reward_dist_1"]:
-#             self.terminated = True
-#             return self.params_env["reward_1"]
-#         elif self.count > self.params_env["max_count"] or distance > self.params_env["max_dist"] or self.time_elapsed > self.params_env["max_time"]:
-#             self.truncated = True
-#             logging.info("Truncated")
-#             return self.params_env["overlimit_penalty"]
-#         else:
-#             self.terminated = False
-#             self.truncated = False
-#             return 0
-
-
-
     def _calculate_reward_old(self):    # DEPRECATED
         """
         Private method to calculate the reward based on distance.
@@ -463,10 +368,10 @@ class BurgerBotEnv(CoppeliaEnv):
 
         # Define observation space
         if params_env["obs_time"]:
-            self.observation_space= spaces.Box(low=np.array([-5,-math.pi, 0],dtype=np.float32), 
+            self.observation_space= spaces.Box(low=np.array([0,-math.pi, 0],dtype=np.float32), 
                                             high=np.array([5, math.pi, 100],dtype=np.float32), dtype=np.float32)
         else: 
-            self.observation_space= spaces.Box(low=np.array([-5,-math.pi],dtype=np.float32), 
+            self.observation_space= spaces.Box(low=np.array([0,-math.pi],dtype=np.float32), 
                                             high=np.array([5, math.pi],dtype=np.float32), dtype=np.float32)
 
 

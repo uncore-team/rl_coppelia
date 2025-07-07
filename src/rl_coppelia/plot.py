@@ -5,18 +5,46 @@ Version: 1.0
 Date: 2025-03-25
 License: GNU General Public License v3.0
 
-Description: 
-    Plot different kind of graphs for checking the performance of a trained model or for comparing
-    several ones using metrics like reward of episode length.
-    
+Description:
+    This script generates various types of plots to analyze the performance of trained reinforcement 
+    learning models in a CoppeliaSim environment. It allows for visual comparison of multiple models 
+    using metrics such as reward evolution, convergence points, episode efficiency, and LAT behavior.
+
 Usage:
-    rl_coppelia plot --robot_name <robot_name> --model_ids <model_ids> 
-                                [--plot_types <str>] [--verbose <num>]
+    rl_coppelia plot --robot_name <robot_name> --plot_types <plot_type_1> [<plot_type_2> ...]
+                     [--model_ids <id_1> <id_2> ...] [--scene_to_load_folder <folder>] 
+                     [--save_plots] [--lat_fixed_timestep <float>] [--timestep_unit <str>] 
+                     [--lat_file_path <path>] [--verbose <level>]
+
+Supported Plot Types:
+        - spider: Generates a spider chart comparing multiple models across various metrics.
+        - convergence-walltime: Plots reward convergence vs. wall time for each model.
+        - convergence-steps: Plots reward convergence vs. steps for each model.
+        - convergence-simtime: Plots reward convergence vs. simulation time for each model.
+        - convergence-episodes: Plots reward convergence vs. episodes for each model.
+        - convergence-all: Generates all convergence plots for each model.
+        - compare-rewards: Compares rewards across multiple models with smoothing and variability bands.
+        - compare-episodes_length: Compares episode lengths across multiple models.
+        - compare-convergences: Compares convergence points across multiple models.
+        - histogram_speeds: Plots histograms for linear and angular speeds for each model.
+        - grouped_bar_speeds: Creates grouped bar charts for linear and angular speeds across models.
+        - grouped_bar_targets: Creates grouped bar charts for target zone frequencies across models.
+        - bar_target_zones: Plots bar charts for target zone distributions for each model.
+        - plot_scene_trajs: Visualizes the scene and trajectories followed by the robot during testing.
+        - plot_boxplots: Generates boxplots for various metrics across models.
+        - lat_curves: Plots LAT-Agent and LAT-wall curves for each model.
+        - speed_lat_curves: Plots curves comparing linear speed and LAT-Agent over time for a model.
+        - dist_lat_curves: Plots curves comparing distance traveled and LAT-Agent over time for a model.
+        - plot_from_csv: Loads externally saved CSV logs to generate reward comparison and metric boxplots across models.
 
 Features:
-    - Automatically creates required directories if they do not exist.
-    - Runs a testing session either sequentially or in parallel with a delay between submissions.
-    - Saves a summary of testing results in a CSV file, along with some plots comparing the obtained metrics.
+    - Generates reward, episode length, and convergence plots for multiple models.
+    - Creates spider charts comparing overall model performance.
+    - Visualizes trajectories and scene layouts from testing sessions.
+    - Plots LAT curves (Agent and Wall time) and speed/distance metrics per timestep.
+    - Exports boxplots, bar charts, and histograms to files or displays them interactively.
+    - Accepts CSV logs from external sources for comparison.
+    - Automatically handles input data discovery based on naming patterns.
 """
 from datetime import datetime
 import matplotlib
@@ -27,17 +55,11 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import seaborn as sns
-
 import pandas as pd
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
-from pandas.api.types import CategoricalDtype
 from scipy.interpolate import interp1d
-from matplotlib.patches import Ellipse
-from scipy.stats import shapiro,gaussian_kde
-from sklearn.covariance import MinCovDet
 from scipy.interpolate import make_interp_spline
 
 
@@ -145,10 +167,16 @@ def plot_spider(rl_copp_obj, title='Models Comparison'):
         ncol = 2
         ) 
     # ax.set_title(title, size=16, color='black', y=1.1)
-
-    # Show the plot
     plt.tight_layout()
-    plt.show()
+
+    # Save or show plot
+    if rl_copp_obj.args.save_plots:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"spider_{timestamp}.png"
+        plt.savefig(filename)
+        plt.close()
+    else:
+        plt.show()
 
 
 def plot_convergence (rl_copp_obj, model_index, x_axis, show_plots = True, title = "Reward Convergence Analysis"):
@@ -218,7 +246,8 @@ def plot_convergence (rl_copp_obj, model_index, x_axis, show_plots = True, title
         plt.title(title + ": Model " + str(timestep) + "s")
         plt.grid()
         if rl_copp_obj.args.save_plots:
-            filename = f"convergence_{rl_copp_obj.args.model_ids[model_index]}_{x_axis}.png"
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"convergence_{rl_copp_obj.args.model_ids[model_index]}_{x_axis}_{timestamp}.png"
             plt.savefig(filename)
             plt.close()
         else:
@@ -359,7 +388,8 @@ def plot_metrics_comparison (rl_copp_obj, metric, max_steps = None, smooth_flag=
 
     # Save plots if needed
     if rl_copp_obj.args.save_plots:
-        filename = f"metrics_comparison_{metric}.png"
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"metrics_comparison_{metric}_{timestamp}.png"
         plt.savefig(filename)
         plt.close()
     else:
@@ -464,7 +494,8 @@ def plot_convergence_comparison (rl_copp_obj, title = "Convergence Comparison ")
         plt.grid()
         plt.tight_layout()
         if rl_copp_obj.args.save_plots:
-            filename = f"convergence_{conv_type}.png"
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"convergence_{conv_type}_{timestamp}.png"
             plt.savefig(filename)
             plt.close()
         else:
@@ -590,7 +621,8 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
 
         # Save or show plot
         if rl_copp_obj.args.save_plots:
-            filename = f"grouped_bar_chart_{id_data}.png"
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"grouped_bar_chart_{id_data}_{timestamp}.png"
             plt.savefig(filename)
             plt.close()
         else:
@@ -760,7 +792,6 @@ def plot_scene_trajs(rl_copp_obj, folder_path):
         plt.close()
     else:
         plt.show()
-    plt.show()
 
 
 def compare_models_boxplots(rl_copp_obj, model_ids):
@@ -1023,407 +1054,12 @@ def plot_lat_curves(rl_copp_obj, model_index):
         plt.show()
 
 
-def interpolate_trajectory(x, y, num_points=100):
-    """
-    Interpolates a trajectory to generate a specified number of evenly spaced points.
-
-    This function takes the x and y coordinates of a trajectory and interpolates them 
-    to produce a new trajectory with a uniform distribution of points along its length.
-
-    Args:
-        x (array-like): X-coordinates of the original trajectory.
-        y (array-like): Y-coordinates of the original trajectory.
-        num_points (int): Number of points for the interpolated trajectory.
-
-    Returns:
-        tuple:
-            - interp_x (array): Interpolated X-coordinates.
-            - interp_y (array): Interpolated Y-coordinates.
-    """
-    distances = np.sqrt(np.diff(x)**2 + np.diff(y)**2)
-    cumulative_dist = np.insert(np.cumsum(distances), 0, 0)
-    total_length = cumulative_dist[-1]
-    if total_length == 0:
-        return np.full(num_points, x[0]), np.full(num_points, y[0])
-
-    normalized_dist = cumulative_dist / total_length
-    interp_x = interp1d(normalized_dist, x, kind='linear')
-    interp_y = interp1d(normalized_dist, y, kind='linear')
-    uniform_points = np.linspace(0, 1, num_points)
-    return interp_x(uniform_points), interp_y(uniform_points)
-
-
-def draw_uncertainty_ellipse(ax, mean_x, mean_y, cov, color, nsig=1.0, alpha=0.3, zorder=2):
-    """Draws an uncertainty ellipse based on a 2x2 covariance matrix.
-
-    The ellipse represents a confidence region for a 2D Gaussian distribution.
-
-    Args:
-        ax (matplotlib.axes.Axes): The axes object to draw the ellipse on.
-        mean_x (float): X-coordinate of the ellipse center.
-        mean_y (float): Y-coordinate of the ellipse center.
-        cov (ndarray): 2x2 covariance matrix.
-        color (str or tuple): Color of the ellipse.
-        nsig (float, optional): Number of standard deviations for the ellipse size. Defaults to 1.0.
-        alpha (float, optional): Transparency of the ellipse (0-1). Defaults to 0.3.
-        zorder (int, optional): Drawing order (higher means drawn on top). Defaults to 2.
-
-    Returns:
-        None: The ellipse is added to the provided axes object.
-    """
-    # Compute eigenvalues and eigenvectors of covariance matrix
-    vals, vecs = np.linalg.eigh(cov)
-    
-    # Sort eigenvalues and eigenvectors in descending order
-    order = vals.argsort()[::-1]
-    vals = vals[order]
-    vecs = vecs[:, order]
-    
-    # Calculate rotation angle (in degrees) from eigenvectors
-    theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
-    
-    # Calculate width and height of ellipse (2 * nsig * standard deviation)
-    width, height = 2 * nsig * np.sqrt(vals)
-
-    # Create ellipse patch
-    ell = Ellipse(
-        xy=(mean_x, mean_y),     # Ellipse center
-        width=width,             # Major axis length
-        height=height,           # Minor axis length
-        angle=theta,             # Rotation angle in degrees
-        color=color,             # Color
-        alpha=alpha,             # Transparency
-        zorder=zorder            # Drawing order
-    )
-    ax.add_patch(ell)
-
-
-def test_normality_univariate(interpolated_xs, interpolated_ys):
-    """
-    Performs a Shapiro-Wilk test for normality on each interpolated point across x and y coordinates.
-
-    This function evaluates whether the distribution of interpolated points at each position 
-    along the trajectory follows a normal distribution.
-
-    Args:
-        interpolated_xs (ndarray): 2D array where each row represents a trajectory's interpolated 
-            x-coordinates and each column corresponds to a specific point along the trajectory.
-        interpolated_ys (ndarray): 2D array where each row represents a trajectory's interpolated 
-            y-coordinates and each column corresponds to a specific point along the trajectory.
-
-    Returns:
-        tuple:
-            - p_values_x (list): List of p-values from the Shapiro-Wilk test for the x-coordinates.
-            - p_values_y (list): List of p-values from the Shapiro-Wilk test for the y-coordinates.
-    """
-    num_points = interpolated_xs.shape[1]
-    p_values_x = []
-    p_values_y = []
-    for j in range(num_points):
-        stat_x, p_x = shapiro(interpolated_xs[:, j])
-        stat_y, p_y = shapiro(interpolated_ys[:, j])
-        p_values_x.append(p_x)
-        p_values_y.append(p_y)
-    return p_values_x, p_values_y
-
-
-def plot_kde_density(ax, xs, ys, cmap="Reds", levels=[0.5, 0.9]):
-    """
-    Plots KDE contours on the given axes.
-
-    Parameters:
-    - ax: Matplotlib axes object where the contours will be plotted.
-    - xs: Array-like, x-coordinates of the data points.
-    - ys: Array-like, y-coordinates of the data points.
-    - cmap: Colormap for the contours.
-    - levels: List of contour levels to display, representing probability densities.
-    """
-    # Stack the data for KDE
-    xy = np.vstack([xs, ys])
-    kde = gaussian_kde(xy)
-
-    # Define grid over data range
-    x_min, x_max = xs.min() - 0.1, xs.max() + 0.1
-    y_min, y_max = ys.min() - 0.1, ys.max() + 0.1
-    xx, yy = np.mgrid[x_min:x_max:100j, y_min:y_max:100j]
-    grid_coords = np.vstack([xx.ravel(), yy.ravel()])
-
-    # Evaluate KDE on grid
-    density = kde(grid_coords).reshape(xx.shape)
-
-    # Normalize density for contour levels
-    density /= density.max()
-
-    # Plot contours
-    contour = ax.contour(xx, yy, density, levels=levels, cmap=cmap, alpha=0.7)
-    return contour
-
-
-def draw_robust_uncertainty_ellipse(ax, mean_x, mean_y, points, color='gray', alpha=0.3, zorder=1, nsig=2.0):
-    """
-    Draws a robust uncertainty ellipse based on a set of 2D points.
-
-    This function computes a robust covariance matrix using the Minimum Covariance Determinant (MCD) 
-    estimator and uses it to draw an uncertainty ellipse. If the robust estimation fails, it falls 
-    back to the classical covariance matrix.
-
-    Args:
-        ax (matplotlib.axes.Axes): The axes object to draw the ellipse on.
-        mean_x (float): X-coordinate of the ellipse center.
-        mean_y (float): Y-coordinate of the ellipse center.
-        points (ndarray): Array of shape (n_samples, 2) containing the 2D points.
-        color (str or tuple): Color of the ellipse.
-        alpha (float, optional): Transparency of the ellipse (0-1). Defaults to 0.3.
-        zorder (int, optional): Drawing order (higher means drawn on top). Defaults to 1.
-        nsig (float, optional): Number of standard deviations for the ellipse size. Defaults to 2.0.
-
-    Returns:
-        None: The ellipse is added to the provided axes object.
-    """
-    if len(points) < 2:
-        return
-
-    try:
-        # Primer intento: robusto
-        robust_cov = MinCovDet(support_fraction=0.9).fit(points)
-        cov = robust_cov.covariance_
-    except Exception as e:
-        logging.warning(f"[MCD fallback] Using classical covariance due to error: {e}")
-        try:
-            cov = np.cov(points.T)
-        except Exception as e2:
-            logging.warning(f"Failed to compute classical covariance too: {e2}")
-            return
-
-    try:
-        # Descomposición de la matriz de covarianza
-        vals, vecs = np.linalg.eigh(cov)
-        order = vals.argsort()[::-1]
-        vals = vals[order]
-        vecs = vecs[:, order]
-
-        # Parámetros de la elipse
-        theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
-        width, height = 2 * nsig * np.sqrt(vals)
-
-        ell = Ellipse(
-            xy=(mean_x, mean_y),
-            width=width,
-            height=height,
-            angle=theta,
-            color=color,
-            alpha=alpha,
-            zorder=zorder
-        )
-        ax.add_patch(ell)
-    except Exception as e:
-        logging.warning(f"Failed to draw ellipse: {e}")
-
-
-def plot_scene_trajs_with_variability(rl_copp_obj, folder_path, num_points=100, nsig=1.0):
-    """
-    Plot a scene with interpolated mean trajectories from multiple models,
-    including uncertainty ellipses at each point based on covariance across trajectories.
-
-    Args:
-        rl_copp_obj: Main RL object providing access to config and paths.
-        folder_path (str): Path to the folder containing scene and trajectory CSVs.
-        num_points (int): Number of interpolation points per trajectory.
-        nsig (float): Number of standard deviations for the uncertainty ellipses (e.g., 1.0 or 2.0).
-    """
-    files = os.listdir(folder_path)
-    scene_file = [f for f in files if f.startswith("scene_") and f.endswith(".csv")][0]
-    traj_files = [f for f in files if f.startswith("trajectory_") and f.endswith(".csv")]
-
-    logging.debug(f"scene files: {scene_file}")
-    logging.debug(f"traj_files: {traj_files}")
-    scene_df = pd.read_csv(os.path.join(folder_path, scene_file))
-
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.set_xlim(2.5, -2.5)
-    ax.set_ylim(2.5, -2.5)
-    ax.set_aspect('equal')
-    ax.set_title(f"Scene with Interpolated Mean Trajectories ({nsig}σ uncertainty)")
-
-    # Draw 0.5 m grid
-    for i in np.arange(-2.5, 3, 0.5):
-        ax.axhline(i, color='lightgray', linewidth=0.5, zorder=0)
-        ax.axvline(i, color='lightgray', linewidth=0.5, zorder=0)
-
-    # Draw static scene elements
-    for _, row in scene_df.iterrows():
-        x, y = row['x'], row['y']
-        if row['type'] == 'robot':
-            ax.add_patch(plt.Circle((x, y), 0.35 / 2, color='blue', label='Robot', zorder=2))
-            
-            # Dibujar orientación (si existe la columna 'theta')
-            if 'theta' in row:
-                theta = row['theta']
-
-                # Triangle option:
-                # Coordenadas del triángulo
-                front_length = 0.15
-                side_offset = 0.08
-
-                # Punto frontal
-                front = (x + front_length * np.cos(theta), y + front_length * np.sin(theta))
-                # Puntos laterales
-                left = (x + side_offset * np.cos(theta + 2.5), y + side_offset * np.sin(theta + 2.5))
-                right = (x + side_offset * np.cos(theta - 2.5), y + side_offset * np.sin(theta - 2.5))
-
-                triangle = plt.Polygon([front, left, right], color='white', zorder=3)
-                ax.add_patch(triangle)
-                
-        elif row['type'] == 'obstacle':
-            ax.add_patch(plt.Circle((x, y), 0.25 / 2, color='gray', label='Obstacle'))
-        elif row['type'] == 'target':
-            for r, c in [(0.25, 'blue'), (0.125, 'red'), (0.015, 'yellow')]:
-                ax.add_patch(plt.Circle((x, y), r, color=c, alpha=0.6))
-
-    # Group trajectories by model ID
-    model_trajs = defaultdict(list)
-    for file in traj_files:
-        parts = file.split('_')
-        model_id = parts[-1].split('.')[0]
-        model_trajs[model_id].append(os.path.join(folder_path, file))
-
-    colors = plt.cm.get_cmap("tab10")
-    training_metrics_path = rl_copp_obj.paths["training_metrics"]
-    train_records_csv_name = os.path.join(training_metrics_path, "train_records.csv")
-
-    model_plot_data = []
-
-    # Interpolate and store data for later ordered plotting
-    for i, (model_id, paths) in enumerate(model_trajs.items()):
-        interpolated_xs, interpolated_ys = [], []
-        for path in paths:
-            df = pd.read_csv(path)
-            x_interp, y_interp = interpolate_trajectory(df['x'].values, df['y'].values, num_points)
-            interpolated_xs.append(x_interp)
-            interpolated_ys.append(y_interp)
-
-        interpolated_xs = np.array(interpolated_xs)
-        interpolated_ys = np.array(interpolated_ys)
-        
-        mean_x = np.mean(interpolated_xs, axis=0)
-        mean_y = np.mean(interpolated_ys, axis=0)
-        color = colors((i + 1) % 10)
-
-        model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
-        timestep = float(utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
-
-        model_plot_data.append({
-            "timestep": timestep,
-            "mean_x": mean_x,
-            "mean_y": mean_y,
-            "interpolated_xs": interpolated_xs,
-            "interpolated_ys": interpolated_ys,
-            "color": color,
-            "label": f"Model {timestep}s"
-        })
-
-    # Sort models by timestep before plotting
-    model_plot_data.sort(key=lambda d: d["timestep"])
-
-    for data in model_plot_data:
-        ax.plot(data["mean_x"], data["mean_y"], color=data["color"],
-                label=data["label"], linewidth=2, zorder=3)
-
-
-
-        # for j in range(num_points):
-        #     if data["interpolated_xs"].shape[0] < 2:
-        #         continue  # Cannot compute covariance with less than 2 trajectories
-        #     # point_samples = np.stack((interpolated_xs[:, j], interpolated_ys[:, j]), axis=1)
-        #     # draw_robust_uncertainty_ellipse(
-        #     #     ax, mean_x[j], mean_y[j], point_samples,
-        #     #     color=data["color"], alpha=0.3, nsig=nsig
-        #     # )
-        #     cov = np.cov(data["interpolated_xs"][:, j], data["interpolated_ys"][:, j])
-        #     if not np.isnan(cov).any() and not np.isinf(cov).any():
-        #         draw_uncertainty_ellipse(ax, data["mean_x"][j], data["mean_y"][j], cov,
-        #                              color=data["color"], nsig=nsig)
-
-
-    # Deduplicate legend entries
-    handles, labels = ax.get_legend_handles_labels()
-    unique = dict(zip(labels, handles))
-    ax.legend(unique.values(), unique.keys(), loc='upper right')
-
-    plt.grid(True)
-    plt.show()
-
-
-def plot_reward_graphs_from_csv(rl_copp_obj, model):
-    """
-    Plots reward graphs from a CSV file containing training metrics.
-    - Reward vs Steps
-    - Reward vs Time (s)
-    - Reward vs Episodes
-    Args:
-        rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class to access paths and arguments.
-        model (int): Model ID to specify which CSV file to read.
-        
-    The CSV must contain the following columns: 'Reward', 'Steps', 'Time (s)', 'Episodes'.
-    """
-
-
-    csv_path = os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, f"{rl_copp_obj.args.model_ids[model]}.csv")
-    
-    # Check if file exists
-    if not os.path.isfile(csv_path):
-        csv_path = csv_path.replace(".csv", "ms.csv")
-        if not os.path.isfile(csv_path):
-            logging.error(f"[Error] File not found: {csv_path}")
-            return
-
-    # Load the CSV into a DataFrame
-    try:
-        df = pd.read_csv(csv_path)
-    except Exception as e:
-        logging.error(f"[Error] Failed to read CSV: {e}")
-        return
-
-    # Check required columns
-    required_columns = ["Reward", "Steps", "Time (s)", "Episodes"]
-    if not all(col in df.columns for col in required_columns):
-        logging.error(f"[Error] CSV must contain the following columns: {required_columns}")
-        return
-
-    # Plot 1: Reward vs Steps
-    plt.figure(figsize=(8, 5))
-    plt.plot(df["Steps"], df["Reward"], linestyle='-', color='blue')
-    # plt.title("Reward vs Steps")
-    plt.xlabel("Steps")
-    plt.ylabel("Reward")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-    # Plot 2: Reward vs Time (s)
-    plt.figure(figsize=(8, 5))
-    plt.plot(df["Time (s)"], df["Reward"], linestyle='-', color='green')
-    # plt.title("Reward vs Time (s)")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Reward")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-    # Plot 3: Reward vs Episodes
-    plt.figure(figsize=(8, 5))
-    plt.plot(df["Episodes"], df["Reward"], linestyle='-', color='orange')
-    # plt.title("Reward vs Episodes")
-    plt.xlabel("Episodes")
-    plt.ylabel("Reward")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-
 def plot_reward_comparison_from_csv(rl_copp_obj, x_axis_name="Steps"):
     """
     Plots a comparison of rewards vs steps for multiple models from their respective CSV files.
+
+    This function has been created for a custom case, in which the name of the csv files follows this
+    patter: '<model>ms.csv', and <model> corresponds to the timestep. CSV files are located inside <robot_name>/Training/.
 
     Args:
         rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class to access paths and arguments.
@@ -1481,12 +1117,23 @@ def plot_reward_comparison_from_csv(rl_copp_obj, x_axis_name="Steps"):
 
     # Show the plot
     plt.tight_layout()
-    plt.show()
+    # Show/save the plot
+    if rl_copp_obj.args.save_plots:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"reward_comparison_from_csv_{x_axis_name}_{timestamp}.png"
+        plt.savefig(filename)
+        plt.close()
+    else:
+        plt.show()
 
 
 def plot_boxplots_from_csv(rl_copp_obj):
     """
-    Plots boxplots for comparing Reward and Time (s) across multiple models.
+    Plots boxplots for comparing Reward and Time (s) across multiple models. 
+
+    This function has been created for a custom case, in which the name of the csv files follows this
+    patter: '<model>ms.csv', and <model> corresponds to the timestep. CSV files are located inside <robot_name>/Explotation/.
+
 
     Args:
         rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class to access paths and arguments.
@@ -1573,13 +1220,20 @@ def plot_boxplots_from_csv(rl_copp_obj):
         plt.grid(axis="y", linestyle="--", alpha=0.7)
         plt.legend(fontsize = 16, loc='upper right')
         plt.tight_layout()
-        plt.show()
+
+        # Show/save the plot
+        if rl_copp_obj.args.save_plots:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"boxplot_from_csv_{ylabel}_{timestamp}.png"
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
 
     # ---------- Plots ----------
     plot_metric("Time (s)", "Balancing time (s)")
     plot_metric("Reward", "Reward")
     
-
 
 def plot_convergence_points_comparison(rl_copp_obj, convergence_points_by_model):
     """
@@ -1624,7 +1278,8 @@ def plot_convergence_points_comparison(rl_copp_obj, convergence_points_by_model)
         plt.grid(True)
         plt.tight_layout()
         if rl_copp_obj.args.save_plots:
-            filename = f"convergence_comparison_{i}.png"
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"convergence_comparison_{i}_{timestamp}.png"
             plt.savefig(filename)
             plt.close()
         else:
@@ -1633,14 +1288,17 @@ def plot_convergence_points_comparison(rl_copp_obj, convergence_points_by_model)
 
 def plot_speed_and_lat(rl_copp_obj, model_index):
     """
-    Plots the linear speed and LAT-Sim from the otherdata CSV file for a specific model index.
+    Plots the linear speed and LAT-Agent from the otherdata CSV file for a specific model index.
     The plot includes vertical lines indicating the start of each episode based on the test data.
     Args:
         rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class to access paths and arguments.
         model_index (int): Index of the model to plot data for.
     Returns:
-        None: Displays the plot with linear speed and LAT-Sim over steps, with episode markers.
+        None: Displays the plot with linear speed and LAT-Agent over steps, with episode markers.
     """
+    mask = None
+    episode_numbers = None
+    
     # Get the training csv path for later getting the action times from there
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
     train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
@@ -1659,7 +1317,6 @@ def plot_speed_and_lat(rl_copp_obj, model_index):
 
     # Read CSV
     df_otherdata = pd.read_csv(files_otherdata[0])
-
     df_testdata = pd.read_csv(files_testdata[0])
 
     # Remove whitespace and ensure column names are clean
@@ -1670,14 +1327,16 @@ def plot_speed_and_lat(rl_copp_obj, model_index):
 
     steps = df_otherdata.index  # Each row represents a step
 
-
-    mask = (df_testdata['Target zone'] == 3) & (df_testdata['Initial distance (m)'] > 0.6)
-    filtered = df_testdata[mask]
-
-    episode_numbers = (filtered.index + 1).tolist()
-    print("Episodes:", episode_numbers)
-
+    # Create mask depending on the timestep
+    if timestep >= 0.45:
+        mask = (df_testdata['Target zone'] == 3) & (df_testdata['TimeSteps count'] > 1)
+    elif timestep >=0.15 and timestep <=0.3:
+        mask = (df_testdata['Target zone'] == 2) & (df_testdata['TimeSteps count'] > 1)
     
+    if mask is not None:
+        filtered = df_testdata[mask]
+        episode_numbers = (filtered.index + 1).tolist()
+        logging.info(f"Episodes that reach the next target ring: {episode_numbers}")
 
     # Create two subfigures in a single figure
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
@@ -1707,36 +1366,43 @@ def plot_speed_and_lat(rl_copp_obj, model_index):
     ax2.set_ylim(ymin - 0.2 * abs(ymax - ymin), ymax + 0.2 * abs(ymax - ymin))
     
 
-    for ep in episode_numbers:
-        # Find the rows where 'Episode number' matches the current episode
-        mask = (df_otherdata['Episode number'] == ep)
-        if not mask.any():
-            continue
-        # Get the last index where the episode finishes
-        last_idx = mask[mask].index[-1]
-        # If the last index is greater than the length of df_otherdata, use the last index
-        # Otherwise, use the last index as is
-        # This ensures that we don't try to access an index that is out of bounds
-        step_to_mark = last_idx if last_idx < len(df_otherdata) else last_idx
-        # Plot vertical lines at the step where each episode starts
-        ax1.axvline(step_to_mark, color='red', linestyle='--', linewidth=1.5)
-        ax2.axvline(step_to_mark, color='red', linestyle='--', linewidth=1.5)
+    if episode_numbers is not None:
+        for ep in episode_numbers:
+            # Find the rows where 'Episode number' matches the current episode
+            mask = (df_otherdata['Episode number'] == ep)
+            if not mask.any():
+                continue
+            # Get the last index where the episode finishes
+            last_idx = mask[mask].index[-1]
+            # If the last index is greater than the length of df_otherdata, use the last index
+            # Otherwise, use the last index as is
+            # This ensures that we don't try to access an index that is out of bounds
+            step_to_mark = last_idx if last_idx < len(df_otherdata) else last_idx
+            # Plot vertical lines at the step where each episode starts
+            ax1.axvline(step_to_mark, color='red', linestyle='--', linewidth=1.5)
+            ax2.axvline(step_to_mark, color='red', linestyle='--', linewidth=1.5)
 
     # Title and layout
     # plt.suptitle('Linear Speed and LAT-Sim over Steps', fontsize=16)
     plt.tight_layout()
-    plt.show()
+    if rl_copp_obj.args.save_plots:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"speed_and_lat_{rl_copp_obj.args.model_ids[model_index]}_{timestamp}.png"
+        plt.savefig(filename)
+        plt.close()
+    else:
+        plt.show()
 
 
 def plot_distance_and_lat(rl_copp_obj, model_index):
     """
-    Plots the linear speed and LAT-Sim from the otherdata CSV file for a specific model index.
+    Plots the traveled distance and LAT-Agent from the otherdata CSV file for a specific model index.
     The plot includes vertical lines indicating the start of each episode based on the test data.
     Args:
         rl_copp_obj (RLCoppeliaManager): Instance of RLCoppeliaManager class to access paths and arguments.
         model_index (int): Index of the model to plot data for.
     Returns:
-        None: Displays the plot with linear speed and LAT-Sim over steps, with episode markers.
+        None: Displays the plot with traveled distance and LAT-Agent over steps, with episode markers.
     """
     # Get the training csv path for later getting the action times from there
     training_metrics_path = rl_copp_obj.paths["training_metrics"]
@@ -1756,7 +1422,6 @@ def plot_distance_and_lat(rl_copp_obj, model_index):
 
     # Read CSV
     df_otherdata = pd.read_csv(files_otherdata[0])
-
     df_testdata = pd.read_csv(files_testdata[0])
 
     # Remove whitespace and ensure column names are clean
@@ -1767,19 +1432,21 @@ def plot_distance_and_lat(rl_copp_obj, model_index):
 
     steps = df_otherdata.index  # Each row represents a step
 
-
-    mask = (df_testdata['Target zone'] == 3) & (df_testdata['Initial distance (m)'] > 0.6)
-    filtered = df_testdata[mask]
-
-    episode_numbers = (filtered.index + 1).tolist()
-    print("Episodes:", episode_numbers)
-
+    # Create mask depending on the timestep
+    if timestep >= 0.45:
+        mask = (df_testdata['Target zone'] == 3) & (df_testdata['TimeSteps count'] > 1)
+    elif timestep >=0.15 and timestep <=0.3:
+        mask = (df_testdata['Target zone'] == 2) & (df_testdata['TimeSteps count'] > 1)
     
+    if mask is not None:
+        filtered = df_testdata[mask]
+        episode_numbers = (filtered.index + 1).tolist()
+        logging.info(f"Episodes that reach the next target ring: {episode_numbers}")
 
     # Create two subfigures in a single figure
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
-    # Subfigure 1: Linear speed
+    # Subfigure 1: Distance
     ax1.plot(steps, df_otherdata['Linear speed']*df_otherdata['LAT-Sim (s)'], color="#004575", label='Distance (m)', linewidth=1.5)  # High-contrast blue
     ax1.set_ylabel('Distance (m)', color="#004575", fontsize=24, labelpad=22)
     ax1.tick_params(axis='y', labelcolor="#004575")
@@ -1804,26 +1471,32 @@ def plot_distance_and_lat(rl_copp_obj, model_index):
     ax2.set_ylim(ymin - 0.2 * abs(ymax - ymin), ymax + 0.2 * abs(ymax - ymin))
     
 
-    for ep in episode_numbers:
-        # Find the rows where 'Episode number' matches the current episode
-        mask = (df_otherdata['Episode number'] == ep)
-        if not mask.any():
-            continue
-        # Get the last index where the episode finishes
-        last_idx = mask[mask].index[-1]
-        # If the last index is greater than the length of df_otherdata, use the last index
-        # Otherwise, use the last index as is
-        # This ensures that we don't try to access an index that is out of bounds
-        step_to_mark = last_idx if last_idx < len(df_otherdata) else last_idx
-        # Plot vertical lines at the step where each episode starts
-        ax1.axvline(step_to_mark, color='red', linestyle='--', linewidth=1.5)
-        ax2.axvline(step_to_mark, color='red', linestyle='--', linewidth=1.5)
+    if episode_numbers is not None:
+        for ep in episode_numbers:
+            # Find the rows where 'Episode number' matches the current episode
+            mask = (df_otherdata['Episode number'] == ep)
+            if not mask.any():
+                continue
+            # Get the last index where the episode finishes
+            last_idx = mask[mask].index[-1]
+            # If the last index is greater than the length of df_otherdata, use the last index
+            # Otherwise, use the last index as is
+            # This ensures that we don't try to access an index that is out of bounds
+            step_to_mark = last_idx if last_idx < len(df_otherdata) else last_idx
+            # Plot vertical lines at the step where each episode starts
+            ax1.axvline(step_to_mark, color='red', linestyle='--', linewidth=1.5)
+            ax2.axvline(step_to_mark, color='red', linestyle='--', linewidth=1.5)
 
     # Title and layout
     # plt.suptitle('Linear Speed and LAT-Sim over Steps', fontsize=16)
     plt.tight_layout()
-    plt.show()
-
+    if rl_copp_obj.args.save_plots:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"dist_and_lat_{rl_copp_obj.args.model_ids[model_index]}_{timestamp}.png"
+        plt.savefig(filename)
+        plt.close()
+    else:
+        plt.show()
 
 
 def main(args):
@@ -1842,29 +1515,10 @@ def main(args):
             - plot_types (list): List of plot types to generate (e.g., "spider", "convergence-walltime").
             - scene_to_load_folder (str, optional): Path to the folder containing scene configurations 
               (required for trajectory plots).
+            - save_plots (bool, optional): If False, the graphs will be shown. If True, graphs will be automatically saved.
             - verbose (int, optional): Verbosity level for logging.
-
-    Supported Plot Types:
-        - "spider": Generates a spider chart comparing multiple models across various metrics.
-        - "convergence-walltime": Plots reward convergence vs. wall time for each model.
-        - "convergence-steps": Plots reward convergence vs. steps for each model.
-        - "convergence-simtime": Plots reward convergence vs. simulation time for each model.
-        - "convergence-episodes": Plots reward convergence vs. episodes for each model.
-        - "convergence-all": Generates all convergence plots for each model.
-        - "compare-rewards": Compares rewards across multiple models with smoothing and variability bands.
-        - "compare-episodes_length": Compares episode lengths across multiple models.
-        - "compare-convergences": Compares convergence points across multiple models.
-        - "histogram_speeds": Plots histograms for linear and angular speeds for each model.
-        - "grouped_bar_speeds": Creates grouped bar charts for linear and angular speeds across models.
-        - "grouped_bar_targets": Creates grouped bar charts for target zone frequencies across models.
-        - "bar_target_zones": Plots bar charts for target zone distributions for each model.
-        - "plot_scene_trajs": Visualizes the scene and trajectories followed by the robot during testing.
-        - "plot_boxplots": Generates boxplots for various metrics across models.
-        - "lat_curves": Plots LAT-sim and LAT-wall curves for each model.
-
     Raises:
         SystemExit: If a required argument (e.g., scene_to_load_folder for trajectory plots) is missing.
-
     Returns:
         None
     """
@@ -1998,16 +1652,10 @@ def main(args):
 
     if "plot_from_csv" in args.plot_types:
         plot_type_correct = True
-        # for model in range(len(args.model_ids)):
-        #     logging.info(f"Plotting reward graphs from csv {args.model_ids[model]}.csv for robot {args.robot_name}")
-        #     plot_reward_graphs_from_csv(rl_copp, model)
         if len(args.model_ids)>1:
             logging.info(f"Plotting a reward comparison graph for models {args.model_ids} for robot {args.robot_name}")
-            # plot_reward_comparison_from_csv(rl_copp, "Steps")
-            # plot_reward_comparison_from_csv(rl_copp, "Time (s)")
             plot_reward_comparison_from_csv(rl_copp, "Episodes")
             plot_boxplots_from_csv(rl_copp)
-    
     
     if not plot_type_correct:
         logging.error(f"Please check plot types: {args.plot_types}")

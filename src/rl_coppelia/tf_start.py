@@ -1,33 +1,41 @@
+"""
+Project: Robot Training and Testing RL Algorithms in CoppeliaSim
+Author: Adrián Bañuls Arias
+Version: 1.0
+Date: 2025-03-25
+License: GNU General Public License v3.0
+
+Description:
+    This script launches TensorBoard to visualize the training metrics of a specified reinforcement learning model.
+    It parses the model name, locates the corresponding TensorBoard logs directory, and opens the TensorBoard interface
+    in the default web browser once the data becomes available.
+
+Usage:
+    rl_coppelia tf_start --model_name <model_name>
+                         [--verbose <0|1|2|3>]
+Features:
+    - Automatically launches a CoppeliaSim instance for testing.
+    - Loads a preconfigured scene and initializes the corresponding environment.
+    - Supports testing multiple models across multiple targets in a single execution.
+    - Dynamically assigns models to scene targets based on model count.
+    - Automatically detects and loads trained models using the correct SB3 algorithm.
+    - Measures and logs key performance metrics such as reward, time, crashes, and target zone.
+    - Saves detailed episode metrics and a summary CSV with aggregated statistics.
+    - Calculates episode trajectory distance if no collision is detected.
+    - Cleans up and stops CoppeliaSim after testing is complete.
+"""
+
 import logging
 import os
 import re
-import signal
 import subprocess
 import sys
 import threading
 import time
 import webbrowser
-
 import requests
 from common.rl_coppelia_manager import RLCoppeliaManager
-import tensorboard
-from tensorboard import program
 
-
-def wait_for_tensorboard(url, timeout=30):
-    print("Waiting for TensorBoard to be ready...", end="", flush=True)
-    for _ in range(timeout * 2):  # Check every 0.5s for 'timeout' seconds
-        try:
-            r = requests.get(url)
-            if r.status_code == 200 and "TensorBoard" in r.text:
-                print(" ready.")
-                return True
-        except requests.exceptions.ConnectionError:
-            pass
-        print(".", end="", flush=True)
-        time.sleep(0.5)
-    print("\n[ERROR] TensorBoard did not become ready in time.")
-    return False
 
 def wait_for_scalars_ready(base_url, timeout=30):
     print("Waiting for scalars to become available...", end="", flush=True)
@@ -44,6 +52,7 @@ def wait_for_scalars_ready(base_url, timeout=30):
         time.sleep(0.5)
     print("\n[ERROR] Scalars not found in expected time.")
     return False
+
 
 def run_tensorboard(curr_tf_logs_path):
     command = [
@@ -76,27 +85,6 @@ def run_tensorboard(curr_tf_logs_path):
     if input().lower().strip() == "q":
         process.terminate()
         process.wait()
-
-    # # Capture the output line by line
-    # for line in process.stderr:
-    #     logging.info(line.strip())
-    #     if "http://localhost" in line:
-    #         # Extract the port from the line
-    #         port_match = re.search(r'http://localhost:(\d+)', line)
-    #         if port_match:
-    #             port = port_match.group(1)
-    #             url = f'http://localhost:{port}'
-    #             logging.info(f"TensorBoard is running on port {port}. Opening the browser.")
-    #             webbrowser.open(url)
-    #             break
-
-    # logging.info("Press 'q' and Enter to stop TensorBoard.")
-    # input()  # Wait for the user to press Enter to stop
-
-    # process.send_signal(signal.SIGINT)  # Gracefully stop TensorBoard
-    
-    # # Wait for the process to finish (don't block forever)
-    # process.communicate()
 
 
 def main(args):

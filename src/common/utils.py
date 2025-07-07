@@ -1,25 +1,25 @@
+from collections import defaultdict
 import csv
 import datetime
 import glob
 import json
 import logging
 from logging.handlers import RotatingFileHandler
-import math
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import time
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 from matplotlib import pyplot as plt
+from matplotlib.patches import Ellipse
 import numpy as np
 import pandas as pd
 import psutil
-from scipy.optimize import root_scalar, curve_fit
+from scipy.optimize import curve_fit
 from scipy.interpolate import interp1d
-from scipy.stats import linregress
+from sklearn.covariance import MinCovDet
 from tensorboard.backend.event_processing import event_accumulator
 import threading
 import select
@@ -30,6 +30,12 @@ from stable_baselines3.common.evaluation import evaluate_policy
 AGENT_SCRIPT_COPPELIA = "/Agent_Script"
 AGENT_SCRIPT_PYTHON = "common/agent_copp.py"
 
+
+# ------------------------------------------
+# ------------------------------------------
+# ------- Functions for managing logs ------
+# ------------------------------------------
+# ------------------------------------------
 
 def initial_warnings(self):
     """
@@ -42,8 +48,7 @@ def initial_warnings(self):
     Args:
         args (Namespace): The command-line arguments passed to the script.
 
-    Returns:
-        
+    Returns: None
     """
 
     if hasattr(self.args, "robot_name") and not self.args.robot_name:
@@ -98,7 +103,6 @@ def logging_config(logs_dir, side_name, robot_name, experiment_id, log_level = l
             ]
         elif verbose==2:    # Just show the progress bar through terminal, but save everything in log files
             log_handlers =[rotating_handler]
-
         elif verbose ==1:   # Just show progress bar through terminal, and save just warning in log files
             # Set the log level for the rotating handler to WARNING
             rotating_handler.setLevel(logging.WARNING)  
@@ -125,8 +129,6 @@ def logging_config_gui(log_level = logging.DEBUG):
     Args:
         log_level (optional): Logging level (default is logging.INFO).
     """
-
-
     logging.basicConfig(
         level=log_level,  
         format='%(asctime)s - %(levelname)s - %(message)s',
@@ -135,7 +137,9 @@ def logging_config_gui(log_level = logging.DEBUG):
 
 
 # ------------------------------------------
+# ------------------------------------------
 # ------- Functions for communication ------
+# ------------------------------------------
 # ------------------------------------------
 
 
@@ -182,9 +186,10 @@ def find_next_free_port(start_port = 49054):
             sys.exit()
 
 
-
+# -------------------------------------------------------------
 # -------------------------------------------------------------
 # ------ Functions for managing files, names and folders ------
+# -------------------------------------------------------------
 # -------------------------------------------------------------
 
 
@@ -278,7 +283,6 @@ def get_next_retrain_subfolder(log_dir):
     ]
     next_index = max(retrain_indices, default=-1) + 1
     return f"retrain_{next_index}"
-
 
 
 def get_model_names_and_paths(rl_copp_obj):
@@ -407,6 +411,7 @@ def get_file_index(args, tf_path, robot_name, retrain_flag=False):
         index = f"{model_id}_{timestamp}"
     
     return index
+
 
 def get_next_model_name(path, robot_name, next_index, callback_mode = False):
     """
@@ -539,10 +544,482 @@ def get_next_retrain_model_name(models_dir, base_model_name):
     return f"{base_model_name}_retrain_{next_index}"
 
 
+def _get_default_params ():
+    """
+    Private function for setting the different parameters to their default values, in case that reading the json fails.
 
+    Args: None
+
+    Return:
+        dicts: Three dictionaries with the parameters of the environment, the training and the testing process.
+    """
+    params = {
+        "params_env": {
+            "var_action_time_flag": False,
+            "fixed_actime": 1.0,
+            "bottom_actime_limit": 0.2,
+            "upper_actime_limit": 3.0,
+            "bottom_lspeed_limit": 0.05,
+            "upper_lspeed_limit": 0.5,
+            "bottom_aspeed_limit": -0.5,
+            "upper_aspeed_limit": 0.5,
+            "finish_episode_flag": False,
+            "dist_thresh_finish_flag": 0.5,
+            "obs_time": False,
+            "reward_dist_1": 0.25,
+            "reward_1": 25,
+            "reward_dist_2": 0.05,
+            "reward_2": 50,
+            "reward_dist_3": 0.015,
+            "reward_3": 100,
+            "max_count": 400,
+            "max_time": 80,
+            "max_dist": 2.5,
+            "finish_flag_penalty": -10,
+            "overlimit_penalty": -10,
+            "crash_penalty": -20,
+            "max_crash_dist": 0.1
+
+        },
+        "params_train": {
+            "sb3_algorithm": "SAC",
+            "policy": "MlpPolicy",
+            "total_timesteps": 300000,
+            "callback_frequency": 10000,
+            "n_training_steps": 2048
+        },
+        "params_test": {
+            "sb3_algorithm": "",
+            "testing_iterations": 50
+        }
+    }
+    return params["params_env"], params["params_train"], params["params_test"]
+
+
+def load_params(file_path):
+    """
+    Load the configuration file as a dictionary.
+
+    Args:
+        file_path (str): Path to the JSON configuration file.
+
+    Returns:
+        params_env (dict): Parameters for configuring the environment.
+        params_train (dict): Parameters for configuring the training process.
+        params_test (dict): Parameters for configuring the testing process.
+    """
+    try:
+        with open(file_path, 'r') as f:
+            params_file = json.load(f)
+            if params_file :
+                params_env = params_file["params_env"]
+                params_train = params_file["params_train"]
+                params_test = params_file["params_test"]
+                logging.info(f"Configuration loaded successfully from {file_path}.")
+                return params_env, params_train, params_test
+            else:
+                logging.error("Failed to load configuration. Default values will be used")
+                return _get_default_params()
+            
+    except Exception as e:
+        logging.error(f"Error loading configuration file: {e}")
+        return _get_default_params()
+    
+    
+def get_output_csv(model_name, metrics_path, train_flag=True):
+    """
+    Get the path to to csv file that will be generated for storing the training/inference metrics. The name of the file
+    will be unique, as it makes use of the timestamp. In case of inference, it will generate also the path of the csv 
+    to store the speeds of the robot during the testing process.
+
+    Args:
+        model_name (str): Name of the model file, as it will be used for identifying the csv file.
+        metrics_path (str): Path to store the csv files with the obtained metrics.
+        train_flag (bool): True if the script has been executed in training mode, False in case of running a test. True by default.
+
+    Return: #TODO complete the return
+        output_csv_path (str): Path to the new csv file.
+    """
+    # Get current timestamp so the metrics.csv file will have an unique name
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    # Get name and return the path to the csv file
+    if train_flag:
+        output_csv_name = f"{model_name}_train_{timestamp}.csv"
+        output_csv_path = os.path.join(metrics_path, output_csv_name)
+        return output_csv_name, output_csv_path
+    else:
+        output_csv_name_1 = f"{model_name}_test_{timestamp}.csv"
+        output_csv_name_2 = f"{model_name}_otherdata_{timestamp}.csv"
+        output_csv_path_1 = os.path.join(metrics_path, output_csv_name_1)
+        output_csv_path_2 = os.path.join(metrics_path, output_csv_name_2)
+        return output_csv_name_1, output_csv_name_2, output_csv_path_1, output_csv_path_2
+
+
+def update_records_file (file_path, exp_name, start_time, end_time, other_metrics):
+    """
+    Function to update the train or test record file, so the user can track all the training or testing attempts.
+
+    Args:
+        file_path (str): Path to the csv file which stores the training/testing records.
+        exp_name (str): ID of the experiment.
+        start_time (timestamp): Time at the beggining of the experiment.
+        end_time (timestamp): Time at the end of the experiment.
+        other_metrics (dic): Dictionary with other metrics that the user wants to record.
+    """
+    # Create the dictionary with the data to be saved in the CSV file
+    new_duration = (end_time - start_time) / 3600
+    new_end_time_str = datetime.datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
+    new_data = {
+        "Exp_id": exp_name,
+        "Start_time": datetime.datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S'),
+        "End_time": new_end_time_str,
+        "Duration": new_duration,
+        **other_metrics
+    }
+
+    rows = []
+    updated = False
+
+    # Read existing data (if file exists)
+    if os.path.exists(file_path):
+        with open(file_path, mode="r", newline='') as f:
+            reader = csv.DictReader(f)
+            headers = reader.fieldnames if reader.fieldnames else list(new_data.keys())
+
+            for row in reader:
+                if row["Exp_id"] == exp_name:
+                    # Update this row
+                    old_duration = float(row.get("Duration", 0.0))
+                    new_data["Start_time"] = row["Start_time"]  # Keep original
+                    new_data["Duration"] = old_duration + new_duration
+                    rows.append({**row, **new_data})
+                    updated = True
+                else:
+                    rows.append(row)
+    else:
+        headers = list(new_data.keys())
+
+    if not updated:
+        rows.append(new_data)
+
+    # Write updated CSV
+    with open(file_path, mode="w", newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    logging.info(f"Record file has been updated in {file_path}")
+
+
+def copy_json_with_id(source_path, destination_dir, file_id):
+    """
+    Copies the given JSON file to a specified directory and appends a file_id to its name.
+
+    Args:
+        source_path (str): Path to the original JSON file.
+        destination_dir (str): Directory where the file should be copied to.
+        file_id (str): The file ID to append to the copied file's name.
+    
+    Returns: None
+    """
+    # Ensure the destination directory exists
+    if not os.path.exists(destination_dir):
+        os.makedirs(destination_dir)
+
+    # Get the filename from the source path
+    filename = os.path.basename(source_path)
+    name, ext = os.path.splitext(filename)
+
+    # Create the new filename with file_id
+    new_filename = f"{name}_model_{file_id}{ext}"
+
+    # Create the destination path
+    destination_path = os.path.join(destination_dir, new_filename)
+
+    # Copy the file
+    shutil.copy(source_path, destination_path)
+
+    logging.info(f"A copy of the parameters file has been copied to {destination_path}")
+
+import csv
+
+
+def get_algorithm_for_model(model_name, csv_path):
+    """
+    Searches for a row in the CSV file where the first column matches the given model name,
+    and returns the value in the "Algorithm" column for that row. Doing this we can be sure
+    that we are testing the model using the same algorithm that was used for training it.
+
+    Args:
+        model_name (str): The model name to search for.
+        csv_path (str): The path to the CSV file.
+
+    Returns:
+        alg_name (str): The value from the "Algorithm" column corresponding to the row where 
+                     the model name is found
+    """
+    # Just keep the name until the '_best' part
+    if "_best" in model_name:
+        model_name = model_name.split("_best")[0]
+
+    with open(csv_path, 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        # Get the key of the first column (assumed to contain the model names)
+        first_col = reader.fieldnames[0]
+        for row in reader:
+            if row[first_col] == model_name:
+                return row.get("Algorithm")
+            
+    logging.error("There was an error while checking the algorithm used for training the model")
+    raise ValueError(f"Model '{model_name}' not found in CSV file '{csv_path}'")
+
+
+def get_data_from_training_csv(model_name, csv_path, column_header):
+    """
+    Searches for a row in the CSV file where the first column matches the given model name,
+    and returns the value in the "column_header" column for that row. This is mainly used for
+    getting the Algorithm used for training the model or for getting the final number of
+    timesteps.
+
+    Args:
+        model_name (str): The model name to search for.
+        csv_path (str): The path to the CSV file.
+        column_header (str): Column name. Usually will be 'Algorithm' and 'Step'
+
+    Returns:
+        alg_name (str): The value from the "column_header" column corresponding to the row where 
+                     the model name is found
+    """
+    # Just keep the name until the '_best' part
+    if "_best" in model_name:
+        model_name = model_name.split("_best")[0]
+
+    with open(csv_path, 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        # Get the key of the first column (assumed to contain the model names)
+        first_col = reader.fieldnames[0]
+        for row in reader:
+            if row[first_col] == model_name:
+                return row.get(column_header)
+
+        logging.error(f"Error while getting data from csv")
+        raise ValueError(f"There was an error while checking the {column_header} column for the {model_name} model. CSV file '{csv_path}'")
+
+
+def get_params_file(paths, args, index_model_id = 0):
+    """
+    Retrieves the path to the parameter configuration file associated with a given model.
+
+    This function checks if a model name is provided. If not, it retrieves the latest model name from the 
+    specified models directory. It then extracts the model ID from the model name and searches for the 
+    corresponding configuration file (ending with "_model_<id>.json") in the parameters directory.
+
+    Args:
+        paths (dict): A dictionary containing paths, including 'models' (for model files) 
+                      and 'parameters_used' (for parameter configuration files).
+        args (argparse.Namespace): The arguments passed to the function, including the optional 'model_name'.
+
+    Returns:
+        str: The full path to the parameter configuration file for the corresponding model.
+
+    Raises:
+        SystemExit: If no model ID is found in the model name or if the corresponding parameter file 
+                    is not found in the parameters directory.
+    """
+    models_path = paths["models"]
+    parameters_used_path = paths["parameters_used"]
+
+    # Check if a model name was provided by the user
+    if hasattr(args, "params_file"):
+        if hasattr(args, "model_name"):
+            if args.model_name is None:
+                model_name, _ = get_last_model(models_path)
+            else:
+                model_name = args.model_name
+        else:
+            model_name = f"{args.robot_name}_model_{args.model_ids[index_model_id]}" #TODO Fix this, right now we are choosing the algorithm of the first model
+            # (for test_scene functionality), so we cannot compare different models
+    
+    
+    # Extract the model_id from the model name
+    match = re.search(r"model_\d+", model_name)
+    if not match:
+        logging.critical(f"No model files ending with 'model_\d' found in the {models_path} folder.")
+        sys.exit()  
+    
+    model_id = match.group(0)  # "model_<id>"
+    
+    # Search the configuration file that ends with the corresponding "_model_<id>.json"
+    for file in os.listdir(parameters_used_path):
+        if file.endswith(f"{model_id}.json"):
+            params_file_path = os.path.join(parameters_used_path, file)  # Saves the whole path
+            logging.info(f"The parameter file that will be used for testing is {params_file_path}")
+            return params_file_path
+    
+    logging.critical(f"No configuration file ending with {model_id}.json found in the {parameters_used_path} folder.")
+    sys.exit()  
+
+
+def auto_create_param_files(base_params_file, output_dir, start_value, end_value, increment):
+    """
+    Creates parameter files with incrementing fixed_actime values.
+    First cleans the output directory of any existing JSON files, preserving CSV files.
+    
+    Args:
+        base_params_file (str): Path to the base parameters file.
+        output_dir (str): Directory to save the generated parameter files.
+        start_value (float): Starting value for fixed_actime.
+        end_value (float): Ending value for fixed_actime.
+        increment (float): Increment value for fixed_actime.
+        
+    Returns:
+        list: List of paths to the generated parameter files.
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Clean the directory by removing all existing files
+    for file in os.listdir(output_dir):
+        if file.lower().endswith('.json'):
+            file_path = os.path.join(output_dir, file)
+            if os.path.isfile(file_path):
+                try:
+                    os.remove(file_path)
+                    logging.info(f"Removed existing JSON file: {file_path}")
+                except Exception as e:
+                    logging.error(f"Error removing JSON file {file_path}: {e}")
+    
+    # Read base parameters file
+    with open(base_params_file, 'r') as f:
+        base_params = json.load(f)
+    
+    param_files = []
+    current_value = start_value
+    
+    # Create parameter files with incrementing fixed_actime values
+    while current_value <= end_value:
+        # Update fixed_actime value
+        base_params["params_env"]["fixed_actime"] = round(current_value, 4)  # Round to avoid floating point precision issues
+        
+        # Create output file name
+        output_file = os.path.join(output_dir, f"params_actime_{current_value:.4f}.json")
+        
+        # Write parameters to file
+        with open(output_file, 'w') as f:
+            json.dump(base_params, f, indent=2)
+        
+        param_files.append(output_file)
+        current_value += increment
+    
+    return param_files
+
+
+def create_next_auto_test_folder(base_path):
+    # Pattern to search: "auto_test_XX"
+    pattern = re.compile(r'auto_test_(\d+)')
+    
+    # Get all the folders with that pattern
+    existing_folders = [f for f in os.listdir(base_path) if pattern.match(f) and os.path.isdir(os.path.join(base_path, f))]
+    
+    # Extract the ids
+    indices = [int(pattern.match(f).group(1)) for f in existing_folders]
+    
+    # Get next id
+    next_index = max(indices, default=0) + 1
+    new_folder_name = f'auto_test_{next_index:02d}'
+    new_folder_path = os.path.join(base_path, new_folder_name)
+    
+    # Create the new folder
+    os.makedirs(new_folder_path, exist_ok=True)
+    logging.info(f'Carpeta creada: {new_folder_path}')
+    return new_folder_path, new_folder_name
+
+
+def process_rl_exploitation_summary(summary_csv_path):
+    """
+    Processes a summary CSV of multiple RL exploitations, filters episodes with TimeSteps count == 1,
+    and computes a cleaned summary CSV.
+
+    Args:
+        summary_csv_path (str): Path to the original summary CSV file.
+    """
+    # Load the original summary CSV
+    summary_df = pd.read_csv(summary_csv_path)
+
+    # Prepare list to store cleaned results
+    cleaned_data = []
+
+    # Define the output CSV name
+    base_dir = os.path.dirname(summary_csv_path)
+    print(f"Base directory for cleaned summary: {base_dir}")
+    cleaned_summary_path = os.path.join(base_dir, "cleaned_summary.csv")
+
+    for _, row in summary_df.iterrows():
+        exp_id = row["Exp_id"]
+        action_time = row["Action Time (s)"]
+
+        if exp_id is None or pd.isna(exp_id):
+            print("Warning: Exp_id is None or NaN. Skipping this row.")
+            continue
+        print(exp_id)
+
+        folder_name = str(exp_id).split('last')[0] + 'last_testing'
+        exp_path = os.path.join(base_dir, folder_name, exp_id)
+
+        if not os.path.isfile(exp_path):
+            print(f"Warning: File {exp_path} not found. Skipping.")
+            continue
+
+        # Load the exploitation CSV
+        exp_df = pd.read_csv(exp_path)
+
+        # Filter out episodes with TimeSteps count == 1
+        filtered_df = exp_df[exp_df["TimeSteps count"] > 1]
+
+        if filtered_df.empty:
+            print(f"Warning: No valid episodes in {exp_id}. Skipping.")
+            continue
+
+        # Compute metrics
+        avg_reward = filtered_df["Reward"].mean()
+        avg_time = filtered_df["Time (s)"].mean()
+        percentage_terminated = 100 * filtered_df["Terminated"].sum() / len(filtered_df)
+        num_collisions = filtered_df["Crashes"].sum()
+        collisions_percentage = 100 * num_collisions / len(filtered_df)
+        zone_1_pct = 100 * (filtered_df["Target zone"] == 1).sum() / len(filtered_df)
+        zone_2_pct = 100 * (filtered_df["Target zone"] == 2).sum() / len(filtered_df)
+        zone_3_pct = 100 * (filtered_df["Target zone"] == 3).sum() / len(filtered_df)
+        avg_distance = filtered_df["Distance traveled (m)"].mean()
+
+        # Append cleaned result
+        cleaned_data.append({
+            "Exp_id": exp_id,
+            "Action Time (s)": action_time,
+            "Avg reward": round(avg_reward,3),
+            "Avg time reach target": round(avg_time,3),
+            "Percentage terminated": round(percentage_terminated,3),
+            "Number of collisions": num_collisions,
+            "Collisions percentage": round(collisions_percentage,3),
+            "Target zone 1 (%)": round(zone_1_pct,3),
+            "Target zone 2 (%)": round(zone_2_pct,3),
+            "Target zone 3 (%)": round(zone_3_pct,3),
+            "Avg episode distance (m)": round(avg_distance,3)
+        })
+
+    # Save cleaned summary to CSV
+    cleaned_df = pd.DataFrame(cleaned_data)
+    cleaned_df.to_csv(cleaned_summary_path, index=False)
+
+    return cleaned_summary_path
+
+
+# ---------------------------------------
 # ---------------------------------------
 # ------ Functions for CoppeliaSim ------
 # ---------------------------------------
+# ---------------------------------------
+
 
 def find_coppelia_path():
     """
@@ -966,377 +1443,6 @@ def get_new_coppelia_pid(before_pids):
     return None
 
 
-def _get_default_params ():
-    """
-    Private function for setting the different parameters to their default values, in case that reading the json fails.
-
-    Args: None
-
-    Return:
-        dicts: Three dictionaries with the parameters of the environment, the training and the testing process.
-    """
-    params = {
-        "params_env": {
-            "var_action_time_flag": False,
-            "fixed_actime": 1.0,
-            "bottom_actime_limit": 0.2,
-            "upper_actime_limit": 3.0,
-            "bottom_lspeed_limit": 0.05,
-            "upper_lspeed_limit": 0.5,
-            "bottom_aspeed_limit": -0.5,
-            "upper_aspeed_limit": 0.5,
-            "finish_episode_flag": False,
-            "dist_thresh_finish_flag": 0.5,
-            "obs_time": False,
-            "reward_dist_1": 0.25,
-            "reward_1": 25,
-            "reward_dist_2": 0.05,
-            "reward_2": 50,
-            "reward_dist_3": 0.015,
-            "reward_3": 100,
-            "max_count": 400,
-            "max_time": 80,
-            "max_dist": 2.5,
-            "finish_flag_penalty": -10,
-            "overlimit_penalty": -10,
-            "crash_penalty": -20,
-            "max_crash_dist": 0.1
-
-        },
-        "params_train": {
-            "sb3_algorithm": "SAC",
-            "policy": "MlpPolicy",
-            "total_timesteps": 300000,
-            "callback_frequency": 10000,
-            "n_training_steps": 2048
-        },
-        "params_test": {
-            "sb3_algorithm": "",
-            "testing_iterations": 50
-        }
-    }
-    return params["params_env"], params["params_train"], params["params_test"]
-
-
-def load_params(file_path):
-    """
-    Load the configuration file as a dictionary.
-
-    Args:
-        file_path (str): Path to the JSON configuration file.
-
-    Returns:
-        params_env (dict): Parameters for configuring the environment.
-        params_train (dict): Parameters for configuring the training process.
-        params_test (dict): Parameters for configuring the testing process.
-    """
-    try:
-        with open(file_path, 'r') as f:
-            params_file = json.load(f)
-            if params_file :
-                params_env = params_file["params_env"]
-                params_train = params_file["params_train"]
-                params_test = params_file["params_test"]
-                logging.info(f"Configuration loaded successfully from {file_path}.")
-                return params_env, params_train, params_test
-            else:
-                logging.error("Failed to load configuration. Default values will be used")
-                return _get_default_params()
-            
-    except Exception as e:
-        logging.error(f"Error loading configuration file: {e}")
-        return _get_default_params()
-    
-    
-def get_output_csv(model_name, metrics_path, train_flag=True):
-    """
-    Get the path to to csv file that will be generated for storing the training/inference metrics. The name of the file
-    will be unique, as it makes use of the timestamp. In case of inference, it will generate also the path of the csv 
-    to store the speeds of the robot during the testing process.
-
-    Args:
-        model_name (str): Name of the model file, as it will be used for identifying the csv file.
-        metrics_path (str): Path to store the csv files with the obtained metrics.
-        train_flag (bool): True if the script has been executed in training mode, False in case of running a test. True by default.
-
-    Return: #TODO complete the return
-        output_csv_path (str): Path to the new csv file.
-    """
-    # Get current timestamp so the metrics.csv file will have an unique name
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
-    # Get name and return the path to the csv file
-    if train_flag:
-        output_csv_name = f"{model_name}_train_{timestamp}.csv"
-        output_csv_path = os.path.join(metrics_path, output_csv_name)
-        return output_csv_name, output_csv_path
-    else:
-        output_csv_name_1 = f"{model_name}_test_{timestamp}.csv"
-        output_csv_name_2 = f"{model_name}_otherdata_{timestamp}.csv"
-        output_csv_path_1 = os.path.join(metrics_path, output_csv_name_1)
-        output_csv_path_2 = os.path.join(metrics_path, output_csv_name_2)
-        return output_csv_name_1, output_csv_name_2, output_csv_path_1, output_csv_path_2
-
-
-def update_records_file (file_path, exp_name, start_time, end_time, other_metrics):
-    """
-    Function to update the train or test record file, so the user can track all the training or testing attempts.
-
-    Args:
-        file_path (str): Path to the csv file which stores the training/testing records.
-        exp_name (str): ID of the experiment.
-        start_time (timestamp): Time at the beggining of the experiment.
-        end_time (timestamp): Time at the end of the experiment.
-        other_metrics (dic): Dictionary with other metrics that the user wants to record.
-    """
-    # Create the dictionary with the data to be saved in the CSV file
-    new_duration = (end_time - start_time) / 3600
-    new_end_time_str = datetime.datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
-    new_data = {
-        "Exp_id": exp_name,
-        "Start_time": datetime.datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S'),
-        "End_time": new_end_time_str,
-        "Duration": new_duration,
-        **other_metrics
-    }
-
-    rows = []
-    updated = False
-
-    # Read existing data (if file exists)
-    if os.path.exists(file_path):
-        with open(file_path, mode="r", newline='') as f:
-            reader = csv.DictReader(f)
-            headers = reader.fieldnames if reader.fieldnames else list(new_data.keys())
-
-            for row in reader:
-                if row["Exp_id"] == exp_name:
-                    # Update this row
-                    old_duration = float(row.get("Duration", 0.0))
-                    new_data["Start_time"] = row["Start_time"]  # Keep original
-                    new_data["Duration"] = old_duration + new_duration
-                    rows.append({**row, **new_data})
-                    updated = True
-                else:
-                    rows.append(row)
-    else:
-        headers = list(new_data.keys())
-
-    if not updated:
-        rows.append(new_data)
-
-    # Write updated CSV
-    with open(file_path, mode="w", newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    logging.info(f"Record file has been updated in {file_path}")
-
-
-def copy_json_with_id(source_path, destination_dir, file_id):
-    """
-    Copies the given JSON file to a specified directory and appends a file_id to its name.
-
-    Args:
-        source_path (str): Path to the original JSON file.
-        destination_dir (str): Directory where the file should be copied to.
-        file_id (str): The file ID to append to the copied file's name.
-    
-    Returns: None
-    """
-    # Ensure the destination directory exists
-    if not os.path.exists(destination_dir):
-        os.makedirs(destination_dir)
-
-    # Get the filename from the source path
-    filename = os.path.basename(source_path)
-    name, ext = os.path.splitext(filename)
-
-    # Create the new filename with file_id
-    new_filename = f"{name}_model_{file_id}{ext}"
-
-    # Create the destination path
-    destination_path = os.path.join(destination_dir, new_filename)
-
-    # Copy the file
-    shutil.copy(source_path, destination_path)
-
-    logging.info(f"A copy of the parameters file has been copied to {destination_path}")
-
-import csv
-
-
-def get_algorithm_for_model(model_name, csv_path):
-    """
-    Searches for a row in the CSV file where the first column matches the given model name,
-    and returns the value in the "Algorithm" column for that row. Doing this we can be sure
-    that we are testing the model using the same algorithm that was used for training it.
-
-    Args:
-        model_name (str): The model name to search for.
-        csv_path (str): The path to the CSV file.
-
-    Returns:
-        alg_name (str): The value from the "Algorithm" column corresponding to the row where 
-                     the model name is found
-    """
-    # Just keep the name until the '_best' part
-    if "_best" in model_name:
-        model_name = model_name.split("_best")[0]
-
-    with open(csv_path, 'r', newline='') as csvfile:
-        reader = csv.DictReader(csvfile)
-        # Get the key of the first column (assumed to contain the model names)
-        first_col = reader.fieldnames[0]
-        for row in reader:
-            if row[first_col] == model_name:
-                return row.get("Algorithm")
-            
-    logging.error("There was an error while checking the algorithm used for training the model")
-    raise ValueError(f"Model '{model_name}' not found in CSV file '{csv_path}'")
-
-
-def get_data_from_training_csv(model_name, csv_path, column_header):
-    """
-    Searches for a row in the CSV file where the first column matches the given model name,
-    and returns the value in the "column_header" column for that row. This is mainly used for
-    getting the Algorithm used for training the model or for getting the final number of
-    timesteps.
-
-    Args:
-        model_name (str): The model name to search for.
-        csv_path (str): The path to the CSV file.
-        column_header (str): Column name. Usually will be 'Algorithm' and 'Step'
-
-    Returns:
-        alg_name (str): The value from the "column_header" column corresponding to the row where 
-                     the model name is found
-    """
-    # Just keep the name until the '_best' part
-    if "_best" in model_name:
-        model_name = model_name.split("_best")[0]
-
-    with open(csv_path, 'r', newline='') as csvfile:
-        reader = csv.DictReader(csvfile)
-        # Get the key of the first column (assumed to contain the model names)
-        first_col = reader.fieldnames[0]
-        for row in reader:
-            if row[first_col] == model_name:
-                return row.get(column_header)
-
-        logging.error(f"Error while getting data from csv")
-        raise ValueError(f"There was an error while checking the {column_header} column for the {model_name} model. CSV file '{csv_path}'")
-
-
-def get_params_file(paths, args, index_model_id = 0):
-    """
-    Retrieves the path to the parameter configuration file associated with a given model.
-
-    This function checks if a model name is provided. If not, it retrieves the latest model name from the 
-    specified models directory. It then extracts the model ID from the model name and searches for the 
-    corresponding configuration file (ending with "_model_<id>.json") in the parameters directory.
-
-    Args:
-        paths (dict): A dictionary containing paths, including 'models' (for model files) 
-                      and 'parameters_used' (for parameter configuration files).
-        args (argparse.Namespace): The arguments passed to the function, including the optional 'model_name'.
-
-    Returns:
-        str: The full path to the parameter configuration file for the corresponding model.
-
-    Raises:
-        SystemExit: If no model ID is found in the model name or if the corresponding parameter file 
-                    is not found in the parameters directory.
-    """
-    models_path = paths["models"]
-    parameters_used_path = paths["parameters_used"]
-
-    # Check if a model name was provided by the user
-    if hasattr(args, "params_file"):
-        if hasattr(args, "model_name"):
-            if args.model_name is None:
-                model_name, _ = get_last_model(models_path)
-            else:
-                model_name = args.model_name
-        else:
-            model_name = f"{args.robot_name}_model_{args.model_ids[index_model_id]}" #TODO Fix this, right now we are choosing the algorithm of the first model
-            # (for test_scene functionality), so we cannot compare different models
-    
-    
-    # Extract the model_id from the model name
-    match = re.search(r"model_\d+", model_name)
-    if not match:
-        logging.critical(f"No model files ending with 'model_\d' found in the {models_path} folder.")
-        sys.exit()  
-    
-    model_id = match.group(0)  # "model_<id>"
-    
-    # Search the configuration file that ends with the corresponding "_model_<id>.json"
-    for file in os.listdir(parameters_used_path):
-        if file.endswith(f"{model_id}.json"):
-            params_file_path = os.path.join(parameters_used_path, file)  # Saves the whole path
-            logging.info(f"The parameter file that will be used for testing is {params_file_path}")
-            return params_file_path
-    
-    logging.critical(f"No configuration file ending with {model_id}.json found in the {parameters_used_path} folder.")
-    sys.exit()  
-
-
-def auto_create_param_files(base_params_file, output_dir, start_value, end_value, increment):
-    """
-    Creates parameter files with incrementing fixed_actime values.
-    First cleans the output directory of any existing JSON files, preserving CSV files.
-    
-    Args:
-        base_params_file (str): Path to the base parameters file.
-        output_dir (str): Directory to save the generated parameter files.
-        start_value (float): Starting value for fixed_actime.
-        end_value (float): Ending value for fixed_actime.
-        increment (float): Increment value for fixed_actime.
-        
-    Returns:
-        list: List of paths to the generated parameter files.
-    """
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Clean the directory by removing all existing files
-    for file in os.listdir(output_dir):
-        if file.lower().endswith('.json'):
-            file_path = os.path.join(output_dir, file)
-            if os.path.isfile(file_path):
-                try:
-                    os.remove(file_path)
-                    logging.info(f"Removed existing JSON file: {file_path}")
-                except Exception as e:
-                    logging.error(f"Error removing JSON file {file_path}: {e}")
-    
-    # Read base parameters file
-    with open(base_params_file, 'r') as f:
-        base_params = json.load(f)
-    
-    param_files = []
-    current_value = start_value
-    
-    # Create parameter files with incrementing fixed_actime values
-    while current_value <= end_value:
-        # Update fixed_actime value
-        base_params["params_env"]["fixed_actime"] = round(current_value, 4)  # Round to avoid floating point precision issues
-        
-        # Create output file name
-        output_file = os.path.join(output_dir, f"params_actime_{current_value:.4f}.json")
-        
-        # Write parameters to file
-        with open(output_file, 'w') as f:
-            json.dump(base_params, f, indent=2)
-        
-        param_files.append(output_file)
-        current_value += increment
-    
-    return param_files
-
-
 def close_coppelia_sim(current_pid, terminal_pid):
     logging.info(f"Closing CoppeliaSim processes with PIDs: {current_pid} and terminal {terminal_pid}")
     # Close the terminal
@@ -1364,6 +1470,13 @@ def close_coppelia_sim(current_pid, terminal_pid):
             except psutil.TimeoutExpired:
                 logging.warning("CoppeliaSim didn't answer, forcing ending.")
                 coppelia_proc.kill()
+
+
+# ---------------------------------------------
+# ---------------------------------------------
+# ------ Other main supporting functions ------
+# ---------------------------------------------
+# ---------------------------------------------
 
 
 def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
@@ -1511,30 +1624,12 @@ def auto_run_mode(args, mode, file = None, model_id = None, no_gui=True):
         return model_name, status, process_duration
         
 
-def create_next_auto_test_folder(base_path):
-    # Pattern to search: "auto_test_XX"
-    pattern = re.compile(r'auto_test_(\d+)')
-    
-    # Get all the folders with that pattern
-    existing_folders = [f for f in os.listdir(base_path) if pattern.match(f) and os.path.isdir(os.path.join(base_path, f))]
-    
-    # Extract the ids
-    indices = [int(pattern.match(f).group(1)) for f in existing_folders]
-    
-    # Get next id
-    next_index = max(indices, default=0) + 1
-    new_folder_name = f'auto_test_{next_index:02d}'
-    new_folder_path = os.path.join(base_path, new_folder_name)
-    
-    # Create the new folder
-    os.makedirs(new_folder_path, exist_ok=True)
-    logging.info(f'Carpeta creada: {new_folder_path}')
-    return new_folder_path, new_folder_name
-
-
+# ------------------------------------
 # ------------------------------------
 # ------ Functions for training ------
 # ------------------------------------
+# ------------------------------------
+
 
 class StopTrainingOnKeypress(BaseCallback): # TODO Check: confirmation message appears two times
     """
@@ -1599,9 +1694,6 @@ class StopTrainingOnKeypress(BaseCallback): # TODO Check: confirmation message a
         while not self.pause_event.is_set() and not self.stop_training:
             time.sleep(0.1)
         return not self.stop_training
-
-
-
 
 
 def parse_tensorboard_logs(
@@ -1911,18 +2003,8 @@ class CustomMetricsCallback(BaseCallback):
 
 
     def _on_step(self) -> bool:
-        
-        # Log in TensorBoard
-        
-        
-
         # Get current episode number
         new_episode_count = self.base_env.n_ep
-
-        # if self.episode_count == 0 and self.num_timesteps == 0:
-        #     self.logger.record("custom/episodes", current_episode, self.num_timesteps)
-        #     self.logger.record("custom/sim_time", current_sim_time, self.num_timesteps)
-        #     self.logger.dump(self.num_timesteps)
 
         # If the episode count has increased, increment it
         if self.episode_count != new_episode_count:
@@ -1948,7 +2030,6 @@ class CustomMetricsCallback(BaseCallback):
             self.logger.record("custom/episodes", current_episode, self.num_timesteps)
             logging.info(f"Logging episodes: {current_episode} at timestep {self.num_timesteps}")
 
-
             # Log the current episode count and simulation time
             self.logger.dump(self.num_timesteps)
 
@@ -1959,7 +2040,9 @@ class CustomMetricsCallback(BaseCallback):
 
 
 # ------------------------------------
-# ------ Functions for testing ------
+# ------------------------------------
+# ------ Functions for testing -------
+# ------------------------------------
 # ------------------------------------
 
 
@@ -2020,7 +2103,6 @@ def calculate_episode_distance(trajs_folder, traj_file_name):
     return distance_traveled
 
 
-
 def calculate_average_distances(trajs_folder):
         """
         Calculate the average distance traveled per episode from the trajectory files.
@@ -2063,27 +2145,24 @@ def calculate_average_distances(trajs_folder):
 
 def get_data_for_spider(csv_path, args, column_names):
     """
-    Searches for rows in a CSV file where the first column contains an experiment name 
-    that ends with a given ID (formatted as '<robot_name>_model_<id>'), and returns the 
-    mean of specific columns' data for the matched rows for each ID in the provided list.
+    Extracts mean values of specific columns from rows in a CSV that match given model IDs.
 
     Args:
-    - csv_path (str): The file path to the CSV file containing the experiment data.
-    - args (argparse.Namespace): An object containing the arguments passed via argparse.
-      - args.robot_name (str): The name of the robot used to filter the experiment names.
-      - args.ids (list of int): A list of IDs to match at the end of the experiment name.
-    - column_names (list): A list of column headers (strings) whose data will be averaged 
-      across all matching rows for each ID.
+        csv_path (str): Path to the CSV file containing experiment data.
+        args (argparse.Namespace): Parsed command-line arguments.
+            - args.robot_name (str): Name of the robot to filter experiment names.
+            - args.ids (list of int): List of model IDs to match at the end of experiment names.
+        column_names (list): List of column headers to average for each matched model ID.
 
     Returns:
-    - dict: A dictionary where the keys are the IDs, and the values are pandas Series 
-      containing the mean values of the specified columns for the matching rows of each ID. 
-      If no rows are found for a specific ID, the value for that ID will be None.
-    
+        dict: A dictionary where keys are model IDs (int) and values are pandas Series 
+        containing the mean values of the specified columns. If no rows are found for a given ID, 
+        the value is None.
+
     Example:
-    - If the CSV has rows like 'robot1_model_34', 'robot2_model_34', 
-      and 'robot1_model_134', and you call the function with robot_name='robot1', ids=[34, 134],
-      it will return a dictionary with the mean values for the matching rows for each ID.
+        If the CSV includes entries like 'robot1_model_34', 'robot2_model_34', and 'robot1_model_134',
+        and you call the function with robot_name='robot1' and ids=[34, 134], the function returns
+        a dictionary with averaged values for each matching ID.
     """
     # Cargar el CSV en un DataFrame de pandas
     try:
@@ -2127,13 +2206,13 @@ def process_spider_data (df, tolerance=0.05):
     - A tolerance is applied to avoid exact 0 or 1 in the normalized values.
 
     Args:
-    - df (DataFrame): Dataframe with data for each ID as pandas.Series.
-    - tolerance (float): Percentage tolerance applied to prevent normalization from reaching 0 or 1.
+        df (DataFrame): Dataframe with data for each ID as pandas.Series.
+        tolerance (float, Optional): Percentage tolerance applied to prevent normalization from reaching 0 or 1.
 
     Returns:
-    - data_list (list of lists): Normalized metric values for each ID.
-    - names (list): List of experiment names formatted as "T_<action_time>".
-    - labels (list): List of metric names.
+        data_list (list of lists): Normalized metric values for each ID.
+        names (list): List of experiment names formatted as "T_<action_time>".
+        labels (list): List of metric names.
     """
     data_list = []
     names = []
@@ -2192,10 +2271,10 @@ def plot_multiple_spider(data_list, labels, names, title='Models Comparison'):
     Plots multiple spider charts on the same figure to compare different models.
 
     Args:
-    - data_list (list of lists): A list of several lsit of metrics, one per model.
-    - labels (list): List of labels for the axes (metrics).
-    - names (list): List of names corresponding to each dataset (for the legend). They correspond to the action time in seconds.
-    - title (str): The title of the chart.
+        data_list (list of lists): A list of several lsit of metrics, one per model.
+        labels (list): List of labels for the axes (metrics).
+        names (list): List of names corresponding to each dataset (for the legend). They correspond to the action time in seconds.
+        title (str, Optional): The title of the chart.
     """
     # Vars number
     num_vars = len(labels)
@@ -2392,32 +2471,28 @@ def plot_metric_boxplot_by_timestep(df, metric, ylabel, color='#2678b0'):
     return fig, ax
 
 
-
 def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     """
-    Analize convergence for trained models.
-    
-    Parameters:
-    -----------
-    file_path : str
-        Path to the csv file with data about training
-    x_axis : str
-        x axis name that can be: 'WallTime', 'Steps', 'SimTime', o 'Episodes'
-    convergence_threshold : float
-        Threshold for accepting the convergence
+    Analyze convergence for trained models.
 
-    
+    Args:
+        file_path (str): Path to the CSV file containing training data.
+        x_axis (str): Name of the x-axis to analyze. Must be one of 
+            'WallTime', 'Steps', 'SimTime', or 'Episodes'.
+        convergence_threshold (float): Threshold for determining convergence. 
+            Defaults to 0.02.
+
     Returns:
-    --------
-    tuple: (convergence_point, reward_fit, x_raw, reward, reward_at_convergence)
+        tuple: A tuple containing:
+            - convergence_point (float): The value on the x-axis where convergence occurs.
+            - reward_fit (np.ndarray): The fitted reward curve.
+            - x_raw (np.ndarray): Raw x-axis values from the CSV.
+            - reward (np.ndarray): Raw reward values from the CSV.
+            - reward_at_convergence (float): The reward value at the convergence point.
     """
     # Read csv file
     df = pd.read_csv(file_path)
 
-    # Limit max steps <= 200000 #TODO: remove this and do it automatically, by using the experiment with less steps as a limit
-    # mask = df['Step'] <= 200000
-    # df = df[mask]
-    
     # Prepare x axis depending on the selected option
     if x_axis == "WallTime":
         df['Step timestamp'] = pd.to_datetime(df['Step timestamp'], format='%Y-%m-%d_%H-%M-%S')
@@ -2577,87 +2652,6 @@ def plot_metrics_comparison_smooth_with_original_deprecated(rl_copp_obj, metric,
         plt.close()
     else:
         plt.show()
-
-
-def process_rl_exploitation_summary(summary_csv_path):
-    """
-    Processes a summary CSV of multiple RL exploitations, filters episodes with TimeSteps count == 1,
-    and computes a cleaned summary CSV.
-
-    Args:
-        summary_csv_path (str): Path to the original summary CSV file.
-    """
-    # Load the original summary CSV
-    summary_df = pd.read_csv(summary_csv_path)
-
-    # Prepare list to store cleaned results
-    cleaned_data = []
-
-    # Define the output CSV name
-    base_dir = os.path.dirname(summary_csv_path)
-    print(f"Base directory for cleaned summary: {base_dir}")
-    cleaned_summary_path = os.path.join(base_dir, "cleaned_summary.csv")
-
-    
-
-    for _, row in summary_df.iterrows():
-        exp_id = row["Exp_id"]
-        action_time = row["Action Time (s)"]
-
-        if exp_id is None or pd.isna(exp_id):
-            print("Warning: Exp_id is None or NaN. Skipping this row.")
-            continue
-        print(exp_id)
-
-        folder_name = str(exp_id).split('last')[0] + 'last_testing'
-        exp_path = os.path.join(base_dir, folder_name, exp_id)
-
-        if not os.path.isfile(exp_path):
-            print(f"Warning: File {exp_path} not found. Skipping.")
-            continue
-
-        # Load the exploitation CSV
-        exp_df = pd.read_csv(exp_path)
-
-        # Filter out episodes with TimeSteps count == 1
-        filtered_df = exp_df[exp_df["TimeSteps count"] > 1]
-
-        if filtered_df.empty:
-            print(f"Warning: No valid episodes in {exp_id}. Skipping.")
-            continue
-
-        # Compute metrics
-        avg_reward = filtered_df["Reward"].mean()
-        avg_time = filtered_df["Time (s)"].mean()
-        percentage_terminated = 100 * filtered_df["Terminated"].sum() / len(filtered_df)
-        num_collisions = filtered_df["Crashes"].sum()
-        collisions_percentage = 100 * num_collisions / len(filtered_df)
-        zone_1_pct = 100 * (filtered_df["Target zone"] == 1).sum() / len(filtered_df)
-        zone_2_pct = 100 * (filtered_df["Target zone"] == 2).sum() / len(filtered_df)
-        zone_3_pct = 100 * (filtered_df["Target zone"] == 3).sum() / len(filtered_df)
-        avg_distance = filtered_df["Distance traveled (m)"].mean()
-
-        # Append cleaned result
-        cleaned_data.append({
-            "Exp_id": exp_id,
-            "Action Time (s)": action_time,
-            "Avg reward": round(avg_reward,3),
-            "Avg time reach target": round(avg_time,3),
-            "Percentage terminated": round(percentage_terminated,3),
-            "Number of collisions": num_collisions,
-            "Collisions percentage": round(collisions_percentage,3),
-            "Target zone 1 (%)": round(zone_1_pct,3),
-            "Target zone 2 (%)": round(zone_2_pct,3),
-            "Target zone 3 (%)": round(zone_3_pct,3),
-            "Avg episode distance (m)": round(avg_distance,3)
-        })
-
-    # Save cleaned summary to CSV
-    cleaned_df = pd.DataFrame(cleaned_data)
-    cleaned_df.to_csv(cleaned_summary_path, index=False)
-
-    return cleaned_summary_path
-
 
 
 # ------------------------------------
@@ -2832,3 +2826,269 @@ def plot_bars_deprecated(rl_copp_obj, model_index, mode, title="Target Zone Dist
             plt.close()
         else:
             plt.show()
+
+
+def plot_scene_trajs_with_variability_deprecated(rl_copp_obj, folder_path, num_points=100, nsig=1.0):
+    """
+    Plot a scene with interpolated mean trajectories from multiple models,
+    including uncertainty ellipses at each point based on covariance across trajectories.
+
+    Args:
+        rl_copp_obj: Main RL object providing access to config and paths.
+        folder_path (str): Path to the folder containing scene and trajectory CSVs.
+        num_points (int): Number of interpolation points per trajectory.
+        nsig (float): Number of standard deviations for the uncertainty ellipses (e.g., 1.0 or 2.0).
+    """
+    files = os.listdir(folder_path)
+    scene_file = [f for f in files if f.startswith("scene_") and f.endswith(".csv")][0]
+    traj_files = [f for f in files if f.startswith("trajectory_") and f.endswith(".csv")]
+
+    logging.debug(f"scene files: {scene_file}")
+    logging.debug(f"traj_files: {traj_files}")
+    scene_df = pd.read_csv(os.path.join(folder_path, scene_file))
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_xlim(2.5, -2.5)
+    ax.set_ylim(2.5, -2.5)
+    ax.set_aspect('equal')
+    ax.set_title(f"Scene with Interpolated Mean Trajectories ({nsig}σ uncertainty)")
+
+    # Draw 0.5 m grid
+    for i in np.arange(-2.5, 3, 0.5):
+        ax.axhline(i, color='lightgray', linewidth=0.5, zorder=0)
+        ax.axvline(i, color='lightgray', linewidth=0.5, zorder=0)
+
+    # Draw static scene elements
+    for _, row in scene_df.iterrows():
+        x, y = row['x'], row['y']
+        if row['type'] == 'robot':
+            ax.add_patch(plt.Circle((x, y), 0.35 / 2, color='blue', label='Robot', zorder=2))
+            
+            # Draw orientation
+            if 'theta' in row:
+                theta = row['theta']
+
+                # Triangle
+                front_length = 0.15
+                side_offset = 0.08
+
+                # Front point
+                front = (x + front_length * np.cos(theta), y + front_length * np.sin(theta))
+                # Side points
+                left = (x + side_offset * np.cos(theta + 2.5), y + side_offset * np.sin(theta + 2.5))
+                right = (x + side_offset * np.cos(theta - 2.5), y + side_offset * np.sin(theta - 2.5))
+
+                triangle = plt.Polygon([front, left, right], color='white', zorder=3)
+                ax.add_patch(triangle)
+                
+        elif row['type'] == 'obstacle':
+            ax.add_patch(plt.Circle((x, y), 0.25 / 2, color='gray', label='Obstacle'))
+        elif row['type'] == 'target':
+            for r, c in [(0.25, 'blue'), (0.125, 'red'), (0.015, 'yellow')]:
+                ax.add_patch(plt.Circle((x, y), r, color=c, alpha=0.6))
+
+    # Group trajectories by model ID
+    model_trajs = defaultdict(list)
+    for file in traj_files:
+        parts = file.split('_')
+        model_id = parts[-1].split('.')[0]
+        model_trajs[model_id].append(os.path.join(folder_path, file))
+
+    colors = plt.cm.get_cmap("tab10")
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path, "train_records.csv")
+
+    model_plot_data = []
+
+    # Interpolate and store data for later ordered plotting
+    for i, (model_id, paths) in enumerate(model_trajs.items()):
+        interpolated_xs, interpolated_ys = [], []
+        for path in paths:
+            df = pd.read_csv(path)
+            x_interp, y_interp = interpolate_trajectory(df['x'].values, df['y'].values, num_points)
+            interpolated_xs.append(x_interp)
+            interpolated_ys.append(y_interp)
+
+        interpolated_xs = np.array(interpolated_xs)
+        interpolated_ys = np.array(interpolated_ys)
+        
+        mean_x = np.mean(interpolated_xs, axis=0)
+        mean_y = np.mean(interpolated_ys, axis=0)
+        color = colors((i + 1) % 10)
+
+        model_name = rl_copp_obj.args.robot_name + "_model_" + str(model_id)
+        timestep = float(get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+
+        model_plot_data.append({
+            "timestep": timestep,
+            "mean_x": mean_x,
+            "mean_y": mean_y,
+            "interpolated_xs": interpolated_xs,
+            "interpolated_ys": interpolated_ys,
+            "color": color,
+            "label": f"Model {timestep}s"
+        })
+
+    # Sort models by timestep before plotting
+    model_plot_data.sort(key=lambda d: d["timestep"])
+
+    for data in model_plot_data:
+        ax.plot(data["mean_x"], data["mean_y"], color=data["color"],
+                label=data["label"], linewidth=2, zorder=3)
+
+        # for j in range(num_points):
+        #     if data["interpolated_xs"].shape[0] < 2:
+        #         continue  # Cannot compute covariance with less than 2 trajectories
+        #     # point_samples = np.stack((interpolated_xs[:, j], interpolated_ys[:, j]), axis=1)
+        #     # draw_robust_uncertainty_ellipse(
+        #     #     ax, mean_x[j], mean_y[j], point_samples,
+        #     #     color=data["color"], alpha=0.3, nsig=nsig
+        #     # )
+        #     cov = np.cov(data["interpolated_xs"][:, j], data["interpolated_ys"][:, j])
+        #     if not np.isnan(cov).any() and not np.isinf(cov).any():
+        #         draw_uncertainty_ellipse(ax, data["mean_x"][j], data["mean_y"][j], cov,
+        #                              color=data["color"], nsig=nsig)
+
+    # Deduplicate legend entries
+    handles, labels = ax.get_legend_handles_labels()
+    unique = dict(zip(labels, handles))
+    ax.legend(unique.values(), unique.keys(), loc='upper right')
+
+    plt.grid(True)
+    plt.show()
+
+
+def interpolate_trajectory(x, y, num_points=100):
+    """
+    Interpolates a trajectory to generate a specified number of evenly spaced points.
+
+    This function takes the x and y coordinates of a trajectory and interpolates them 
+    to produce a new trajectory with a uniform distribution of points along its length.
+
+    Args:
+        x (array-like): X-coordinates of the original trajectory.
+        y (array-like): Y-coordinates of the original trajectory.
+        num_points (int): Number of points for the interpolated trajectory.
+
+    Returns:
+        tuple:
+            - interp_x (array): Interpolated X-coordinates.
+            - interp_y (array): Interpolated Y-coordinates.
+    """
+    distances = np.sqrt(np.diff(x)**2 + np.diff(y)**2)
+    cumulative_dist = np.insert(np.cumsum(distances), 0, 0)
+    total_length = cumulative_dist[-1]
+    if total_length == 0:
+        return np.full(num_points, x[0]), np.full(num_points, y[0])
+
+    normalized_dist = cumulative_dist / total_length
+    interp_x = interp1d(normalized_dist, x, kind='linear')
+    interp_y = interp1d(normalized_dist, y, kind='linear')
+    uniform_points = np.linspace(0, 1, num_points)
+    return interp_x(uniform_points), interp_y(uniform_points)
+
+
+def draw_uncertainty_ellipse(ax, mean_x, mean_y, cov, color, nsig=1.0, alpha=0.3, zorder=2):
+    """Draws an uncertainty ellipse based on a 2x2 covariance matrix.
+
+    The ellipse represents a confidence region for a 2D Gaussian distribution.
+
+    Args:
+        ax (matplotlib.axes.Axes): The axes object to draw the ellipse on.
+        mean_x (float): X-coordinate of the ellipse center.
+        mean_y (float): Y-coordinate of the ellipse center.
+        cov (ndarray): 2x2 covariance matrix.
+        color (str or tuple): Color of the ellipse.
+        nsig (float, optional): Number of standard deviations for the ellipse size. Defaults to 1.0.
+        alpha (float, optional): Transparency of the ellipse (0-1). Defaults to 0.3.
+        zorder (int, optional): Drawing order (higher means drawn on top). Defaults to 2.
+
+    Returns:
+        None: The ellipse is added to the provided axes object.
+    """
+    # Compute eigenvalues and eigenvectors of covariance matrix
+    vals, vecs = np.linalg.eigh(cov)
+    
+    # Sort eigenvalues and eigenvectors in descending order
+    order = vals.argsort()[::-1]
+    vals = vals[order]
+    vecs = vecs[:, order]
+    
+    # Calculate rotation angle (in degrees) from eigenvectors
+    theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+    
+    # Calculate width and height of ellipse (2 * nsig * standard deviation)
+    width, height = 2 * nsig * np.sqrt(vals)
+
+    # Create ellipse patch
+    ell = Ellipse(
+        xy=(mean_x, mean_y),     # Ellipse center
+        width=width,             # Major axis length
+        height=height,           # Minor axis length
+        angle=theta,             # Rotation angle in degrees
+        color=color,             # Color
+        alpha=alpha,             # Transparency
+        zorder=zorder            # Drawing order
+    )
+    ax.add_patch(ell)
+
+
+def draw_robust_uncertainty_ellipse(ax, mean_x, mean_y, points, color='gray', alpha=0.3, zorder=1, nsig=2.0):
+    """
+    Draws a robust uncertainty ellipse based on a set of 2D points.
+
+    This function computes a robust covariance matrix using the Minimum Covariance Determinant (MCD) 
+    estimator and uses it to draw an uncertainty ellipse. If the robust estimation fails, it falls 
+    back to the classical covariance matrix.
+
+    Args:
+        ax (matplotlib.axes.Axes): The axes object to draw the ellipse on.
+        mean_x (float): X-coordinate of the ellipse center.
+        mean_y (float): Y-coordinate of the ellipse center.
+        points (ndarray): Array of shape (n_samples, 2) containing the 2D points.
+        color (str or tuple): Color of the ellipse.
+        alpha (float, optional): Transparency of the ellipse (0-1). Defaults to 0.3.
+        zorder (int, optional): Drawing order (higher means drawn on top). Defaults to 1.
+        nsig (float, optional): Number of standard deviations for the ellipse size. Defaults to 2.0.
+
+    Returns:
+        None: The ellipse is added to the provided axes object.
+    """
+    if len(points) < 2:
+        return
+
+    try:
+        # Primer intento: robusto
+        robust_cov = MinCovDet(support_fraction=0.9).fit(points)
+        cov = robust_cov.covariance_
+    except Exception as e:
+        logging.warning(f"[MCD fallback] Using classical covariance due to error: {e}")
+        try:
+            cov = np.cov(points.T)
+        except Exception as e2:
+            logging.warning(f"Failed to compute classical covariance too: {e2}")
+            return
+
+    try:
+        # Descomposición de la matriz de covarianza
+        vals, vecs = np.linalg.eigh(cov)
+        order = vals.argsort()[::-1]
+        vals = vals[order]
+        vecs = vecs[:, order]
+
+        # Parámetros de la elipse
+        theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+        width, height = 2 * nsig * np.sqrt(vals)
+
+        ell = Ellipse(
+            xy=(mean_x, mean_y),
+            width=width,
+            height=height,
+            angle=theta,
+            color=color,
+            alpha=alpha,
+            zorder=zorder
+        )
+        ax.add_patch(ell)
+    except Exception as e:
+        logging.warning(f"Failed to draw ellipse: {e}")

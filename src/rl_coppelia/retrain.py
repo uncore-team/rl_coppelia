@@ -1,3 +1,39 @@
+""" 
+----------------- IMPORTANT: Currently not working properly. -----------------
+
+Project: Robot Training and Testing RL Algorithms in CoppeliaSim
+Author: Adrián Bañuls Arias
+Version: 1.0
+Date: 2025-03-25
+License: GNU General Public License v3.0
+
+Description:
+    This script retrains an existing reinforcement learning model in a CoppeliaSim environment.
+    It resumes training from a previously saved model, extending it with new timesteps while 
+    preserving logging, monitoring, and performance tracking features. The script also saves 
+    evaluation metrics and model checkpoints throughout the retraining process.
+
+    It uses the same environment and parameters used during the initial training (unless explicitly 
+    overridden) and integrates seamlessly with TensorBoard, metrics loggers, and evaluation callbacks.
+
+Usage:
+    rl_coppelia retrain --model_name <model_name> --retrain_steps <steps>
+                        [--scene_path <path_to_scene>] 
+                        [--dis_parallel_mode] [--no_gui]
+                        [--params_file <path>] 
+                        [--verbose <0|1|2|3>]
+
+Features:
+    - Automatically resumes training from a pretrained model checkpoint.
+    - Loads and uses the correct algorithm (e.g., SAC, PPO) from training records.
+    - Logs new metrics into TensorBoard and saves them in CSV format.
+    - Tracks episode count and simulation time for consistency in retraining.
+    - Includes customizable callbacks for saving models, early stopping, and metric-based evaluation.
+    - Supports verbose logging and intermediate model checkpoint saving.
+    - Final metrics are stored in `train_records.csv` with convergence information if available.
+    - Cleans up environment and monitor files after training finishes.
+"""
+
 import logging
 import os
 import shutil

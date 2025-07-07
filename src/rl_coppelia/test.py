@@ -1,20 +1,44 @@
+"""
+Project: Robot Training and Testing RL Algorithms in CoppeliaSim
+Author: Adrián Bañuls Arias
+Version: 1.0
+Date: 2025-03-25
+License: GNU General Public License v3.0
+
+Description:
+    This script tests a single reinforcement learning model in a CoppeliaSim environment.
+    The model is evaluated for a given number of iterations, and various performance metrics
+    are collected, saved to CSV files, and used to compute a testing summary.
+
+Usage:
+    rl_coppelia test --model_name <model_name> [--robot_name <robot_name>]
+                     [--scene_path <path_to_scene_file>] [--save_scene] [--save_traj]
+                     [--dis_parallel_mode] [--no_gui] [--params_file <path_to_params_file>]
+                     [--iterations <int>] [--timestamp <timestamp>] [--verbose <0|1|2|3>]
+
+Features:
+    - Automatically detects and launches a CoppeliaSim instance.
+    - Loads a trained model using the correct SB3 algorithm used for training.
+    - Tests the model in a preconfigured scenario for a set number of iterations.
+    - Collects detailed step-by-step data including LATs and speed during the episode.
+    - Calculates and logs key episode metrics like reward, time, distance, and collisions.
+    - Discards invalid episodes (e.g., those with only one timestep --> the robot starts above the target).
+    - Saves a per-episode CSV with all metrics and a secondary CSV with additional data (LATs, speeds).
+    - Computes and stores a final metrics summary including success rates and episode averages.
+    - Supports optional saving of robot trajectories and appending results to a global test record.
+    - Ensures proper environment and simulator cleanup after testing is complete.
+"""
+
+
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" # Suppress TensorFlow warnings
 import csv
-import glob
 import logging
 import time
-import numpy as np
-import pandas as pd
 import stable_baselines3
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
-from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.monitor import Monitor
 from tqdm.auto import tqdm
-
-
 
 
 def main(args):
@@ -61,7 +85,6 @@ def main(args):
     # Load the model file using the same algorithm used for training that model
     model = ModelClass.load(rl_copp.args.model_name, rl_copp.env)
     
-
     # Create a folder for the test results
     testing_folder = os.path.join(testing_metrics_path, f"{model_name}_testing")
     os.makedirs(testing_folder, exist_ok=True)
@@ -69,7 +92,6 @@ def main(args):
     # Create a subfolder for trajectories
     trajs_folder = os.path.join(testing_folder, "trajs")
     os.makedirs(trajs_folder, exist_ok=True)
-
 
     # Get output csv path
     experiment_csv_name, _, experiment_csv_path, otherdata_csv_path = utils.get_output_csv(model_name, testing_folder, train_flag=False)
@@ -82,7 +104,6 @@ def main(args):
     time_reach_targets_list = []
     timesteps_counts_list = []
     terminated_list =[]
-    # truncated_list = []
     collision_list = []
     max_achieved_list = []
     target_zone_list = []
@@ -120,7 +141,6 @@ def main(args):
         # Wrap your range with tqdm to create a progress bar
         for i in tqdm(range(n_iter), desc="Testing Episodes", unit="episode"):
             # The tqdm progress bar will automatically update
-
             # Get episode number
             n_ep = i+1
             
@@ -153,16 +173,13 @@ def main(args):
                         otherdata_writer = csv.writer(f)
                         otherdata_writer.writerow(otherdata_headers)  # Write the headers
 
-                
-                
                 with open(otherdata_csv_path, mode='a', newline='') as speed_file:
                     otherdata_writer = csv.writer(speed_file)
                     otherdata_writer.writerow([n_ep, info["linear_speed"], info["angular_speed"], info["lat_sim"], info["lat_wall"]])    # saves also the episode number
             
             
             # Call get_metrics(), so we will have the total time of the iteration
-            # and the final distance to the target
-            
+            # and the final distance to the targe
             init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved, target_zone = utils.get_metrics_test(rl_copp.env.envs[0].unwrapped)
             
             if terminated:
@@ -219,7 +236,6 @@ def main(args):
     percentage_target_zone_3 = (target_zone_list.count(3) / len(target_zone_list)) * 100
     avg_distance_per_episode = sum(episode_distances_list) / len(episode_distances_list) if episode_distances_list else 0
 
-
     data_to_store ={
         "Algorithm" : rl_copp.params_test["sb3_algorithm"],
         "Avg reward": avg_reward,
@@ -248,7 +264,6 @@ def main(args):
     rl_copp.env.envs[0].unwrapped._commstoagent.stepExpFinished()
     logging.info("Testing has finished")
     
-
     ### Close the CoppeliaSim instance
     rl_copp.stop_coppelia_sim()
 

@@ -24,18 +24,15 @@ import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import inspect
 import logging
-
 import psutil
-
-
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 from common import utils
 from common.coppelia_envs import BurgerBotEnv, TurtleBotEnv
 from stable_baselines3.common.env_util import make_vec_env
 
+
 class RLCoppeliaManager():
-    
     def __init__(self, args):
         """
         Manages the interactions with the CoppeliaSim simulation environment for robot training.
@@ -157,7 +154,7 @@ class RLCoppeliaManager():
         logging.info(f"Environment for training created: {self.env}. Comms port: {self.free_comms_port}")  
         
         
-    def start_coppelia_sim(self, test_mode = False):
+    def start_coppelia_sim(self):
         """
         Run CoppeliaSim and open the selected scene. It will override the code of the 'Agent_Script' file inside the scene with the
         content of the agent_coppelia_script.py.
@@ -167,7 +164,7 @@ class RLCoppeliaManager():
         utils.start_coppelia_and_simulation(self)
 
 
-    def stop_coppelia_sim(self, test_mode = False):
+    def stop_coppelia_sim(self):
         """
         Check if Coppelia simulations are running and, if so, stops every instance.
         """

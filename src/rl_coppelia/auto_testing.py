@@ -6,20 +6,29 @@ Date: 2025-03-25
 License: GNU General Public License v3.0
 
 Description:
-    This script manages the execution of a set of tests for a robot in a CoppeliaSim 
-    environment. It automates the testing process, running a test for each specified model, and
-    comparing and saving the results.
+    This script manages the automatic evaluation of multiple trained reinforcement learning models 
+    within a CoppeliaSim environment. It executes testing sessions for each model listed, using the 
+    specified number of iterations per model, and stores comparative results in a summary CSV file.
+
+    The script supports sequential or parallel execution to adapt to system capabilities, ensuring 
+    efficient and scalable performance testing for different model configurations.
 
 Usage:
-    rl_coppelia auto_testing --robot_name <robot_name> --model_ids <model_ids> 
-                            --iterations <num> [--parallel_mode] [--max_workers]
-                            [--verbose <num>]
-
+    rl_coppelia auto_testing --robot_name <robot_name> 
+                             --session_name <session_name> 
+                             --model_ids <id1> <id2> ... 
+                             --iterations <num_iterations> 
+                             [--dis_parallel_mode] 
+                             [--max_workers <num_workers>] 
+                             [--verbose <0|1|2|3>]
 
 Features:
-    - Automatically creates required directories if they do not exist.
-    - Runs a testing session either sequentially or in parallel with a delay between submissions.
-    - Saves a summary of testing results in a CSV file, along with some plots comparing the obtained metrics.
+    - Automatically locates and loads models by their ID.
+    - Executes a fixed number of test episodes per model.
+    - Supports both sequential and parallel testing of models.
+    - Limits concurrent testing jobs via configurable worker count.
+    - Captures performance metrics and saves results in a timestamped CSV summary.
+    - Provides configurable verbosity and debug logging.
 """
 
 from argparse import Namespace

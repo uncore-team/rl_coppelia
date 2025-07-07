@@ -10,20 +10,27 @@ Description:
     environment. It automates the generation of parameter files, the execution of training 
     runs (either sequentially or in parallel), and logs the results into a summary CSV file.
 
-    Generates parameter files by varying the "fixed_actime" value, executes training runs, and 
-    logs the results. This method is used when you want to find the optimal action time for training a robot using RL algorithms.
+    It systematically varies the `fixed_actime` parameter in the configuration file to evaluate
+    its effect on the training performance, helping determine the optimal value.
 
 Usage:
-    rl_coppelia sat_training --robot_name <robot_name> --session_name <session_name> 
-                               [--parallel_mode] [--max_workers <num>] [--base_params_file <path>]
-                               [--start_value <float>] [--end_value <float>] [--increment <float>]
+    rl_coppelia sat_training --robot_name <robot_name>
+                              --session_name <session_name>
+                              --base_params_file <path_to_base_params>
+                              [--dis_parallel_mode]
+                              [--max_workers <num_workers>]
+                              [--start_value <float>]
+                              [--end_value <float>]
+                              [--increment <float>]
+                              [--verbose <0|1|2|3>]
 
 Features:
-    - Automatically creates required directories if they do not exist.
-    - Cleans the output directory of old JSON files before generating new ones.
-    - Runs training sessions either sequentially or in parallel with a delay between submissions.
-    - Detects and terminates CoppeliaSim instances after training.
-    - Saves a summary of training results in a CSV file.
+    - Automatically creates session-specific parameter files varying the fixed action time.
+    - Executes training runs in parallel or sequentially based on user preference.
+    - Limits concurrent processes using semaphores to avoid CoppeliaSim conflicts.
+    - Introduces automatic delays between parallel job submissions to reduce overlap.
+    - Aggregates and saves training results (status and duration) into a timestamped summary CSV.
+    - Logs errors, warnings, and exceptions encountered during any training run.
 """
 
 import csv

@@ -1,18 +1,44 @@
+"""
+Project: Robot Training and Testing RL Algorithms in CoppeliaSim
+Author: Adrián Bañuls Arias
+Version: 1.0
+Date: 2025-03-25
+License: GNU General Public License v3.0
+
+Description:
+    This script tests multiple trained reinforcement learning models in a predefined scene using CoppeliaSim.
+    Each model is evaluated on a specific target within the scene, and performance metrics are collected and saved
+    for later analysis.
+
+Usage:
+    rl_coppelia test_scene --robot_name <robot_name> --model_ids <model_ids> 
+                            --scene_to_load_folder <scene_to_load_folder> [--iters_per_model <int>]
+                            [--scene_path <path_to_scene_file>] [--dis_parallel_mode] [--no_gui]
+                            [--params_file <path_to_params_file>] [--timestamp <timestamp>]
+                            [--verbose <0|1|2|3>]
+
+Features:
+    - Automatically launches a CoppeliaSim instance for testing.
+    - Loads a preconfigured scene and initializes the corresponding environment.
+    - Supports testing multiple models across multiple targets in a single execution.
+    - Dynamically assigns models to scene targets based on model count.
+    - Automatically detects and loads trained models using the correct SB3 algorithm.
+    - Measures and logs key performance metrics such as reward, time, crashes, and target zone.
+    - Saves detailed episode metrics and a summary CSV with aggregated statistics.
+    - Calculates episode trajectory distance if no collision is detected.
+    - Cleans up and stops CoppeliaSim after testing is complete.
+"""
+
 import csv
 import datetime
 import logging
 import os
 import re
-import time
 import pandas as pd
 import stable_baselines3
 from tqdm.auto import tqdm
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
-from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.monitor import Monitor
-
 
 
 def main(args):
@@ -106,13 +132,10 @@ def main(args):
             # Load the model file using the same algorithm used for training that model
             model = ModelClass.load(models_paths_dict[model_index], rl_copp.env)
 
-            # speed_headers = ["Linear speed", "Angular speed"]
-
             if i == 0:
                 # Get the first observation from the BS3 environment
                 observation, *_ = rl_copp.env.envs[0].reset()
 
-            
             # Reset variables to start the iteration
             terminated = False
             truncated = False
@@ -121,11 +144,10 @@ def main(args):
             # it will continue trying to get the best reward using the trained model.
             while not (terminated or truncated):
                 action, _states = model.predict(observation, deterministic=True)
-                observation, _, terminated, truncated, info = rl_copp.env.envs[0].step(action)
+                observation, _, terminated, truncated, _info = rl_copp.env.envs[0].step(action)
 
             _, final_target_distance, time_reach_target, reward_target, _, collision_flag, max_achieved, target_zone = utils.get_metrics_test(rl_copp.env.envs[0].unwrapped)
                 
-
             # Reset the environment and get an observation
             observation, *_ = rl_copp.env.envs[0].reset()
 
@@ -139,11 +161,9 @@ def main(args):
                 episode_distance = utils.calculate_episode_distance(trajs_folder, traj_file)
                 logging.info(f"Episode distance calculated: {episode_distance} m for traj file {traj_file}")
 
-
             metrics_writer.writerow([model_name, action_times[i], target_name, final_target_distance, 
                                     time_reach_target, reward_target, target_zone, collision_flag,
                                     episode_distance, terminated, truncated, max_achieved])
-
 
     # Finish the testing process
     rl_copp.env.envs[0].unwrapped._commstoagent.stepExpFinished()
@@ -153,7 +173,6 @@ def main(args):
     rl_copp.stop_coppelia_sim()
 
     # Create a summary CSV file
-
     # Read the metrics just written
     df_metrics = pd.read_csv(scene_path_metrics_csv)
 

@@ -1,8 +1,28 @@
+"""
+This script serves as the simulation-side handler for CoppeliaSim integration in the RL-Coppelia framework.
+It initializes the agent based on robot type, handles the interaction between the agent and the environment, 
+saves scene configurations and robot trajectories, and manages control logic through simulation lifecycle callbacks.
+
+Usage:
+    This script is designed to be used within CoppeliaSim's threaded environment and expects to be called via:
+        - sysCall_init(): Initialization logic.
+        - sysCall_thread(): Agent setup before simulation steps begin.
+        - sysCall_sensing(): Executes each simulation step, processes actions, and stores data.
+
+Features:
+    - Dynamically finds the RL-Coppelia source directory and loads common utilities and agent classes.
+    - Automatically creates necessary directories for logs and scene saving.
+    - Supports both TurtleBot and BurgerBot agents.
+    - Communicates with an external RL training process using a communication port.
+    - Captures robot trajectories and can save scene configurations.
+"""
+
 import logging
 import os
 import shutil
 import sys
 
+# Locate rl_coppelia installation and append the source folder to sys.path
 project_folder = shutil.which("rl_coppelia")
 common_paths = [
         os.path.expanduser("~/Documents"),  # Search in Documents folder
@@ -25,7 +45,7 @@ sys.path.append(os.path.abspath(os.path.join(project_path,"src")))
 from common import utils
 from common.coppelia_agents import BurgerBotAgent, TurtleBotAgent
 
-
+# Global variables for the simulation context
 sim = None
 agent = None
 verbose = 1
@@ -35,7 +55,7 @@ agent_created = False
 
 def sysCall_init():
     """
-    Initialize the simulation.
+    Called at the beginning of the simulation to configure logging and path setup. It alseo receives variable data from the RL side.
     """
     global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_env, comms_port, paths, file_id, scene_to_load_folder, save_scene, save_traj, action_times, model_name
     sim = require('sim')    # type: ignore
@@ -54,8 +74,6 @@ def sysCall_init():
     save_traj = None
     action_times = None
 
-    # If agent received a scene_config_path from Python RL side, it means that the user wants to load a scene configuration
-
     # Generate needed routes for logs and tf
     paths = utils.get_robot_paths(base_path, robot_name, agent_logs=True)
     file_id = utils.get_file_index(model_name, paths["tf_logs"], robot_name)
@@ -66,6 +84,9 @@ def sysCall_init():
 
 
 def sysCall_thread():
+    """
+    Called once after simulation starts to create the agent and configure paths.
+    """
     global sim, agent, robot_name, params_env, comms_port, sim_initialized, model_ids, paths, file_id, scene_to_load_folder, save_scene, save_traj, agent_created, action_times, model_name
 
     if sim_initialized:
@@ -80,9 +101,11 @@ def sysCall_thread():
             agent = TurtleBotAgent(sim, params_env, paths, file_id, comms_port=comms_port)
         logging.info("Agent initialized")
 
+        # Configure scene and trajectory behavior
         agent.scene_to_load_folder = scene_to_load_folder
         agent.save_scene = save_scene
         agent.model_ids = model_ids
+        agent.action_times = action_times
 
         # Set the folder where the trajectories will be saved (inside testing_metrics folder)
         if model_name is None:
@@ -98,14 +121,11 @@ def sysCall_thread():
                 "trajs"
             )
 
-        agent.action_times = action_times
-
         if agent.save_scene:
             os.makedirs(agent.save_scene_csv_folder, exist_ok=True)
             logging.info(f"Scene configurations will be saved in: {agent.save_scene_csv_folder}.")
 
-        # Check if there is any path at agent.load_scene_path. If that is the case, it doesn't make sense to not save the trajectory,
-        # so agent.save_traj will be overrieded to True
+        # Automatically force save_traj=True if loading from a predefined scene
         if agent.scene_to_load_folder =="" or agent.scene_to_load_folder is None:
             agent.save_traj = save_traj
             if agent.save_traj:
@@ -121,10 +141,9 @@ def sysCall_thread():
 
 def sysCall_sensing():
     """
-    Main loop to continuously handle instructions and actions.
-    """  
+    Called at each simulation step. Executes the agent's action and logs trajectories.
+    """
     global sim, agent, verbose, agent_created
-    initial_realTime = 0
     
     if agent and not agent.finish_rec and agent_created:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
@@ -159,6 +178,7 @@ def sysCall_sensing():
         logging.info(" ----- END OF EXPERIMENT ----- ")
         agent.finish_rec = False
 
+    # Time tracking setup
     if agent and not agent.training_started:
         agent.initial_realTime = sim.getSystemTime()
         agent.initial_simTime = sim.getSimulationTime()

@@ -1,25 +1,45 @@
-import csv
-import datetime
-import glob
+"""
+Project: Robot Training and Testing RL Algorithms in CoppeliaSim
+Author: Adrián Bañuls Arias
+Version: 1.0
+Date: 2025-03-25
+License: GNU General Public License v3.0
+
+Description:
+    This script trains a reinforcement learning agent in a simulated CoppeliaSim environment using Stable-Baselines3.
+    It supports configuration via parameter files, headless mode, logging, and can run in parallel with other training or 
+    testing processes.
+    Models and logs are saved automatically for later analysis and visualization.
+
+Usage:
+    rl_coppelia train --robot_name <robot_name>
+                      [--scene_path <path_to_scene_file>]
+                      [--dis_parallel_mode]
+                      [--no_gui]
+                      [--params_file <path_to_config_file>]
+                      [--timestamp <timestamp>]
+                      [--verbose <0|1|2|3>]
+
+Features:
+    - Automatically starts a CoppeliaSim instance and prepares the training environment.
+    - Supports parallel and sequential training modes.
+    - Allows GUI-less execution for headless servers.
+    - Loads training configuration from a user-defined parameters file.
+    - Saves trained models, logs, and metrics for evaluation and visualization.
+    - Detailed logging system with multiple verbosity levels and file output.
+    - Automatically creates output directories for models, logs, and metrics.
+    - Can be launched directly from the GUI or terminal with CLI arguments.
+"""
+
 import inspect
 import logging
 import os
 import shutil
-
-import numpy as np
-# os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # If you don't want logs from Tensorflow to be displayed
-import sys
 import time
 import stable_baselines3
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
 from stable_baselines3.common.callbacks import CheckpointCallback
-from tensorboard.backend.event_processing import event_accumulator
-import threading
-import select
-from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
-from stable_baselines3.common.results_plotter import load_results, ts2xy
-from stable_baselines3.common.evaluation import evaluate_policy
 import traceback
 
 
@@ -124,14 +144,12 @@ def main(args):
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
                 callback=[checkpoint_callback, stop_callback, eval_train_callback, metrics_callback], 
-                # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs"
                 )
         else:
             model.learn(
                 total_timesteps=rl_copp.params_train['total_timesteps'],
                 callback=[checkpoint_callback, stop_callback, eval_train_callback, metrics_callback], 
-                # log_interval=25, # This is will be also the minimum timesteps to store a data in a tf.events file.
                 tb_log_name=f"{rl_copp.args.robot_name}_tflogs",
                 progress_bar = True
                 )
@@ -145,7 +163,6 @@ def main(args):
     end_time = time.time()
 
     # Save the final trained model
-    
     logging.info(f"PATH TO SAVE MODEL: {to_save_model_path}")
     model.save(os.path.join(to_save_model_path, f"{model_name}_last"))
 

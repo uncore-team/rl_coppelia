@@ -4,9 +4,7 @@ import math
 import os
 import random
 import sys
-
 import pandas as pd
-
 from common import utils
 from spindecoupler import AgentSide # type: ignore
 from socketcomms.comms import BaseCommPoint # type: ignore
@@ -22,30 +20,56 @@ class CoppeliaAgent:
         environment simulates the robot's movement in response to actions.
         
         Args:
-            sim: Coppelia object for handling the scene's objects.
-            params_env (dict): Dictionary of parameters for configuring the agent.
-            comms_port (int, optional): The port to be used for communication with the RL system. Defaults to 49054.
-        
+            sim (object): CoppeliaSim simulation object, used to interact with the scene.
+            params_env (dict): Dictionary containing environment configuration parameters.
+            paths (dict): Dictionary containing necessary filesystem paths for logs, configs, and metrics.
+            file_id (str): Unique identifier for the current experiment or training session.
+            comms_port (int, optional): Communication port for connecting with the RL system. Defaults to 49054.
+
         Attributes:
-            _control_timestep (float): Timestep of the step() cycle in the agent.
-            _rltimestep (float): Timestep (or action time) of a RL step (not of an Agent step; the timestep of the Agent step is self._control_timestep)
-            _waitingforrlcommands (bool): True if the agent is in waiting state, False if it's in execution state.
-            _lastaction (dict): Dictionary that stores the data of the last action.
-            _lastactiont0 (float): Timestep of the instant when the last action started.
-            reward (float): Reward for the current step, received by the RLSide.
-            execute_cmd_vel (bool): Flag for executing or not the cmd_vel script inside CoppeliaSim scene.
-            sim (CoppeliaObject): Simulation object from CoppeliaSim.
-            robot (CoppeliaObject): Robot object in CoppeliaSim scene.
-            target (CoppeliaObject): Target object in CoppeliaSim scene.
-            robot_baselink (CoppeliaObject): Object of the robot's basein CoppeliaSim scene.
-            laser (CoppeliaObject): Lase object in CoppeliaSim scene.
-            generator (CoppeliaObject): Obstacles' generator object in CoppeliaSim scene.
-            handle_laser_get_observation_script (CoppeliaObject): Handle for using the script which gets the laser observations in CoppeliaSim scene.
-            handle_obstaclegenerators_script (CoppeliaObject): Handle for using the script which generates the obstacles in CoppeliaSim scene.
-            handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
-            _commstoRL (AgentSide): Object to interact with the RL side.
-            finish_rec (bool): Flag activated when a FINISH command is received from RL side.
-            params_env (dict): Dictionary of parameters for configuring the agent.
+            _control_timestep (float): Timestep used by the simulation engine.
+            _rltimestep (float): Timestep used by the RL algorithm to issue new actions.
+            _waitingforrlcommands (bool): Whether the agent is waiting for new commands from RL.
+            _lastaction (dict): The most recent action executed.
+            _lastactiont0_sim (float): Simulation timestamp of the last action start.
+            _lastactiont0_wall (float): Wall-clock timestamp of the last action start.
+            lat_sim (float): Simulated latency between actions.
+            lat_wall (float): Wall-clock latency between actions.
+            current_sim_offset_time (float): Elapsed simulated time in the current episode.
+            current_wall_offset_time (float): Elapsed real time in the current episode.
+            reward (float): Current step reward.
+            execute_cmd_vel (bool): Whether to send velocity commands to CoppeliaSim.
+            colorID (int): Color identifier for visualizing actions in the simulation.
+            robot (object): Handle to the robot model in the CoppeliaSim scene.
+            robot_baselink (object): Handle to the base of the robot for position tracking.
+            target (object): Handle to the target object.
+            laser (object): Handle to the laser scanner sensor.
+            generator (object): Handle to the obstacle generator object.
+            handle_robot_scripts (object): Script handle for controlling robot motion.
+            handle_laser_get_observation_script (object): Script handle for laser observation extraction.
+            handle_obstaclegenerators_script (object): Script handle for obstacle generation.
+            sim (object): Reference to the CoppeliaSim interface.
+            params_env (dict): Environment parameters.
+            paths (dict): Filesystem paths used during execution.
+            experiment_id (str): Current experiment ID.
+            file_id (str): Alias for experiment_id.
+            save_scene (bool): Whether to save the current scene configuration.
+            scene_configs_path (str): Path to folder containing scene configurations.
+            save_scene_csv_folder (str): Output directory for scene CSVs.
+            save_traj (bool): Whether to save trajectory information.
+            save_trajs_path (str): Directory for saving trajectory CSVs.
+            save_traj_csv_folder (str): Directory for the current trajectory output.
+            model_ids (list): List of model IDs used in the experiment.
+            trajectory (list): List of 2D coordinates forming the robot’s trajectory.
+            episode_idx (int): Current episode number.
+            action_times (list): Optional list of action durations for each episode.
+            scene_to_load_folder (str): Folder name of the scene to load from disk.
+            training_started (bool): Flag that is True once training begins.
+            finish_rec (bool): True when the FINISH command is received from RL.
+            reset_flag (bool): Internal flag to signal that a RESET was requested.
+            crash_flag (bool): Internal flag to indicate that a collision occurred.
+            first_reset_done (bool): Whether the first reset has been completed.
+            _commstoRL (AgentSide): Communication interface with the RL side.
         
         Methods:
             get_observation(): It must be called only by the agent to get an observation from the CoppeliaSim scene.
@@ -90,23 +114,6 @@ class CoppeliaAgent:
 
         self.paths = paths
         self.first_reset_done = False
-
-        # retries = 0
-        # MAX_RETRIES = 5
-        
-        ## AgentSide doesn't have a timeout, so we do this loop in case that Coppelia scene is executed before the RL.
-        # while retries < MAX_RETRIES:
-        #     try:
-        #         logging.info(f"Trying to establish communication using the port {comms_port}")
-        #         self._commstoRL = AgentSide(BaseCommPoint.get_ip(),comms_port)
-        #         break
-        #     except Exception as e:
-        #         logging.error(f"Connection with RL failed: {str(e)}. Retrying in few secs...")
-        #         retries += 1
-        #         if retries >= MAX_RETRIES:
-        #             logging.error("Max retries reached. Exiting.")
-        #             raise Exception("Failed to establish connection with RL after multiple attempts.")
-        #         self.sim.wait(2)
         
         # AgentSide doesn't have a timeout, so we do this loop in case that Coppelia scene is executed before the RL.
         while True:
@@ -130,7 +137,6 @@ class CoppeliaAgent:
         self.scene_to_load_folder = ""
         self.id_obstacle = 0
         self.action_times = []
-        # self.load_scene = True
 
         # Needed for saving scenes
         self.save_scene = False
@@ -201,9 +207,7 @@ class CoppeliaAgent:
         self.sim.setShapeMass(obs, 1000)
         self.sim.resetDynamicObject(obs)
         
-
         return
-
 
 
     def reset_simulator(self):
@@ -292,7 +296,7 @@ class CoppeliaAgent:
 
                 df = pd.read_csv(scene_path)
 
-                # Obtener todas las filas que son targets
+                # Get all rows that contain targets
                 target_rows = df[df['type'] == 'target'].reset_index(drop=True)
                 num_targets = len(target_rows)
 
@@ -300,16 +304,16 @@ class CoppeliaAgent:
                     logging.error("No targets found in the scene CSV.")
                     sys.exit()
 
-                # Calcular qué target usar en este episodio
+                # Get what target will be used for each episode
                 target_idx = self.episode_idx // (len(self.action_times) // num_targets)
-                target_idx = min(target_idx, num_targets - 1)  # proteger por si acaso
+                target_idx = min(target_idx, num_targets - 1)  
 
-                # Inicializar contador para saber qué target aplicar
+                # Initialize target counter
                 current_target_idx = 0
 
                 for _, row in df.iterrows():
                     x, y = row['x'], row['y']
-                    z = 0.06969 if row['type'] == "robot" else 0.0
+                    z = 0.06969 if row['type'] == "robot" else 0.0  # Set height for placing the robot
 
                     if row['type'] == 'robot':
                         self.sim.setObjectPosition(self.robot_baselink, -1, [x, y, z])
@@ -328,65 +332,30 @@ class CoppeliaAgent:
                 logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
                 logging.info(f"Episode {self.episode_idx}: Using target #{target_idx} with position {target_rows.iloc[target_idx][['x','y']].tolist()}")
 
-
-            # df = pd.read_csv(scene_path)
-
-            # if self.episode_idx < len(self.action_times):
-            #     self.id_obstacle = 0
-            #     # CSV path
-            #     csv_folder = os.path.join(self.paths["scene_configs"], self.scene_to_load_folder)  
-            #     scene_path = utils.find_scene_csv_in_dir(csv_folder)
-            #     if not os.path.exists(scene_path):
-            #         logging.error(f"[ERROR] CSV scene file not found: {scene_path}")
-            #         sys.exit()
-                
-            #     for _, row in df.iterrows():
-            #         x, y = row['x'], row['y']
-            #         z = 0.06969 if row['type'] == "robot" else 0.0
-
-            #         if row['type'] == 'robot':
-            #             self.sim.setObjectPosition(self.robot_baselink, -1, [x, y, z])
-            #             theta = float(row['theta']) if 'theta' in row and not pd.isna(row['theta']) else 0
-            #             self.sim.setObjectOrientation(self.robot_baselink, -1, [0, 0, theta])
-
-            #         elif row['type'] == 'target':
-            #             self.sim.setObjectPosition(self.target, -1, [x, y, 0])
-
-            #         elif row['type'] == 'obstacle':
-            #             self.id_obstacle = self.id_obstacle + 1
-            #             self.generate_obs_from_csv(row)
-
-            #     logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
-
-
         # Save current scene configuration for further analysis
         if self.save_scene:
             
-            
-            # Crear lista donde guardaremos los datos
+            # Create list to save all the elements
             scene_elements = []
 
-            # Obtener y guardar posición del robot
+            # Get and save the position and orientation of the robot
             robot_pos = self.sim.getObjectPosition(self.robot_baselink, -1)
             robot_ori = self.sim.getObjectOrientation(self.robot_baselink, -1)
             scene_elements.append(["robot", robot_pos[0], robot_pos[1], robot_ori[2]]) 
 
-            # Obtener y guardar posición del target
+            # Get and save target position
             target_pos = self.sim.getObjectPosition(self.target, -1)
             scene_elements.append(["target", target_pos[0], target_pos[1]])
 
-            # Obtener obstáculos (asumiendo que están bajo self.generator)
+            # Get obstacles (assuming that they are located under self.generator object in Coppelia scene)
             obstacles = self.sim.getObjectsInTree(self.generator, self.sim.handle_all, 1)
             for obs_handle in obstacles:
                 obs_pos = self.sim.getObjectPosition(obs_handle, -1)
                 scene_elements.append(["obstacle", obs_pos[0], obs_pos[1]])
-
-            # Ruta para guardar el CSV (en la carpeta de la escena)
             
-
             csv_path = os.path.join(self.save_scene_csv_folder, f"scene_{self.episode_idx}.csv")
                 
-            # Guardar el archivo CSV
+            # Save CSV file
             with open(csv_path, mode="w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["type", "x", "y", "theta"])
@@ -395,6 +364,7 @@ class CoppeliaAgent:
             logging.info(f"Scene saved in CSV: {csv_path}")
 
         self.episode_idx = self.episode_idx + 1
+
         # Set first reset flag to True
         if (self.episode_idx<=1):
             self.first_reset_done = True
@@ -523,31 +493,10 @@ class CoppeliaAgent:
                         logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}")
                         self._commstoRL.stepSendLastActDur(self.lat_sim, self.lat_wall)
                         logging.info("LAT already sent")
-
-
-
-                    # if self.first_reset_done and self.reset_flag:
-                    #     # Reset timing variables after resetting the scene
-                    #     print("inside first_reset_done actions")
-                    #     self._lastactiont0_sim = 0.0
-                    #     self._lastactiont0_wall = 0.0
-                    #     self.episode_start_time_sim = self.sim.getSimulationTime()
-                    #     self.episode_start_time_wall = self.sim.getSystemTime()
-                    #     self.reset_flag = False
-                    #     self.first_reset_done = False
-
-                    # if self.reset_flag:
-                    #     print("inside reset_flag actions")
-                    #     self.episode_start_time_sim = self.sim.getSimulationTime()
-                    #     self.episode_start_time_wall = self.sim.getSystemTime()
-                    #     self.reset_flag = False
-
                     
                     self._waitingforrlcommands = False # from now on, we are waiting to execute the action
                     self.execute_cmd_vel = True
                     
-                    
-            
                 # RESET received
                 elif rl_instruction[0] == AgentSide.WhatToDo.RESET_SEND_OBS:
                     logging.info("Received: RESET_SEND_OBS")
@@ -583,10 +532,6 @@ class CoppeliaAgent:
                     self._commstoRL.resetSendObs(observation, simTime)
 
                     action = None
-                    
-                    # # Reset timing variables after resetting the scene
-                    # self._lastactiont0 = 0.0
-                    # self.episode_start_time = self.sim.getSimulationTime()
                     self.reset_flag = True
                     
                 # FINISH received --> the loop ends (train or inference has finished)

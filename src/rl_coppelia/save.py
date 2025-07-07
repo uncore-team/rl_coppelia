@@ -1,3 +1,25 @@
+"""
+Project: Robot Training and Testing RL Algorithms in CoppeliaSim
+Author: Adrián Bañuls Arias
+Version: 1.0
+Date: 2025-03-25
+License: GNU General Public License v3.0
+
+Usage:
+    rl_coppelia save --model_name <robot_name>_model_<id>
+                     --new_name <new_model_name>
+                     [--verbose <0|1|2|3>]
+
+Features:
+    - Validates the format of the model name to extract robot name and ID.
+    - Gathers model weights, training callbacks, training/test metrics, TensorBoard logs, and parameter configuration.
+    - Automatically renames internal files to match the new name.
+    - Filters test results and training logs relevant to the specified model.
+    - Saves the complete dataset into a single ZIP file under the `results/` folder.
+    - Keeps a log file mapping original names to the new names for traceability.
+    - Useful for model sharing, versioning, or final packaging before deployment.
+"""
+
 import datetime
 import logging
 import os
