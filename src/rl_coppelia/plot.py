@@ -1109,7 +1109,7 @@ def plot_reward_comparison_from_csv(rl_copp_obj, x_axis_name="Steps"):
 
     # Add labels, legend, and grid
     plt.xlabel(x_axis_name, fontsize=18, labelpad=10)
-    plt.ylabel("Reward", fontsize=18, labelpad=10)
+    plt.ylabel("Reward", fontsize=18, labelpad=6)
     # plt.title("Reward Comparison Across Models", fontsize=16)
     plt.legend(fontsize=16)
     plt.tick_params(axis='both', which='major', labelsize=16)
@@ -1326,11 +1326,12 @@ def plot_speed_and_lat(rl_copp_obj, model_index):
     df_otherdata = df_otherdata.iloc[1:].reset_index(drop=True)
 
     steps = df_otherdata.index  # Each row represents a step
+    timestep = float(timestep)
 
     # Create mask depending on the timestep
     if timestep >= 0.45:
         mask = (df_testdata['Target zone'] == 3) & (df_testdata['TimeSteps count'] > 1)
-    elif timestep >=0.15 and timestep <=0.3:
+    elif timestep >=float(0.15) and timestep <=0.3:
         mask = (df_testdata['Target zone'] == 2) & (df_testdata['TimeSteps count'] > 1)
     
     if mask is not None:
@@ -1431,6 +1432,7 @@ def plot_distance_and_lat(rl_copp_obj, model_index):
     df_otherdata = df_otherdata.iloc[1:].reset_index(drop=True)
 
     steps = df_otherdata.index  # Each row represents a step
+    timestep = float(timestep)
 
     # Create mask depending on the timestep
     if timestep >= 0.45:
