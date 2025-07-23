@@ -2459,7 +2459,7 @@ def plot_metric_boxplot_by_timestep(df, metric, ylabel, color='#2678b0'):
     # X-axis configuration
     ax.set_xticks(valid_timesteps)
     ax.set_xlim(min(valid_timesteps) - 0.2, max(valid_timesteps) + 0.1)
-    ax.set_xticklabels([f"{t}" for t in valid_timesteps], fontsize=14, rotation=90)
+    ax.set_xticklabels([f"{t}" for t in valid_timesteps], fontsize=14, rotation=0)
 
     # Labels and grid
     ax.set_xlabel("Timestep (s)", fontsize=20, labelpad=10)

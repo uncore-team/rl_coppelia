@@ -502,6 +502,87 @@ def plot_convergence_comparison (rl_copp_obj, title = "Convergence Comparison ")
             plt.show()
 
 
+def plot_convergence_comparison_cloud (rl_copp_obj, title = "Convergence Comparison "):
+    """
+    Plot a scatter plot of convergence points for multiple models vs. their timesteps.
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Instance used to access arguments and file paths.
+        title (str): Base title for each plot.
+    """
+
+    # Define the x-axis options
+    x_axis = "Steps"
+
+    # Get the training csv path for later getting the action times from there
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")
+    timestep = []
+    n_models = len(rl_copp_obj.args.model_ids)
+    convergence_point_list = []
+
+    # Generate a color map for the models
+    color_map = utils.get_color_map(n_models)
+    
+    plt.figure(figsize=(10, 6))
+
+    max_convergence_point = 0  # Track the maximum convergence point for this category
+
+    for model_index, model_id in enumerate(rl_copp_obj.args.model_ids):
+        # Get timestep of the selected model
+        model_name = f"{rl_copp_obj.args.robot_name}_model_{model_id}"
+        timestep.append(float(utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)")))
+        
+        # CSV File path to get data from
+        file_pattern = f"{model_name}_*.csv"
+        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "training_metrics", file_pattern))
+
+        if not files:
+            continue
+
+        # Get convergence point and reward data
+        convergence_point, *_ = utils.get_convergence_point(files[0], x_axis, convergence_threshold=0.01)
+
+        # Add convergence point to the list for cloud plot
+        convergence_point_list.append(convergence_point)
+
+    # Update the maximum convergence point
+    max_convergence_point = max(convergence_point_list)
+
+    # Convert convergence points to thousands for visualization
+    convergence_point_list = np.array(convergence_point_list) / 1000.0
+
+    # Plot curve and vertical line
+    plt.scatter(timestep, convergence_point_list, c='blue', s=80, edgecolors='black')
+
+    # for t, y in zip(timestep, convergence_point_list):
+    #     plt.text(t, y + 1, f"{t:.2f}s", fontsize=12, ha='center')
+
+    plt.xlabel("Timestep (s)", fontsize=16)
+    plt.ylabel("Convergence point (Steps × 10³)", fontsize=16)
+
+    plt.tick_params(axis='both', which='major', labelsize=22)
+    plt.xticks(sorted(set(timestep)), [f"{t:.2f}" for t in sorted(set(timestep))], rotation=45)
+    plt.yticks(np.arange(0, max(convergence_point_list) + 5, 50), fontsize=14)
+    # plt.xlim(0, max_convergence_point * 1.2 / 1000)
+
+    # Title and legend
+    # plt.title(f"{title} ({conv_type})", fontsize=24)
+    plt.legend(loc='lower right', fontsize=18, ncol=utils.get_legend_columns(n_models, items_per_column=4))
+
+    # Layout and save/show
+    plt.grid()
+    plt.tight_layout()
+    if rl_copp_obj.args.save_plots:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"convergence_cloud_{x_axis}_{timestamp}.png"
+        plt.savefig(filename)
+        plt.close()
+    else:
+        plt.show()
+
+
+
 def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribution by Intervals"):
     """
     Creates a grouped bar chart showing the distribution of values across multiple models.
@@ -615,7 +696,7 @@ def plot_grouped_bar_chart(rl_copp_obj, mode, num_intervals=10, title=" Distribu
         # plt.title(data_keys[id_data] + title, fontsize=16, pad=20)
         plt.xticks(r, interval_labels, rotation=30 if mode == "speeds" else 0, ha='right', fontsize=20)  # rotate labels for speed (many intervals)
         plt.yticks(fontsize=20)
-        plt.legend(fontsize=17, ncol = utils.get_legend_columns(len(timestep), items_per_column=4)) # maybe you will have to add this: bbox_to_anchor=(1.05, 1)
+        plt.legend(fontsize=17, ncol = utils.get_legend_columns(len(timestep), items_per_column=5)) # maybe you will have to add this: bbox_to_anchor=(1.05, 1)
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
 
@@ -982,76 +1063,76 @@ def plot_lat_curves(rl_copp_obj, model_index):
         file_pattern = f"{model_name}_*_otherdata_*.csv"
         subfolder_pattern = f"{model_name}_*_testing"
         files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", robot_name, "testing_metrics", subfolder_pattern, file_pattern))
-        lat_file = files[0] # If there are several files, we just take one
     else:
-        lat_file = rl_copp_obj.args.lat_file_path
+        files = rl_copp_obj.args.lat_file_path
 
-    # Read CSV
-    logging.info(f"Reading file: {lat_file}")
-    df = pd.read_csv(lat_file)
+    for lat_file in files:
+        # Read CSV
+        logging.info(f"Reading file: {lat_file}")
+        df = pd.read_csv(lat_file)
 
-    # Remove the first row as LAT is 0
-    df = df.iloc[1:].reset_index(drop=True)
-    
-    # Just show the first 100 episodes as it is enough for the visualization
-    if 'Episode number' in df.columns:
-        df = df[df['Episode number'] <= 100]
-    
-    if rl_copp_obj.args.lat_fixed_timestep == 0:
-        try:
-            timestep = (utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
-        except Exception as e:
-            logging.error(f"You probably forgot to specify the timestep by --lat_fixed_timestep argument, please check it. Error message: {e}")
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(df.index, df["LAT-Sim (s)"], label="LAT-Agent (s)", color='tab:blue', linewidth=2, zorder = 3)
-        plt.plot(df.index, df["LAT-Wall (s)"], label="LAT-Wall (s)", color='tab:orange', linewidth=2, zorder = 2)
+        # Remove the first row as LAT is 0
+        df = df.iloc[1:].reset_index(drop=True)
         
-    else:    # This case is used for some special cases in which we don't have the model data in the train_records file
-        timestep = rl_copp_obj.args.lat_fixed_timestep
-        timestep_unit = rl_copp_obj.args.timestep_unit
-        if timestep_unit == "s":
-            factor =  1
-        elif timestep_unit == "ms":
-            factor =  1000
-        elif timestep_unit == "us":
-            factor =  1000000
+        # Just show the first 100 episodes as it is enough for the visualization
+        if 'Episode number' in df.columns:
+            df = df[df['Episode number'] <= 100]
+        
+        if rl_copp_obj.args.lat_fixed_timestep == 0:
+            try:
+                timestep = (utils.get_data_from_training_csv(model_name, train_records_csv_name, column_header="Action time (s)"))
+            except Exception as e:
+                logging.error(f"You probably forgot to specify the timestep by --lat_fixed_timestep argument, please check it. Error message: {e}")
 
-        # Detect the correct LAT column name (could be LAT-Wall or any column containing 'LAT')
-        lat_col = None
-        for col in df.columns:
-            if "LAT" in col:
-                lat_col = col
-                break
-        if lat_col is not None:
-            df[lat_col] = df[lat_col] / factor  # Convert LAT unit
+            plt.figure(figsize=(10, 6))
+            plt.plot(df.index, df["LAT-Sim (s)"], label="LAT-Agent (s)", color='tab:blue', linewidth=2, zorder = 3)
+            plt.plot(df.index, df["LAT-Wall (s)"], label="LAT-Wall (s)", color='tab:orange', linewidth=2, zorder = 2)
+            
+        else:    # This case is used for some special cases in which we don't have the model data in the train_records file
+            timestep = rl_copp_obj.args.lat_fixed_timestep
+            timestep_unit = rl_copp_obj.args.timestep_unit
+            if timestep_unit == "s":
+                factor =  1
+            elif timestep_unit == "ms":
+                factor =  1000
+            elif timestep_unit == "us":
+                factor =  1000000
+
+            # Detect the correct LAT column name (could be LAT-Wall or any column containing 'LAT')
+            lat_col = None
+            for col in df.columns:
+                if "LAT" in col:
+                    lat_col = col
+                    break
+            if lat_col is not None:
+                df[lat_col] = df[lat_col] / factor  # Convert LAT unit
+            else:
+                logging.error("LAT column not found in the CSV file.")
+                raise ValueError("LAT column not found in the CSV file.")
+
+            plt.figure(figsize=(10, 6))
+            plt.plot(df.index, df[lat_col], label="LAT (s)", linewidth=1.5, zorder = 2)    
+            
+        # Draw a horizontal line for the timestep value
+        plt.axhline(float(timestep), color="#245000", linestyle='-.', linewidth=2, label=f"Timestep = {timestep}s",xmin=0)
+
+        # Plot configuration
+        plt.xlabel("Steps", fontsize = 22, labelpad=12)
+        plt.ylabel("LAT (s)", fontsize = 22, labelpad=12)
+        plt.tick_params(axis='both', which='major', labelsize=18)
+        # plt.title(f"LAT-Sim and LAT-Wall vs. Steps - Model {timestep}s")
+        plt.legend(fontsize=18) # bbox_to_anchor=(1, 0.5)
+        plt.grid(True)
+        plt.tight_layout()
+
+        # Show/save the plot
+        if rl_copp_obj.args.save_plots:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"lat_curves_{timestep}_{timestamp}.png"
+            plt.savefig(filename)
+            plt.close()
         else:
-            logging.error("LAT column not found in the CSV file.")
-            raise ValueError("LAT column not found in the CSV file.")
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(df.index, df[lat_col], label="LAT (s)", linewidth=1.5, zorder = 2)    
-        
-    # Draw a horizontal line for the timestep value
-    plt.axhline(float(timestep), color="#245000", linestyle='-.', linewidth=2, label=f"Timestep = {timestep}s",xmin=0)
-
-    # Plot configuration
-    plt.xlabel("Steps", fontsize = 22, labelpad=12)
-    plt.ylabel("LAT (s)", fontsize = 22, labelpad=12)
-    plt.tick_params(axis='both', which='major', labelsize=18)
-    # plt.title(f"LAT-Sim and LAT-Wall vs. Steps - Model {timestep}s")
-    plt.legend(fontsize=18) # bbox_to_anchor=(1, 0.5)
-    plt.grid(True)
-    plt.tight_layout()
-
-    # Show/save the plot
-    if rl_copp_obj.args.save_plots:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"lat_curves_{timestep}_{timestamp}.png"
-        plt.savefig(filename)
-        plt.close()
-    else:
-        plt.show()
+            plt.show()
 
 
 def plot_reward_comparison_from_csv(rl_copp_obj, x_axis_name="Steps"):
@@ -1608,6 +1689,14 @@ def main(args):
         else:
             logging.info(f"Plotting convergences-comparison graph for comparing the models {args.model_ids}")
             plot_convergence_comparison(rl_copp)
+    
+    if "convergence_cloud" in args.plot_types:
+        plot_type_correct = True
+        if len(args.model_ids) <= 1:    
+            logging.error(f"Please, introduce more than one model ID for creating a convergence-cloud graph. Models specified: {args.model_ids}")
+        else:
+            logging.info(f"Plotting convergence cloud graph for comparing the models {args.model_ids}")
+            plot_convergence_comparison_cloud(rl_copp)
 
     if "grouped_bar_speeds" in args.plot_types:
         plot_type_correct = True
