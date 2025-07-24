@@ -1312,9 +1312,136 @@ def plot_boxplots_from_csv(rl_copp_obj):
             plt.show()
 
     # ---------- Plots ----------
-    plot_metric("Time (s)", "Balancing time (s)")
+    plot_metric("Time (s)", "Balancing time (ms)")
     plot_metric("Reward", "Reward")
     
+
+
+def plot_boxplots_from_csv_dual_axis(rl_copp_obj):
+    """
+    Plots superimposed boxplots of Reward and Balancing Time for multiple models on a shared X-axis.
+
+    This function reads CSV files corresponding to different model timesteps, each containing
+    the metrics 'Reward' and 'Time (s)'. It then draws:
+    Two Y-axes are used: left for Reward, right for Balancing Time.
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): An instance of the RLCoppeliaManager class.
+
+    Returns:
+        None. The function displays the plot or saves it to disk depending on `save_plots`.
+    """
+
+    combined_data = []
+
+    for model in rl_copp_obj.args.model_ids:
+        csv_path = os.path.join(
+            rl_copp_obj.base_path,
+            "robots",
+            rl_copp_obj.args.robot_name,
+            "Explotation",
+            f"{model}.csv"
+        )
+
+        if not os.path.isfile(csv_path):
+            csv_path = csv_path.replace(".csv", "ms.csv")
+            if not os.path.isfile(csv_path):
+                logging.error(f"[Error] File not found: {csv_path}")
+                continue
+
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception as e:
+            logging.error(f"[Error] Failed to read CSV for model {model}: {e}")
+            continue
+
+        if not all(col in df.columns for col in ["Reward", "Time (s)"]):
+            logging.error(f"[Error] CSV for model {model} must contain 'Reward' and 'Time (s)'")
+            continue
+
+        df["Model"] = model
+        combined_data.append(df)
+
+    if not combined_data:
+        logging.error("[Error] No valid data found.")
+        return
+
+    combined_df = pd.concat(combined_data, ignore_index=True)
+    timesteps = sorted(combined_df["Model"].unique())
+    positions = np.arange(len(timesteps)) * 10
+
+    rewards_data = [combined_df[combined_df["Model"] == t]["Reward"].values for t in timesteps]
+    times_data = [combined_df[combined_df["Model"] == t]["Time (s)"].values for t in timesteps]
+    rewards_medians = [np.median(r) for r in rewards_data]
+    times_medians = [np.median(t) for t in times_data]
+
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Boxplots 
+    ax1.boxplot(rewards_data, positions=positions, widths=4, patch_artist=True,
+                boxprops=dict(facecolor="skyblue", alpha=0.6),
+                medianprops=dict(color="blue"))
+
+    ax2 = ax1.twinx()
+    ax2.boxplot(times_data, positions=positions, widths=4, patch_artist=True,
+                boxprops=dict(facecolor="lightgreen", alpha=0.5),
+                medianprops=dict(color="green"))
+
+    # Spline for reward
+    if len(positions) > 2:
+        spline_r = make_interp_spline(positions, rewards_medians, k=2)
+        x_smooth = np.linspace(min(positions), max(positions), 300)
+        y_smooth_r = spline_r(x_smooth)
+        ax1.plot(x_smooth, y_smooth_r, linestyle='--', color='blue', label='Reward spline')
+        ax1.scatter(positions, rewards_medians, color='blue', marker='x', s=60)
+
+        opt_idx_r = np.argmax(y_smooth_r)
+        opt_x_r = x_smooth[opt_idx_r]
+        opt_y_r = y_smooth_r[opt_idx_r]
+        opt_ts_r = np.interp(opt_x_r, positions, timesteps)
+        ax1.plot(opt_x_r, opt_y_r, marker='o', color='blue',markersize=10, markeredgewidth=3,
+                 label=f'Optimal - reward: {opt_ts_r:.2f} ms')
+
+    # Spline for balancing time
+    if len(positions) > 2:
+        spline_t = make_interp_spline(positions, times_medians, k=2)
+        y_smooth_t = spline_t(x_smooth)
+        ax2.plot(x_smooth, y_smooth_t, linestyle='--', color='darkgreen', label='Balancing time spline')
+        ax2.scatter(positions, times_medians, color='darkgreen', marker='x', s=60)
+
+        opt_idx_t = np.argmax(y_smooth_t)
+        opt_x_t = x_smooth[opt_idx_t]
+        opt_y_t = y_smooth_t[opt_idx_t]
+        opt_ts_t = np.interp(opt_x_t, positions, timesteps)
+        ax2.plot(opt_x_t, opt_y_t, marker='o', color='green',markersize=10, markeredgewidth=3,
+                 label=f'Optimal - balancing: {opt_ts_t:.2f} ms')
+
+    # Plot format
+    ax1.set_xlabel("Timestep (ms)", fontsize=16)
+    ax1.set_ylabel("Reward", fontsize=16, color='blue')
+    ax2.set_ylabel("Balancing time (s)", fontsize=16, color='green')
+    ax1.tick_params(axis='y', labelcolor='blue')
+    ax2.tick_params(axis='y', labelcolor='green')
+    plt.xticks(positions, [str(int(t)) for t in timesteps], fontsize=14)
+
+    # Combine legends
+    handles1, labels1 = ax1.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    fig.legend(handles1 + handles2, labels1 + labels2, loc='upper right', fontsize=12)
+    plt.tight_layout()
+
+    # Save plot
+    if rl_copp_obj.args.save_plots:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"dual_boxplot_superpuesto_{timestamp}.png"
+        plt.savefig(filename)
+        plt.close()
+    else:
+        plt.show()
+
+
+
+
 
 def plot_convergence_points_comparison(rl_copp_obj, convergence_points_by_model):
     """
@@ -1746,7 +1873,8 @@ def main(args):
         if len(args.model_ids)>1:
             logging.info(f"Plotting a reward comparison graph for models {args.model_ids} for robot {args.robot_name}")
             plot_reward_comparison_from_csv(rl_copp, "Episodes")
-            plot_boxplots_from_csv(rl_copp)
+            # plot_boxplots_from_csv(rl_copp)
+            plot_boxplots_from_csv_dual_axis(rl_copp)
     
     if not plot_type_correct:
         logging.error(f"Please check plot types: {args.plot_types}")
