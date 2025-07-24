@@ -558,12 +558,12 @@ def plot_convergence_comparison_cloud (rl_copp_obj, title = "Convergence Compari
     # for t, y in zip(timestep, convergence_point_list):
     #     plt.text(t, y + 1, f"{t:.2f}s", fontsize=12, ha='center')
 
-    plt.xlabel("Timestep (s)", fontsize=16)
-    plt.ylabel("Convergence point (Steps × 10³)", fontsize=16)
+    plt.xlabel("Timestep (s)", fontsize=18, labelpad=12)
+    plt.ylabel("Convergence point (Steps × 10³)", fontsize=18, labelpad=12)
 
-    plt.tick_params(axis='both', which='major', labelsize=22)
+    plt.tick_params(axis='both', which='major', labelsize=16)
     plt.xticks(sorted(set(timestep)), [f"{t:.2f}" for t in sorted(set(timestep))], rotation=45)
-    plt.yticks(np.arange(0, max(convergence_point_list) + 5, 50), fontsize=14)
+    plt.yticks(np.arange(0, max(convergence_point_list) + 5, 50), fontsize=16)
     # plt.xlim(0, max_convergence_point * 1.2 / 1000)
 
     # Title and legend

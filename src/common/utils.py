@@ -2522,11 +2522,13 @@ def get_convergence_point(file_path, x_axis, convergence_threshold=0.02):
     start_fraction=0.001  # For method 1, change this to 0.05 and uncomment method1 code (and comment method 2)
     start_idx = int(len(x_norm) * start_fraction)
     x_norm_window = x_norm[start_idx:]
+    
     reward_window = reward[start_idx:]
     
     # Estimate initial delay
     min_idx = np.argmin(reward_window)
     delay_estimate = x_norm_window[min_idx]
+
 
     initial_estimation = [
         np.max(reward_window) - np.min(reward_window),  # A
