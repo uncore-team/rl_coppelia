@@ -1392,15 +1392,15 @@ def plot_boxplots_from_csv_dual_axis(rl_copp_obj):
         spline_r = make_interp_spline(positions, rewards_medians, k=2)
         x_smooth = np.linspace(min(positions), max(positions), 300)
         y_smooth_r = spline_r(x_smooth)
-        ax1.plot(x_smooth, y_smooth_r, linestyle='--', color='blue', label='Reward spline')
-        ax1.scatter(positions, rewards_medians, color='blue', marker='x', s=60)
+        ax1.plot(x_smooth, y_smooth_r, linestyle='--', color='darkblue', label='Reward spline')
+        ax1.scatter(positions, rewards_medians, color='darkblue', marker='x', s=60)
 
         opt_idx_r = np.argmax(y_smooth_r)
         opt_x_r = x_smooth[opt_idx_r]
         opt_y_r = y_smooth_r[opt_idx_r]
         opt_ts_r = np.interp(opt_x_r, positions, timesteps)
-        ax1.plot(opt_x_r, opt_y_r, marker='o', color='blue',markersize=10, markeredgewidth=3,
-                 label=f'Optimal - reward: {opt_ts_r:.2f} ms')
+        ax1.plot(opt_x_r, opt_y_r, marker='o', color='darkblue',markersize=10, markeredgewidth=3,
+                 label=f'Optimal: {opt_ts_r:.2f} ms')
 
     # Spline for balancing time
     if len(positions) > 2:
@@ -1413,21 +1413,22 @@ def plot_boxplots_from_csv_dual_axis(rl_copp_obj):
         opt_x_t = x_smooth[opt_idx_t]
         opt_y_t = y_smooth_t[opt_idx_t]
         opt_ts_t = np.interp(opt_x_t, positions, timesteps)
-        ax2.plot(opt_x_t, opt_y_t, marker='o', color='green',markersize=10, markeredgewidth=3,
-                 label=f'Optimal - balancing: {opt_ts_t:.2f} ms')
+        ax2.plot(opt_x_t, opt_y_t, marker='o', color='darkgreen',markersize=10, markeredgewidth=3,
+                 label=f'Optimal: {opt_ts_t:.2f} ms')
 
     # Plot format
-    ax1.set_xlabel("Timestep (ms)", fontsize=16)
-    ax1.set_ylabel("Reward", fontsize=16, color='blue')
-    ax2.set_ylabel("Balancing time (s)", fontsize=16, color='green')
-    ax1.tick_params(axis='y', labelcolor='blue')
-    ax2.tick_params(axis='y', labelcolor='green')
-    plt.xticks(positions, [str(int(t)) for t in timesteps], fontsize=14)
+    ax1.set_xlabel("Timestep (ms)", fontsize=20, labelpad=12)
+    ax1.set_ylabel("Reward", fontsize=20, color='darkblue', labelpad=2)
+    ax2.set_ylabel("Balancing time (s)", fontsize=20, color='darkgreen', labelpad=14)
+    ax1.tick_params(axis='y', labelsize=18, labelcolor='darkblue')
+    ax2.tick_params(axis='y', labelsize=18, labelcolor='darkgreen')
+    ax1.set_xticks(positions)
+    ax1.set_xticklabels([str(int(t)) for t in timesteps], fontsize=18)
 
     # Combine legends
     handles1, labels1 = ax1.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
-    fig.legend(handles1 + handles2, labels1 + labels2, loc='upper right', fontsize=12)
+    fig.legend(handles1 + handles2, labels1 + labels2, loc='upper right', fontsize=14, bbox_to_anchor=(0.88, 0.99))
     plt.tight_layout()
 
     # Save plot
