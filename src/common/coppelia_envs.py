@@ -238,6 +238,7 @@ class CoppeliaEnv(gym.Env):
         return adjusted_reward
     
     
+
     def _calculate_reward(self):
         """
         Private method to calculate the reward based on distance.
@@ -247,7 +248,73 @@ class CoppeliaEnv(gym.Env):
         Returns:
             reward (float): The computed reward.
         """
-        laser_obs = list(self.observation.values())[-4:]
+        laser_obs = list(self.observation.values())[-self.params_env["laser_observations"]:]
+        distance = self.observation["distance"]
+
+        if self.crash_flag:
+            logging.info("Crashed detected during the movement")
+            self.collision_flag = True
+            self.terminated=True
+            self.target_zone = 0
+            return self.params_env["crash_penalty"]
+
+        if self.params_env["finish_episode_flag"]:
+            if self.action_dic["finish_flag"]<0.5:
+                logging.info("Agent self truncated.")
+                self.truncated = True
+                self.target_zone = 0
+                if distance>self.params_env["dist_thresh_finish_flag"]:
+                    return self.params_env["finish_flag_penalty"]
+                else:
+                    return 0
+
+        if any(d < self.params_env["max_crash_dist_critical"] for d in laser_obs):
+            logging.info("Crashed")
+            self.collision_flag = True
+            self.terminated=True
+            self.target_zone = 0
+            return self.params_env["crash_penalty"]
+        
+        else:
+            self.collision_flag = False
+
+        if distance < self.params_env["reward_dist_3"]:
+            self.target_zone = 3
+            self.terminated = True
+            return self._compute_adjusted_reward(self.params_env["reward_3"])
+        elif distance < self.params_env["reward_dist_2"]:
+            self.target_zone = 2
+            self.terminated = True
+            return self._compute_adjusted_reward(self.params_env["reward_2"])
+        elif distance < self.params_env["reward_dist_1"]:
+            self.target_zone = 1
+            self.terminated = True
+            return self._compute_adjusted_reward(self.params_env["reward_1"])
+        elif distance > self.params_env["max_dist"] or self.time_elapsed > self.params_env["max_time"]:
+            self.terminated = True
+            logging.info("Max dist or max time achieved")
+            self.max_achieved = True
+            self.target_zone = 0
+            return self.params_env["overlimit_penalty"]
+        else:
+            self.terminated = False
+            self.truncated = False
+            self.max_achieved = False
+            self.collision_flag = False
+            self.target_zone = 0
+            return 0
+
+
+    def _calculate_reward_turtle(self):
+        """
+        Private method to calculate the reward based on distance.
+
+        Args: None
+
+        Returns:
+            reward (float): The computed reward.
+        """
+        laser_obs = list(self.observation.values())[-self.params_env["laser_observations"]:]
         distance = self.observation["distance"]
 
         if self.crash_flag:
@@ -368,11 +435,11 @@ class BurgerBotEnv(CoppeliaEnv):
 
         # Define observation space
         if params_env["obs_time"]:
-            self.observation_space= spaces.Box(low=np.array([0,-math.pi, 0],dtype=np.float32), 
-                                            high=np.array([5, math.pi, 100],dtype=np.float32), dtype=np.float32)
+            self.observation_space= spaces.Box(low=np.array([0,-math.pi, 0, 0, 0, 0, 0, 0, 0, 0, 0],dtype=np.float32), 
+                                            high=np.array([5, math.pi, 4, 4, 4, 4, 4, 4, 4, 4, 100],dtype=np.float32), dtype=np.float32)
         else: 
-            self.observation_space= spaces.Box(low=np.array([0,-math.pi],dtype=np.float32), 
-                                            high=np.array([5, math.pi],dtype=np.float32), dtype=np.float32)
+            self.observation_space= spaces.Box(low=np.array([0,-math.pi, 0, 0, 0, 0, 0, 0, 0, 0],dtype=np.float32), 
+                                            high=np.array([5, math.pi, 4, 4, 4, 4, 4, 4, 4, 4],dtype=np.float32), dtype=np.float32)
 
 
 class TurtleBotEnv(CoppeliaEnv):

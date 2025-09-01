@@ -162,7 +162,7 @@ class CoppeliaAgent:
         Compute the current distance and angle from the robot to the target.
         
         Returns:
-            tuple: distance and angle.
+            tuple: distance, angle and laser observations (if there is a laser sensor).
         """
 
         _, data, _ = self.sim.checkDistance(self.robot_baselink, self.target)
@@ -182,13 +182,45 @@ class CoppeliaAgent:
 
         if self.laser is not None:
             lasers_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
-            return distance, angle, lasers_obs
-        
+            
         else:
-            return distance, angle
-    
+            lasers_obs = None
+
+        return distance, angle, lasers_obs
+        
+
+    def get_observation_space(self):
+        """
+        Returns the observation space of the agent.
+        The observation space includes distance and angle to the target, laser observations (if available), and optionally the action time.
+        """
+        # Get an observation from the agent
+        distance, angle, laser_obs = self.get_observation()
+        observation_space = {
+            "distance": distance,
+            "angles": angle
+        }
+
+        # Add all the laser observations "laser_obs{i}"
+        if laser_obs is not None:
+            for i, val in enumerate(laser_obs):
+                observation_space[f"laser_obs{i}"] = val
+
+        # Add action time to the observation if required
+        if self.params_env["obs_time"]:
+            observation_space["action_time"] = self._rltimestep
+
+        return observation_space
+
 
     def generate_obs_from_csv(self, row):
+        '''
+        Generate an obstacle in the CoppeliaSim scene based on a row from the CSV file.
+        Args: 
+            row (pd.Series): A row from the CSV file containing 'x' and 'y' coordinates for the obstacle.
+        Returns:
+            None
+        '''
         logging.debug(f"Generating obstacles from csv file")
         height_obstacles = 0.4
         size_obstacles = 0.25
@@ -208,6 +240,28 @@ class CoppeliaAgent:
         self.sim.resetDynamicObject(obs)
         
         return
+
+
+    def get_random_target_pos (self):
+        '''
+        Get a random target position inside the container, taking into account the target radius and the container dimensions.
+        
+        Returns:
+            tuple: x and y coordinates of the target position.
+        '''
+        raw_container = self.sim.readCustomBufferData(self.container, '__config__')
+        raw_target = self.sim.readCustomBufferData(self.target, '__config__')
+        cfg_wall   = self.sim.unpackTable(raw_container) if raw_container else {}
+        cfg_target = self.sim.unpackTable(raw_target) if raw_target else {}
+
+        containerSideX    = cfg_wall.get('xSize', None)
+        containerSideY    = cfg_wall.get('ySize', None)
+        outerRadius  = cfg_target.get('outerRadius', None)
+
+        targetPosX = random.uniform(-containerSideX/2 + outerRadius, containerSideX/2 - outerRadius)
+        targetPosY = random.uniform(-containerSideY/2 + outerRadius, containerSideY/2 - outerRadius)
+
+        return targetPosX, targetPosY 
 
 
     def reset_simulator(self):
@@ -273,9 +327,8 @@ class CoppeliaAgent:
             # Randomize target position
             current_target_position = self.sim.getObjectPosition(self.target, -1)
             if current_target_position != [0, 0, 0]:
-                delta_x = random.uniform(-2, 2)
-                delta_y = random.uniform(-2, 2)
-                self.sim.setObjectPosition(self.target, [delta_x, delta_y, 0], -1)
+                posX, posY = self.get_random_target_pos()
+                self.sim.setObjectPosition(self.target, [posX, posY, 0], -1)
 
             if self.generator is not None:
                 # Generate new obstacles
@@ -387,23 +440,7 @@ class CoppeliaAgent:
                 self.execute_cmd_vel = False
 
                 # Get an observation
-                if self.laser is not None:
-                    distance, angle, laser_obs = self.get_observation()
-                    if self.params_env["obs_time"]:
-                        observation = {"distance": distance, "angles": angle, "laser_obs0": laser_obs[0],
-                                        "laser_obs1": laser_obs[1], "laser_obs2":laser_obs[2], 
-                                        "laser_obs3":laser_obs[3], "action_time": self._rltimestep}
-                    else:
-                        observation = {"distance": distance, "angles": angle, "laser_obs0": laser_obs[0],
-                                        "laser_obs1": laser_obs[1], "laser_obs2":laser_obs[2], 
-                                        "laser_obs3":laser_obs[3]}
-                else:
-                    distance, angle = self.get_observation()
-                    if self.params_env["obs_time"]:
-                        observation = {"distance": distance, "angles": angle, 
-                                       "action_time": self._rltimestep}
-                    else:
-                        observation = {"distance": distance, "angles": angle}
+                observation = self.get_observation_space()
                     
                 logging.info(f"Obs send STEP: { {key: round(value, 3) for key, value in observation.items()} }")
 
@@ -418,15 +455,26 @@ class CoppeliaAgent:
             # seconds, the robot can have a collision and then it slides around the obstacle, so when the 5 seconds action 
             # finishes, the robot will be slightly further from the robot, and the collision won't be detected anymore. This
             # is not the desired performance: if there was a collision, then we need to know it.
+            
+            # ---TURTLEBOT
+            # else:
+            #     if self.laser is not None:
+            #         laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
+            #         logging.debug(f"Laser values during movement: {laser_obs}")
+            #         if (
+            #             laser_obs[0] < self.params_env["max_crash_dist_critical"] or
+            #             laser_obs[3] < self.params_env["max_crash_dist_critical"] or
+            #             any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
+            #         ) and not self.crash_flag:
+            #             logging.info("Crash during action execution, episode will finish once the action completes")
+            #             self.crash_flag = True
+            
+            # ---BURGERBOT
             else:
                 if self.laser is not None:
                     laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
                     logging.debug(f"Laser values during movement: {laser_obs}")
-                    if (
-                        laser_obs[0] < self.params_env["max_crash_dist_critical"] or
-                        laser_obs[3] < self.params_env["max_crash_dist_critical"] or
-                        any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
-                    ) and not self.crash_flag:
+                    if any(d < self.params_env["max_crash_dist_critical"] for d in laser_obs) and not self.crash_flag:
                         logging.info("Crash during action execution, episode will finish once the action completes")
                         self.crash_flag = True
 
@@ -505,25 +553,7 @@ class CoppeliaAgent:
                     self.reset_simulator()
                     
                     # Get an observation
-                    if self.laser is not None:
-                        distance, angle, laser_obs = self.get_observation()
-
-                        if self.params_env["obs_time"]:
-                            observation = {"distance": distance, "angles": angle, 
-                                           "laser_obs0": laser_obs[0], "laser_obs1": laser_obs[1], 
-                                           "laser_obs2":laser_obs[2], "laser_obs3":laser_obs[3], 
-                                           "action_time": self._rltimestep}
-                        else:
-                            observation = {"distance": distance, "angles": angle, "laser_obs0": laser_obs[0], "laser_obs1": laser_obs[1], "laser_obs2":laser_obs[2], "laser_obs3":laser_obs[3]}
-
-                    else:
-                        distance, angle = self.get_observation()
-
-                        if self.params_env["obs_time"]:
-                            observation = {"distance": distance, "angles": angle, 
-                                           "action_time": self._rltimestep}
-                        else:
-                            observation = {"distance": distance, "angles": angle}
+                    observation = self.get_observation_space()
 
                     logging.info(f"Obs send RESET: { {key: round(value, 3) for key, value in observation.items()} }")
                     
@@ -566,8 +596,15 @@ class BurgerBotAgent(CoppeliaAgent):
         super(BurgerBotAgent, self).__init__(sim, params_env, paths, file_id, comms_port)
 
         self.robot = sim.getObject("/Burger")
+        self.robot_baselink = self.robot
         self.target = sim.getObject("/Target")
+        self.generator=sim.getObject('/ObstaclesGenerator')
+        self.container = sim.getObject('/ExternalWall')
+        self.laser=sim.getObject('/Burger/Laser')
+        self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
         self.handle_robot_scripts = sim.getScript(1, self.robot)
+        self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')
+        
 
         logging.info(f"BurgerBot Agent created successfully using port {comms_port}.")
 
@@ -597,10 +634,12 @@ class TurtleBotAgent(CoppeliaAgent):
         self.robot=sim.getObject('/Turtlebot2')
         self.robot_baselink=sim.getObject('/Turtlebot2/base_link_respondable')
         self.target=sim.getObject("/Target")
+        self.container = sim.getObject('/ExternalWall')
         self.laser=sim.getObject('/Turtlebot2/fastHokuyo_ROS2')
         self.generator=sim.getObject('/ObstaclesGenerator')
         self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
         self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')
         self.handle_robot_scripts = sim.getScript(1, self.robot)
+        
 
         logging.info(f"TurtleBot Agent created successfully using port {comms_port}.")
