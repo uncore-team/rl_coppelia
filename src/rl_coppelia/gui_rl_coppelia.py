@@ -50,7 +50,41 @@ PLOT_TYPE_DESCRIPTIONS = {
     "bar_target_zones": "Bar chart comparing frequency of reaching each target zone.",
 }
 
-tooltip_text = """<b>Available Plot Types:</b><ul>
+PARAM_TOOLTIPS = {
+    "var_action_time_flag": "Add the action time as a learning variable for the agent, so it will be variable.",
+    "fixed_actime": "Fixed duration (in seconds) for each action.",
+    "bottom_actime_limit": "Minimum allowed action time when 'var_action_time_flag' is set.",
+    "upper_actime_limit": "Maximum allowed action time when 'var_action_time_flag' is set.",
+    "bottom_lspeed_limit": "Minimum linear speed limit.",
+    "upper_lspeed_limit": "Maximum linear speed limit.",
+    "bottom_aspeed_limit": "Minimum angular speed limit.",
+    "upper_aspeed_limit": "Maximum angular speed limit.",
+    "finish_episode_flag": "Enable the robot to decide when to finish the episodes.",
+    "dist_thresh_finish_flag": "Distance threshold for considering an episode successful if 'finish_episode_flag' is set.",
+    "obs_time": "Include time in observation space.",
+    "reward_dist_1": "Threshold for entering in target zone 1.",
+    "reward_1": "Value for reward when reaching target zone 1.",
+    "reward_dist_2": "Threshold for entering in target zone 2.",
+    "reward_2": "Value for reward when reaching target zone 2.",
+    "reward_dist_3": "Threshold for entering in target zone 3.",
+    "reward_3": "Value for reward when reaching target zone 3.",
+    "max_count": "Max number of steps per episode.",
+    "max_time": "Max time per episode.",
+    "max_dist": "Max distance allowed (robot-target).",
+    "finish_flag_penalty": "Penalty if distance between robot and target is under the threshold 'dist_thresh_finish_flag' if 'finish_episode_flag' is set.",
+    "overlimit_penalty": "Penalty for exceed time or distance limit.",
+    "crash_penalty": "Penalty for collision.",
+    "max_crash_dist": "Distance between robot and object to consider a crash.",
+    "max_crash_dist_critical": "Distance between robot and object to consider a crash (for lateral collisions)",
+    "sb3_algorithm": "RL algorithm to use (e.g., SAC, PPO).",
+    "policy": "Network policy type (e.g., MlpPolicy).",
+    "total_timesteps": "Number of training steps.",
+    "callback_frequency": "How often to save a callback.",
+    "n_training_steps": "Steps before each training update.",
+    "testing_iterations": "Number of testing episodes."
+}
+
+PLOT_TOOLTIPS = """<b>Available Plot Types:</b><ul>
 <li><b>spider</b>: Radar chart comparing key performance metrics.</li>
 <li><b>convergence-walltime</b>: Shows model convergence during learning over real time.</li>
 <li><b>convergence-simtime</b>: Shows model convergence during learning over simulation time.</li>
@@ -161,13 +195,11 @@ class ManualParamsDialog(QDialog):
         layout = QGridLayout()  # Use grid layout to align labels and fields
         layout.setHorizontalSpacing(25)  # Add space between label and field columns
 
-        tooltips = self.get_param_tooltips()  # Get tooltips for parameters
-
         row = 0
         col = 0
         for key, value in fields.items():
             label = QLabel(key)
-            label.setToolTip(tooltips.get(key, ""))  # Show tooltip if available
+            label.setToolTip(PARAM_TOOLTIPS.get(key, ""))  # Show tooltip if available
 
             if isinstance(value, bool):
                 field = QCheckBox()  # Use checkbox for boolean parameters
@@ -194,6 +226,10 @@ class ManualParamsDialog(QDialog):
     
 
     def apply_changes(self):
+        '''
+        Gathers input values, validates them, and saves to a new JSON file.
+        Emits a signal with the new filename if successful.
+        '''
         new_data = json.loads(json.dumps(self.default_data))  # Deep copy of original data
 
         for (section, key), widget in self.field_widgets.items():
@@ -240,47 +276,6 @@ class ManualParamsDialog(QDialog):
             self.accept()  # Close the dialog
         except Exception as e:
             QMessageBox.critical(self, "Save error", f"Could not save file: {e}")  # Show error if saving fails
-
-    def get_param_tooltips(self):
-        """
-        Returns a dictionary mapping parameter keys to descriptive tooltips.
-
-        Returns:
-            dict: Tooltip strings for parameter input fields.
-        """
-        return {
-            "var_action_time_flag": "Add the action time as a learning variable for the agent, so it will be variable.",
-            "fixed_actime": "Fixed duration (in seconds) for each action.",
-            "bottom_actime_limit": "Minimum allowed action time when 'var_action_time_flag' is set.",
-            "upper_actime_limit": "Maximum allowed action time when 'var_action_time_flag' is set.",
-            "bottom_lspeed_limit": "Minimum linear speed limit.",
-            "upper_lspeed_limit": "Maximum linear speed limit.",
-            "bottom_aspeed_limit": "Minimum angular speed limit.",
-            "upper_aspeed_limit": "Maximum angular speed limit.",
-            "finish_episode_flag": "Enable the robot to decide when to finish the episodes.",
-            "dist_thresh_finish_flag": "Distance threshold for considering an episode successful if 'finish_episode_flag' is set.",
-            "obs_time": "Include time in observation space.",
-            "reward_dist_1": "Threshold for entering in target zone 1.",
-            "reward_1": "Value for reward when reaching target zone 1.",
-            "reward_dist_2": "Threshold for entering in target zone 2.",
-            "reward_2": "Value for reward when reaching target zone 2.",
-            "reward_dist_3": "Threshold for entering in target zone 3.",
-            "reward_3": "Value for reward when reaching target zone 3.",
-            "max_count": "Max number of steps per episode.",
-            "max_time": "Max time per episode.",
-            "max_dist": "Max distance allowed (robot-target).",
-            "finish_flag_penalty": "Penalty if distance between robot and target is under the threshold 'dist_thresh_finish_flag' if 'finish_episode_flag' is set.",
-            "overlimit_penalty": "Penalty for exceed time or distance limit.",
-            "crash_penalty": "Penalty for collision.",
-            "max_crash_dist": "Distance between robot and object to consider a crash.",
-            "max_crash_dist_critical": "Distance between robot and object to consider a crash (for lateral collisions)",
-            "sb3_algorithm": "RL algorithm to use (e.g., SAC, PPO).",
-            "policy": "Network policy type (e.g., MlpPolicy).",
-            "total_timesteps": "Number of training steps.",
-            "callback_frequency": "How often to save a callback.",
-            "n_training_steps": "Steps before each training update.",
-            "testing_iterations": "Number of testing episodes."
-        }
 
 
 class RobotAngleSpinBox(QDoubleSpinBox):
@@ -958,8 +953,8 @@ class MainApp(QMainWindow):
 
 
         self.plot_tooltip_label = QLabel(self)
-        self.plot_tooltip_label.setText(tooltip_text)
-        self.plot_tooltip_label.setWindowFlags(Qt.ToolTip)
+        self.plot_tooltip_label.setText(PLOT_TOOLTIPS)
+        # self.plot_tooltip_label.setWindowFlags(Qt.ToolTip)
         self.plot_tooltip_label.setStyleSheet("""
             QLabel {
                 background-color: #ffffe0;
@@ -1367,18 +1362,24 @@ class MainApp(QMainWindow):
                     self.logs_text.append(f"<span style='color:green;'> --- </span> {message}")
 
                 # Construct the params file path
-                params_file_path = os.path.join(self.base_path, "robots", robot_name, "parameters_used", f"params_file_model_{self.experiment_id}.json")
-                # Check if the params file exists
-                if not os.path.exists(params_file_path):
-                    warning_message = f"WARNING: {params_file_path} does not exist. Please check the model name."
-                    logging.warning(warning_message)
-                    # self.test_params_file_input.setText(warning_message)
-                    self.logs_text.append(f"<span style='color:orange;'>{warning_message}</span>")
+                params_file = utils.find_params_file(self.base_path, robot_name, self.experiment_id)
+                if params_file:
+                    params_file_path = os.path.join(self.base_path, "robots", robot_name, "parameters_used", params_file)
+                    # Check if the params file exists
+                    if not os.path.exists(params_file_path):
+                        warning_message = f"WARNING: {params_file_path} does not exist. Please check the model name."
+                        logging.warning(warning_message)
+                        # self.test_params_file_input.setText(warning_message)
+                        self.logs_text.append(f"<span style='color:orange;'>{warning_message}</span>")
+                    else:
+                        message = f"Params file {params_file_path} found for robot {robot_name}."
+                        logging.info(message)
+                        self.test_params_file_input.setText(params_file_path)
+                        self.logs_text.append(f"<span style='color:green;'> --- </span> {message}")
                 else:
-                    message = f"Params file {params_file_path} found for robot {robot_name}."
-                    logging.info(message)
-                    self.test_params_file_input.setText(params_file_path)
-                    self.logs_text.append(f"<span style='color:green;'> --- </span> {message}")
+                    warning_message = f"WARNING: No params file found for experiment ID '{robot_name}_model_{self.experiment_id}'."
+                    logging.warning(warning_message)
+                    self.logs_text.append(f"<span style='color:orange;'>{warning_message}</span>")
                 
             else:
                 self.test_robot_name_input.setText("")  # Clear if format is invalid
@@ -1733,7 +1734,7 @@ class MainApp(QMainWindow):
         # Iterations (optional, default: 50)
         self.test_iterations_input = QSpinBox()
         self.test_iterations_input.setRange(1, 1000)
-        self.test_iterations_input.setValue(5)
+        self.test_iterations_input.setValue(50)
 
         # Verbose level (optional, default: 3)
         self.verbose_input = QSpinBox()
@@ -1765,7 +1766,7 @@ class MainApp(QMainWindow):
         form.addRow("", self.dis_parallel_mode_checkbox)
         form.addRow("", self.no_gui_checkbox)
         form.addRow("Params File (optional):", self.test_params_file_input)
-        form.addRow("Iterations (default: 400):", self.test_iterations_input)
+        form.addRow("Iterations (default: 50):", self.test_iterations_input)
         form.addRow("Verbose Level (default: 1):", self.verbose_input)
 
         # Buttons
@@ -1870,7 +1871,7 @@ class MainApp(QMainWindow):
             self.test_scene_scene_info_label.show()
             self.test_scene_view_scene_button.hide()
 
-        # Mostrar/ocultar botones según la selección
+        # Show/hide edit and delete buttons
         if folder_name and not folder_name.startswith("Select") and folder_name != "Custom scene":
             self.test_scene_edit_scene_button.setVisible(True)
             self.test_scene_delete_scene_button.setVisible(True)
@@ -1880,6 +1881,9 @@ class MainApp(QMainWindow):
 
 
     def handle_edit_scene(self):
+        '''
+        Edit the selected scene folder using the CustomSceneDialog.
+        '''
         folder_name = self.test_scene_scene_to_load_folder_input.currentText().strip()
         if not folder_name or folder_name in ["Select a scene folder to load...", "Custom scene", "Scene configs directory not found", "No scene configs found"]:
             return
@@ -1893,6 +1897,9 @@ class MainApp(QMainWindow):
                 self.test_scene_scene_to_load_folder_input.setCurrentIndex(idx)
 
     def handle_delete_scene(self):
+        '''
+        Delete the selected scene folder after user confirmation.
+        '''
         folder_name = self.test_scene_scene_to_load_folder_input.currentText().strip()
         if not folder_name or folder_name in ["Select a scene folder to load...", "Custom scene"]:
             return
@@ -2170,7 +2177,7 @@ class MainApp(QMainWindow):
         grid_layout = QGridLayout()
         grid_widget.setLayout(grid_layout)
 
-        info_button = self.create_info_button_with_tooltip(tooltip_text)
+        info_button = self.create_info_button_with_tooltip(PLOT_TOOLTIPS)
 
         cols = 2
         for index, plot_type in enumerate(PLOT_TYPES):

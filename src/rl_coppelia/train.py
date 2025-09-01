@@ -127,7 +127,7 @@ def main(args):
             )   
 
     # Make a copy of the configuration file for saving the parameters that will be used for this training
-    utils.copy_json_with_id(rl_copp.args.params_file, parameters_used_path, rl_copp.file_id)
+    params_file_save_path = utils.copy_json_with_id(rl_copp.args.params_file, parameters_used_path, rl_copp.file_id)
 
     logging.warning("Training will start in few seconds. If you want to end it at any time, press 'F' + Enter key, and then 'Y' + Enter key."
                     " It's not recommended to pause and then resume the training, as it will affect the current episode. That said, grab a cup of coffee and enjoy the process ☕️")
@@ -174,7 +174,6 @@ def main(args):
     except:
         last_metric_row = {}
         logging.error("There was an exception while trying to get data from tensorboard log.")
-        # TODO MAnage exception
 
     # Name of the records csv to store the final values of the training experiment.
     records_csv_name = os.path.join(training_metrics_path,"train_records.csv")
@@ -192,7 +191,8 @@ def main(args):
         "Policy" : rl_copp.params_train["policy"],
         "Action time (s)" : rl_copp.params_env["fixed_actime"],
         "Time to converge (h)" : convergence_time,
-        **last_metric_row
+        **last_metric_row,
+        "Params file" : os.path.basename(params_file_save_path)
     }
 
     # Update the train record.

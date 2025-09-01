@@ -721,7 +721,8 @@ def copy_json_with_id(source_path, destination_dir, file_id):
         destination_dir (str): Directory where the file should be copied to.
         file_id (str): The file ID to append to the copied file's name.
     
-    Returns: None
+    Returns:
+        destination_path (str): The path to the copied JSON file with the new name.
     """
     # Ensure the destination directory exists
     if not os.path.exists(destination_dir):
@@ -742,7 +743,7 @@ def copy_json_with_id(source_path, destination_dir, file_id):
 
     logging.info(f"A copy of the parameters file has been copied to {destination_path}")
 
-import csv
+    return destination_path
 
 
 def get_algorithm_for_model(model_name, csv_path):
@@ -1012,6 +1013,35 @@ def process_rl_exploitation_summary(summary_csv_path):
     cleaned_df.to_csv(cleaned_summary_path, index=False)
 
     return cleaned_summary_path
+
+
+def find_params_file(base_path, robot_name, experiment_id):
+    """
+    Finds the parameters file associated with a specific experiment ID for a given robot.
+    Args:
+        base_path (str): Base directory where robot data is stored.
+        robot_name (str): Name of the robot.
+        experiment_id (str): Experiment ID to search for.
+    Returns:
+        str: Path to the parameters file if found, otherwise None.
+    """
+    try:
+        exp_id = f"{robot_name}_model_{experiment_id}"
+        csv_path = os.path.join(base_path, "robots", robot_name, "training_metrics", "train_records.csv")
+
+        df = pd.read_csv(csv_path).fillna("")
+        row = df[df["Exp_id"] == exp_id]
+
+        if not row.empty:
+            params_file = row.iloc[0]["Params file"]
+            return params_file.strip() if isinstance(params_file, str) else None
+        else:
+            logging.warning(f"Exp_id '{exp_id}' not found in {csv_path}")
+            return None
+
+    except Exception as e:
+        logging.error(f"Error loading params file for {exp_id}: {e}")
+        return None
 
 
 # ---------------------------------------
@@ -1766,12 +1796,14 @@ def parse_tensorboard_logs(
 
     if not all_rows:
         logging.error("No valid event data found in any log directory.")
-        return [], {}
+        sorted_rows = []
+        last_row_dict = []
 
-    # Sort rows by wall_time to ensure chronological order
-    all_rows.sort(key=lambda x: x[0])
-    sorted_rows = [r for _, r in all_rows]
-    last_row_dict = sorted_rows[-1]
+    else:
+        # Sort rows by wall_time to ensure chronological order
+        all_rows.sort(key=lambda x: x[0])
+        sorted_rows = [r for _, r in all_rows]
+        last_row_dict = sorted_rows[-1]
 
     # Write to CSV
     headers = ["Step", "Step timestamp"] + metrics
