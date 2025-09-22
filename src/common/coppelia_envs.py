@@ -248,7 +248,10 @@ class CoppeliaEnv(gym.Env):
         Returns:
             reward (float): The computed reward.
         """
-        laser_obs = list(self.observation.values())[-self.params_env["laser_observations"]:]
+        if "laser_observations" in self.params_env:
+            laser_obs = list(self.observation.values())[-self.params_env["laser_observations"]:]
+        else:
+            laser_obs = list(self.observation.values())[-4:]
         distance = self.observation["distance"]
 
         if self.crash_flag:

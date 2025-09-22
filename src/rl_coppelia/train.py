@@ -203,13 +203,6 @@ def main(args):
 
     logging.info("Training completed")
 
-    # Remove monitor folder
-    if os.path.exists(rl_copp.log_monitor):
-        shutil.rmtree(rl_copp.log_monitor)
-        logging.info("Monitor removed")
-    else:
-        logging.error(f"Monitor not found: {rl_copp.log_monitor}")
-
     ### Close the CoppeliaSim instance
     rl_copp.stop_coppelia_sim()
 

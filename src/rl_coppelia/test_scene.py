@@ -74,6 +74,7 @@ def main(args):
 
     # Get action times
     action_times= utils.get_fixed_actimes(rl_copp)
+    logging.info(f"Action times sequence used for testing: {action_times}")
 
     # Set iterations number
     n_iter = len(rl_copp.args.model_ids)
@@ -158,7 +159,9 @@ def main(args):
                 # so we can calculate the distance traveled in the episode
                 trajs_folder = os.path.join(scene_path_folder, "trajs")
                 traj_file = f"trajectory_{i+1}_{model_id}.csv"
-                episode_distance = utils.calculate_episode_distance(trajs_folder, traj_file)
+                # episode_distance = utils.calculate_episode_distance(trajs_folder, traj_file)
+                #TODO FIND SOLUTION FOR THE DISTANCE TRAVELED
+                episode_distance = 0.0
                 logging.info(f"Episode distance calculated: {episode_distance} m for traj file {traj_file}")
 
             metrics_writer.writerow([model_name, action_times[i], target_name, final_target_distance, 

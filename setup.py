@@ -11,7 +11,7 @@ setup(
     entry_points={
         "console_scripts": [
             "uncore_rl=rl_coppelia.cli:main",
-            "uncore_rl_gui=rl_coppelia.gui_rl_coppelia:main"
+            "uncore_rl_gui=gui.main:main"
         ]
     },
     include_package_data=True,

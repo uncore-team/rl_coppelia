@@ -1,4 +1,4 @@
-# Training and Testing of RL algorithms for controlling robots' movements in CoppeliaSim
+# Training and Testing of RL algorithms for robots in CoppeliaSim
 
 This project allows for either training models for robots in a CoppeliaSim environment using different Reinforcement Learning algorithms, or testing those pre-trained models. It automates the process of launching the CoppeliaSim software, loading the respective scene, and executing training or testing experiments for a given robot. The project is organized into several key directories:
 

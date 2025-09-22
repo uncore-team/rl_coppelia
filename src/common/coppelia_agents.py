@@ -11,7 +11,7 @@ from socketcomms.comms import BaseCommPoint # type: ignore
 
 
 class CoppeliaAgent:
-    def __init__(self, sim, params_env, paths, file_id, comms_port = 49054) -> None:
+    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port = 49054) -> None:
         """
         Custom agent for CoppeliaSim simulations of different robots.
         
@@ -90,6 +90,7 @@ class CoppeliaAgent:
         self.lat_wall = 0.0
         self.current_sim_offset_time = 0.0
         self.current_wall_offset_time = 0.0
+        self.verbose = verbose
 
         self.reward = 0
         self.execute_cmd_vel = False
@@ -137,6 +138,7 @@ class CoppeliaAgent:
         self.scene_to_load_folder = ""
         self.id_obstacle = 0
         self.action_times = []
+        self.test_scene_mode = ""
 
         # Needed for saving scenes
         self.save_scene = False
@@ -269,15 +271,19 @@ class CoppeliaAgent:
         Reset the simulator: position the robot and target, and reset the counters.
         If there are obstacles, remove them and create new ones.
         """
+
+        # Set action time for the episode new episode
         if self.action_times != [] and self.action_times is not None:
             if self.episode_idx < len(self.action_times):
                 self._rltimestep = self.action_times[self.episode_idx]
                 logging.info(f"Action time set to {self._rltimestep}")
         
+        
         # Set speed to 0. It's important to do this before setting the position and orientation
         # of the robot, to avoid bugs with Coppelia simulation
         self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
-        self.sim.callScriptFunction('draw_path', self.handle_robot_scripts, 0,0, self.colorID)
+        if self.verbose == 3:
+            self.sim.callScriptFunction('draw_path', self.handle_robot_scripts, 0,0, self.colorID)
 
         # Calculate lat:
         self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
@@ -335,31 +341,59 @@ class CoppeliaAgent:
                 self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
             logging.info("Environment RST done")
 
-        # Load the preconfigured scene
+
+        # --- LOAD A PRECONFIGURED SCENE FOR TESTING ---
         else:
             if self.episode_idx < len(self.action_times):
                 self.id_obstacle = 0
 
-                # CSV path
-                csv_folder = os.path.join(self.paths["scene_configs"], self.scene_to_load_folder)  
-                scene_path = utils.find_scene_csv_in_dir(csv_folder)
-                if not os.path.exists(scene_path):
-                    logging.error(f"[ERROR] CSV scene file not found: {scene_path}")
-                    sys.exit()
+                # Load the CSV file and get all the tuples (action_time, target_id) just once
+                if self.episode_idx==0:
 
-                df = pd.read_csv(scene_path)
+                    # CSV path
+                    csv_folder = os.path.join(self.paths["scene_configs"], self.scene_to_load_folder)  
+                    scene_path = utils.find_scene_csv_in_dir(csv_folder)
+                    if not os.path.exists(scene_path):
+                        logging.error(f"[ERROR] CSV scene file not found: {scene_path}")
+                        sys.exit()
 
-                # Get all rows that contain targets
-                target_rows = df[df['type'] == 'target'].reset_index(drop=True)
-                num_targets = len(target_rows)
+                    df = pd.read_csv(scene_path)
 
-                if num_targets == 0:
-                    logging.error("No targets found in the scene CSV.")
-                    sys.exit()
+                    # Get all rows that contain targets
+                    target_rows = df[df['type'] == 'target'].reset_index(drop=True)
+                    num_targets = len(target_rows)
+
+                    if num_targets == 0:
+                        logging.error("No targets found in the scene CSV.")
+                        sys.exit()
+
+                    # Get block size (number of episodes per target)
+                    block_size = len(self.action_times) // num_targets 
+
+                    # Get unique values of action times
+                    unique_times = sorted(set(self.action_times))
+
+                    # Calculate how many times each unique action time is repeated
+                    reps = self.action_times.count(unique_times[0]) // num_targets
+
+                    # Get a list with (action_time, target_id) for each episode
+                    
+                    tuples = []
+
+                    # Mode A: alternate targets
+                    if self.test_scene_mode == "alternate_targets":
+                        for t in unique_times:
+                            for target_id in range(num_targets):
+                                tuples.extend([(t, target_id)] * reps)
+                    # Mode B (default): alternate action times
+                    else:
+                        for idx, t in enumerate(self.action_times):
+                            target_id = idx // block_size
+                            tuples.append((t, target_id))
+                    
 
                 # Get what target will be used for each episode
-                target_idx = self.episode_idx // (len(self.action_times) // num_targets)
-                target_idx = min(target_idx, num_targets - 1)  
+                target_idx = min(tuples[self.episode_idx][1], num_targets - 1)  
 
                 # Initialize target counter
                 current_target_idx = 0
@@ -385,7 +419,8 @@ class CoppeliaAgent:
                 logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
                 logging.info(f"Episode {self.episode_idx}: Using target #{target_idx} with position {target_rows.iloc[target_idx][['x','y']].tolist()}")
 
-        # Save current scene configuration for further analysis
+
+        # --- SAVE CURRENT SCENE CONFIGURATION FOR FURTHER TESTING ---
         if self.save_scene:
             
             # Create list to save all the elements
@@ -423,9 +458,13 @@ class CoppeliaAgent:
             self.first_reset_done = True
 
 
-    def agent_step(self):
+    def agent_step(self, robot_name):
         """
         A step of the agent. Process incoming instructions from the server side and execute actions accordingly.
+        Args:
+            robot_name (str): Name of the robot in the CoppeliaSim scene.
+        Returns:
+            dict: The action to be executed.
         """
         
         action = self._lastaction	# by default, continue executing the same last action
@@ -457,26 +496,27 @@ class CoppeliaAgent:
             # is not the desired performance: if there was a collision, then we need to know it.
             
             # ---TURTLEBOT
-            # else:
-            #     if self.laser is not None:
-            #         laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
-            #         logging.debug(f"Laser values during movement: {laser_obs}")
-            #         if (
-            #             laser_obs[0] < self.params_env["max_crash_dist_critical"] or
-            #             laser_obs[3] < self.params_env["max_crash_dist_critical"] or
-            #             any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
-            #         ) and not self.crash_flag:
-            #             logging.info("Crash during action execution, episode will finish once the action completes")
-            #             self.crash_flag = True
+            else:
+                if robot_name == "turtlebot":
+                    if self.laser is not None:
+                        laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
+                        logging.debug(f"Laser values during movement: {laser_obs}")
+                        if (
+                            laser_obs[0] < self.params_env["max_crash_dist_critical"] or
+                            laser_obs[3] < self.params_env["max_crash_dist_critical"] or
+                            any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
+                        ) and not self.crash_flag:
+                            logging.info("Crash during action execution, episode will finish once the action completes")
+                            self.crash_flag = True
             
             # ---BURGERBOT
-            else:
-                if self.laser is not None:
-                    laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
-                    logging.debug(f"Laser values during movement: {laser_obs}")
-                    if any(d < self.params_env["max_crash_dist_critical"] for d in laser_obs) and not self.crash_flag:
-                        logging.info("Crash during action execution, episode will finish once the action completes")
-                        self.crash_flag = True
+                elif robot_name == "burgerbot":
+                    if self.laser is not None:
+                        laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
+                        logging.debug(f"Laser values during movement: {laser_obs}")
+                        if any(d < self.params_env["max_crash_dist_critical"] for d in laser_obs) and not self.crash_flag:
+                            logging.info("Crash during action execution, episode will finish once the action completes")
+                            self.crash_flag = True
 
             action = self._lastaction
             
@@ -541,6 +581,9 @@ class CoppeliaAgent:
                         logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}")
                         self._commstoRL.stepSendLastActDur(self.lat_sim, self.lat_wall)
                         logging.info("LAT already sent")
+                    self.sim.setFloatSignal('latValueSignal', float(self.lat_sim))
+                    logging.info(f"Signal latValueSignal set to {self.lat_sim}")
+                        
                     
                     self._waitingforrlcommands = False # from now on, we are waiting to execute the action
                     self.execute_cmd_vel = True
@@ -579,7 +622,7 @@ class CoppeliaAgent:
 
 
 class BurgerBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_env, paths, file_id, comms_port=49054):
+    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
         """
         Custom agent for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
@@ -593,7 +636,7 @@ class BurgerBotAgent(CoppeliaAgent):
             target (CoppeliaObject): Target object in CoppeliaSim scene.
             handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
         """
-        super(BurgerBotAgent, self).__init__(sim, params_env, paths, file_id, comms_port)
+        super(BurgerBotAgent, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
 
         self.robot = sim.getObject("/Burger")
         self.robot_baselink = self.robot
@@ -610,7 +653,7 @@ class BurgerBotAgent(CoppeliaAgent):
 
 
 class TurtleBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_env, paths, file_id, comms_port=49054):
+    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
         """
         Custom agent for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
@@ -629,7 +672,7 @@ class TurtleBotAgent(CoppeliaAgent):
             handle_obstaclegenerators_script (CoppeliaObject): Handle for using the script which generates the obstacles in CoppeliaSim scene.
             handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
         """
-        super(TurtleBotAgent, self).__init__(sim, params_env, paths, file_id, comms_port)
+        super(TurtleBotAgent, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
 
         self.robot=sim.getObject('/Turtlebot2')
         self.robot_baselink=sim.getObject('/Turtlebot2/base_link_respondable')

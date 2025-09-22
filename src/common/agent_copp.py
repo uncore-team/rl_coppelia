@@ -57,7 +57,7 @@ def sysCall_init():
     """
     Called at the beginning of the simulation to configure logging and path setup. It alseo receives variable data from the RL side.
     """
-    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_env, comms_port, paths, file_id, scene_to_load_folder, save_scene, save_traj, action_times, model_name
+    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_env, comms_port, paths, file_id, scene_to_load_folder, save_scene, save_traj, action_times, model_name, test_scene_mode
     sim = require('sim')    # type: ignore
 
     # Variables to get from agent_copp.py script
@@ -73,6 +73,7 @@ def sysCall_init():
     save_scene = None
     save_traj = None
     action_times = None
+    test_scene_mode = ""
 
     # Generate needed routes for logs and tf
     paths = utils.get_robot_paths(base_path, robot_name, agent_logs=True)
@@ -87,18 +88,18 @@ def sysCall_thread():
     """
     Called once after simulation starts to create the agent and configure paths.
     """
-    global sim, agent, robot_name, params_env, comms_port, sim_initialized, model_ids, paths, file_id, scene_to_load_folder, save_scene, save_traj, agent_created, action_times, model_name
+    global sim, agent, robot_name, params_env, comms_port, sim_initialized, model_ids, paths, file_id, scene_to_load_folder, save_scene, save_traj, agent_created, action_times, model_name, verbose, test_scene_mode
 
     if sim_initialized:
         logging.info("inside thread sim_initialized")
         # Create agent
         if robot_name == "turtleBot":
-            agent = TurtleBotAgent(sim, params_env, paths, file_id, comms_port=comms_port)
+            agent = TurtleBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
         elif robot_name == "burgerBot":
-            agent = BurgerBotAgent(sim, params_env, paths, file_id, comms_port=comms_port)
+            agent = BurgerBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
             agent.robot_baselink = agent.robot
-        else:   # by default it will use the TurtleBot configuration
-            agent = TurtleBotAgent(sim, params_env, paths, file_id, comms_port=comms_port)
+        else:   # by default it will use the BurgerBot configuration
+            agent = BurgerBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
         logging.info("Agent initialized")
 
         # Configure scene and trajectory behavior
@@ -106,6 +107,7 @@ def sysCall_thread():
         agent.save_scene = save_scene
         agent.model_ids = model_ids
         agent.action_times = action_times
+        agent.test_scene_mode = test_scene_mode
 
         # Set the folder where the trajectories will be saved (inside testing_metrics folder)
         if model_name is None:
@@ -143,11 +145,11 @@ def sysCall_sensing():
     """
     Called at each simulation step. Executes the agent's action and logs trajectories.
     """
-    global sim, agent, verbose, agent_created
+    global sim, agent, verbose, agent_created, robot_name
     
     if agent and not agent.finish_rec and agent_created:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
-        action = agent.agent_step()
+        action = agent.agent_step(robot_name)
 
         # If an action is received, execute it
         if action is not None:
@@ -188,4 +190,5 @@ def sysCall_sensing():
         logging.debug("SIM Time:", simTime)
         realTime = sim.getSystemTime() - agent.initial_realTime
         logging.debug("REAL Time:", realTime)
+
     

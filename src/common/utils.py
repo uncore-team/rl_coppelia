@@ -1205,6 +1205,11 @@ def update_and_copy_script(rl_copp_obj):
         else:
             model_ids = rl_copp_obj.args.model_ids
 
+        if not hasattr(rl_copp_obj.args, "test_scene_mode"):
+            test_scene_mode = None
+        else:
+            test_scene_mode = rl_copp_obj.args.test_scene_mode
+
             # Get how many targets are in the scene
             scene_configs_path = rl_copp_obj.paths["scene_configs"]
             scene_path = os.path.join(scene_configs_path, rl_copp_obj.args.scene_to_load_folder)
@@ -1239,6 +1244,7 @@ def update_and_copy_script(rl_copp_obj):
             "save_traj": save_traj,
             "testvar": rl_copp_obj.free_comms_port+1,
             "action_times": action_times,
+            "test_scene_mode": test_scene_mode
         }
 
         # Update standard variables
@@ -1434,7 +1440,7 @@ def start_coppelia_and_simulation(rl_copp_obj):
     # Check if scene is loaded
     if is_scene_loaded(rl_copp_obj.current_sim, rl_copp_obj.args.scene_path):
         logging.info("Scene is already loaded, simulation will be stopped in case that it's running...")
-        stop_coppelia_simulation(rl_copp_obj.current_sim)
+        stop_coppelia_simulation(rl_copp_obj)
     else:
         logging.info(f"Loading scene: {rl_copp_obj.args.scene_path}")
         rl_copp_obj.current_sim.loadScene(rl_copp_obj.args.scene_path)
@@ -3126,3 +3132,231 @@ def draw_robust_uncertainty_ellipse(ax, mean_x, mean_y, points, color='gray', al
         ax.add_patch(ell)
     except Exception as e:
         logging.warning(f"Failed to draw ellipse: {e}")
+
+
+
+
+def extract_timestamp(path: str) -> str:
+    """
+    Get the timestamp from a CSV filename.
+    ..._YYYY-MM-DD_HH-MM-SS.csv
+    """
+    m = re.search(r'_(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})\.csv$', os.path.basename(path))
+    return m.group(1) if m else None
+
+
+
+def _yes(prompt: str, default=False) -> bool:
+    '''
+    Ask a yes/no question via input() and return their answer as a boolean.
+    Args:
+        prompt (str): The question to ask the user.
+        default (bool): The default answer if the user just hits Enter. Defaults to False.
+    Returns:
+        bool: True for 'yes', False for 'no'.
+    '''
+    s = input(f"{prompt} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
+    if s == "" and default: 
+        return True
+    return s in ("y", "yes", "s", "si", "sí")
+
+
+def _ask_float(prompt: str, current: float):
+    '''
+    Ask the user to input a float value, with the option to keep the current value.
+    Args:
+        prompt (str): The prompt to display to the user.
+        current (float): The current value to keep if the user presses Enter.
+    Returns:
+        float | None: The new float value or the current value if Enter is pressed.
+    '''
+    s = input(f"{prompt} - Enter to keep current value ({current:.3f}): ").strip()
+    if s == "":
+        return current
+    try:
+        return float(s)
+    except ValueError:
+        print("  [!] Invalid value, current will be kept.")
+        return current
+
+
+def ask_and_set_limits_for_axes(ax, label: str):
+    '''
+    Interactively ask the user if they want to set custom axis limits for a matplotlib Axes object.
+    If the user agrees, prompts for min and max values for both X and Y axes.
+    Args:
+        ax (matplotlib.axes.Axes): The Axes object to modify.
+        label (str): Label to identify the graph in prompts.
+    '''
+    print(f"\n--- Limits for «{label}» ---")
+    if not _yes("Do you want to define custom axis limits for this graph?"):
+        return  
+
+    # Current limit values
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+
+    # X axis
+    if _yes("Fix limit in X axis?"):
+        nx0 = _ask_float("  xmin", x0)
+        nx1 = _ask_float("  xmax", x1)
+        if nx1 <= nx0:
+            print("  [!] xmax must be > xmin. Limits in X will be ignored.")
+        else:
+            ax.set_xlim(nx0, nx1)
+
+    # Y axis
+    if _yes("Fix limits in Y?"):
+        ny0 = _ask_float("  ymin", y0)
+        ny1 = _ask_float("  ymax", y1)
+        if ny1 <= ny0:
+            print("  [!] ymax debe ser > ymin. Limits in Y will be ignored.")
+        else:
+            ax.set_ylim(ny0, ny1)
+
+
+def map_files_by_timestamp(files_1, files_2=None):
+    '''
+    Maps files by their extracted timestamps.
+    If files2 is provided, returns only timestamps present in both lists.
+    Args:
+        files_1 (list): List of file paths.
+        files_2 (list, optional): Second list of file paths for intersection. Defaults to None.
+    Returns:
+        tuple: (path_1, path_2) where path_1 is from files_1 and path_2 from files_2 (or None if files_2 is None).
+    '''
+
+    # If only one timestamp, return it directly
+    if len(files_1) == 1:
+        if files_2 is not None:
+            return files_1[0], files_2[0]
+        else:
+            return files_1[0], None
+
+    # Map timestamps to file paths 1
+    timestamp_1= {}
+    for p in files_1:
+        ts = extract_timestamp(p)
+        if ts:
+            timestamp_1[ts] = p
+    
+
+    if files_2 is not None:
+        timestamp_2 = {}
+        for p in files_2:
+            ts = extract_timestamp(p)
+            if ts:
+                timestamp_2[ts] = p
+
+        # Check for common timestamps
+        common_ts = sorted(set(timestamp_1.keys()).intersection(timestamp_2.keys()))
+        if not common_ts:
+            logging.error("[!] No matching timestamps.")
+            logging.info(f"Folder 1: {sorted(timestamp_1.keys())}")
+            logging.info(f"Folder 2: {sorted(timestamp_2.keys())}")
+            return
+    else:
+        common_ts = sorted(timestamp_1.keys())
+        
+    # Show avaliable timestamps and ask user to choose one
+    print("\nAvaliable timestamps:")
+    for i, ts in enumerate(common_ts):
+        print(f"  [{i}] {ts}")
+
+    while True:
+        sel = input("Choose the desired experiment to load: ").strip()
+        if sel.isdigit():
+            sel = int(sel)
+            if 0 <= sel < len(common_ts):
+                chosen_ts = common_ts[sel]
+                break
+        print(f"Invalid index. Please enter a number between 0 and {len(common_ts)-1}.")
+
+    # Rutas seleccionadas
+    path_1 = timestamp_1[chosen_ts]
+    if files_2 is not None:
+        path_2  = timestamp_2[chosen_ts]
+    else:
+        path_2 = None
+    return path_1, path_2
+
+
+def create_robot_plugin_file(base_src_path: str, robot_name: str) -> str:
+    """Create (idempotently) a robot plugin module for dynamic registration.
+
+    Args:
+        base_src_path: Path to your 'src' root (where 'rl_coppelia' lives).
+        robot_name: New robot name (e.g., "myNewBot").
+
+    Returns:
+        The absolute path to the plugin file created or already existing.
+
+    Raises:
+        OSError: If directories cannot be created or file cannot be written.
+    """
+    import os
+
+    # Ensure package path: src/rl_coppelia/robot_plugins/
+    pkg_dir = os.path.join(base_src_path, "rl_coppelia", "robot_plugins")
+    os.makedirs(pkg_dir, exist_ok=True)
+
+    init_path = os.path.join(pkg_dir, "__init__.py")
+    if not os.path.exists(init_path):
+        # Create empty __init__.py to mark package (safe if repeated)
+        with open(init_path, "w", encoding="utf-8") as f:
+            f.write("# Plugin package for robot environments\n")
+
+    # Target plugin file
+    module_path = os.path.join(pkg_dir, f"{robot_name}.py")
+
+    # Template (same text as shown above)
+    template = f'''"""Plugin to register '{robot_name}' robot environment.
+
+This module is auto-generated by the GUI. It registers a factory that builds
+a VecEnv for the robot using the manager's parameters.
+"""
+
+from rl_coppelia.rl_coppelia_manager import RLCoppeliaManager  # adjust if your package root differs
+from stable_baselines3.common.env_util import make_vec_env
+
+# TODO: Replace `BurgerBotEnv` with the actual Env class for this robot,
+# or keep it if you use a generic Env that reads robot-specific params.
+from common.coppelia_envs import BurgerBotEnv  # or: from robots.{robot_name}.envs import NewRobotEnv
+
+
+def _factory(manager: RLCoppeliaManager):
+    """Create a VecEnv instance for '{robot_name}'.
+
+    Args:
+        manager: The current RLCoppeliaManager instance. You can access:
+            - manager.params_env
+            - manager.free_comms_port
+            - manager.log_monitor
+            - manager.paths
+            - manager.args
+
+    Returns:
+        A vectorized environment (VecEnv) suitable for training/testing.
+    """
+    env_cls = BurgerBotEnv  # TODO: change to your specific Env class if needed
+    return make_vec_env(
+        env_cls,
+        n_envs=1,
+        monitor_dir=manager.log_monitor,
+        env_kwargs={{
+            "params_env": manager.params_env,
+            "comms_port": manager.free_comms_port,
+        }},
+    )
+
+
+# Register on module import
+RLCoppeliaManager.register_robot("{robot_name}", _factory)
+'''
+
+    # Create only if not exists (idempotent)
+    if not os.path.exists(module_path):
+        with open(module_path, "w", encoding="utf-8") as f:
+            f.write(template)
+
+    return module_path
