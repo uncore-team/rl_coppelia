@@ -138,7 +138,11 @@ class CoppeliaAgent:
         self.scene_to_load_folder = ""
         self.id_obstacle = 0
         self.action_times = []
+        self.tuples = []
+        self.num_targets = 0
         self.test_scene_mode = ""
+        self.df = None
+        self.target_rows = None
 
         # Needed for saving scenes
         self.save_scene = False
@@ -272,11 +276,7 @@ class CoppeliaAgent:
         If there are obstacles, remove them and create new ones.
         """
 
-        # Set action time for the episode new episode
-        if self.action_times != [] and self.action_times is not None:
-            if self.episode_idx < len(self.action_times):
-                self._rltimestep = self.action_times[self.episode_idx]
-                logging.info(f"Action time set to {self._rltimestep}")
+        
         
         
         # Set speed to 0. It's important to do this before setting the position and orientation
@@ -357,48 +357,54 @@ class CoppeliaAgent:
                         logging.error(f"[ERROR] CSV scene file not found: {scene_path}")
                         sys.exit()
 
-                    df = pd.read_csv(scene_path)
+                    self.df = pd.read_csv(scene_path)
 
                     # Get all rows that contain targets
-                    target_rows = df[df['type'] == 'target'].reset_index(drop=True)
-                    num_targets = len(target_rows)
+                    self.target_rows = self.df[self.df['type'] == 'target'].reset_index(drop=True)
+                    self.num_targets = len(self.target_rows)
 
-                    if num_targets == 0:
+                    if self.num_targets == 0:
                         logging.error("No targets found in the scene CSV.")
                         sys.exit()
 
                     # Get block size (number of episodes per target)
-                    block_size = len(self.action_times) // num_targets 
+                    block_size = len(self.action_times) // self.num_targets 
 
                     # Get unique values of action times
                     unique_times = sorted(set(self.action_times))
 
                     # Calculate how many times each unique action time is repeated
-                    reps = self.action_times.count(unique_times[0]) // num_targets
+                    reps = self.action_times.count(unique_times[0]) // self.num_targets
 
-                    # Get a list with (action_time, target_id) for each episode
-                    
-                    tuples = []
-
+                    # Get a list (tuples) with (action_time, target_id) for each episode
                     # Mode A: alternate targets
                     if self.test_scene_mode == "alternate_targets":
+                        print("Alternate targets")
+                        logging.info("Test scene mode: alternate_targets")
                         for t in unique_times:
-                            for target_id in range(num_targets):
-                                tuples.extend([(t, target_id)] * reps)
+                            for target_id in range(self.num_targets):
+                                self.tuples.extend([(t, target_id)] * reps)
                     # Mode B (default): alternate action times
                     else:
+                        print("Alternate action times")
+                        logging.info("Test scene mode: alternate_action_times")
                         for idx, t in enumerate(self.action_times):
                             target_id = idx // block_size
-                            tuples.append((t, target_id))
-                    
-
+                            self.tuples.append((t, target_id))
+                    print(self.tuples)
                 # Get what target will be used for each episode
-                target_idx = min(tuples[self.episode_idx][1], num_targets - 1)  
+                target_idx = min(self.tuples[self.episode_idx][1], self.num_targets - 1)  
+
+                # Set action time for the episode new episode
+                if self.action_times != [] and self.action_times is not None:
+                    if self.episode_idx < len(self.action_times):
+                        self._rltimestep = self.tuples[self.episode_idx][0]
+                        logging.info(f"Action time set to {self._rltimestep}")
 
                 # Initialize target counter
                 current_target_idx = 0
 
-                for _, row in df.iterrows():
+                for _, row in self.df.iterrows():
                     x, y = row['x'], row['y']
                     z = 0.06969 if row['type'] == "robot" else 0.0  # Set height for placing the robot
 
@@ -417,7 +423,7 @@ class CoppeliaAgent:
                         self.generate_obs_from_csv(row)
 
                 logging.info(f"Scene recreated with {self.id_obstacle} obstacles.")
-                logging.info(f"Episode {self.episode_idx}: Using target #{target_idx} with position {target_rows.iloc[target_idx][['x','y']].tolist()}")
+                logging.info(f"Episode {self.episode_idx}: Using target #{target_idx} with position {self.target_rows.iloc[target_idx][['x','y']].tolist()}")
 
 
         # --- SAVE CURRENT SCENE CONFIGURATION FOR FURTHER TESTING ---
