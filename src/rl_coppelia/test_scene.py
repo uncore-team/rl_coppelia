@@ -159,9 +159,11 @@ def main(args):
                 # so we can calculate the distance traveled in the episode
                 trajs_folder = os.path.join(scene_path_folder, "trajs")
                 traj_file = f"trajectory_{i+1}_{model_id}.csv"
-                # episode_distance = utils.calculate_episode_distance(trajs_folder, traj_file)
-                #TODO FIND SOLUTION FOR THE DISTANCE TRAVELED
-                episode_distance = 0.0
+
+                try:
+                    episode_distance = utils.calculate_episode_distance(trajs_folder, traj_file)
+                except:
+                    episode_distance = 0.0
                 logging.info(f"Episode distance calculated: {episode_distance} m for traj file {traj_file}")
 
             metrics_writer.writerow([model_name, action_times[i], target_name, final_target_distance, 
