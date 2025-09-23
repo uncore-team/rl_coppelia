@@ -748,9 +748,19 @@ class NewEnvDialog(QDialog):
         super().accept() 
 
 
-
 class EditParamsDialog(QDialog):
+    '''
+    Dialog window for editing existing robot training parameter files.
+    Allows users to modify parameters through input widgets and save changes back to the JSON file.
+    '''
     def __init__(self, base_path, filename, parent=None):
+        '''
+        Initializes the parameter editing dialog.
+        Args:
+            base_path (str): Path to the root directory of the project.
+            filename (str): Name of the parameter file to edit.
+            parent (QWidget, optional): Parent widget of the dialog. Defaults to None.
+        '''
         super().__init__(parent)
         self.setWindowTitle("Edit Parameters File")
         self.setMinimumSize(800, 600)
@@ -795,7 +805,10 @@ class EditParamsDialog(QDialog):
         layout.addLayout(button_row)
 
 
-    def load_existing_params(self):
+    def load_existing_params(self) -> None:
+        '''
+        Loads existing parameters from the JSON file and creates input widgets.
+        '''
         if not os.path.exists(self.file_path):
             self.scroll_layout.addWidget(QLabel("❌ File not found."))
             return
@@ -829,7 +842,15 @@ class EditParamsDialog(QDialog):
 
             self.scroll_layout.addLayout(grid)
 
-    def create_input_widget(self, value):
+
+    def create_input_widget(self, value) -> QWidget:
+        '''
+        Creates an appropriate input widget based on the value type.
+        Args:
+            value: The parameter value to determine the widget type.
+        Returns:
+            QWidget: The created input widget.
+        '''
         if isinstance(value, bool):
             checkbox = QCheckBox()
             checkbox.setChecked(value)
@@ -838,7 +859,11 @@ class EditParamsDialog(QDialog):
             line_edit = QLineEdit(str(value))
             return line_edit
 
-    def save_changes(self):
+
+    def save_changes(self) -> None:
+        '''
+        Gathers input values, validates them, and saves to the JSON file.
+        '''
         updated_data = {}
 
         for (section, key), widget in self.form_widgets.items():
@@ -862,22 +887,13 @@ class EditParamsDialog(QDialog):
         except Exception as e:
             self.error_label.setText(f"❌ Failed to save file: {e}")
 
-    def get_param_description(self, key):
+
+    def get_param_description(self, key) -> str:
+        '''
+        Retrieves the description for a given parameter key.
+        Args:
+            key (str): The parameter key.
+        Returns:
+            str: The parameter description or the key itself if not found.
+        '''
         return PARAM_TOOLTIPS.get(key, key)
-    
-
-class BrowseZipDialog(QFileDialog):
-    """Open a file dialog to select a ZIP file."""
-    def __init__(self, start_path:str, input_field: QLineEdit, parent=None):
-        super().__init__(parent)
-        self.start_path = start_path
-        self.input_field = input_field
-
-        file_path, _ = QFileDialog.getOpenFileName(
-                self, 
-                "Select ZIP File", 
-                self.start_path,    
-                "ZIP Files (*.zip)"
-            )
-        if file_path:
-            self.input_field.setText(file_path)

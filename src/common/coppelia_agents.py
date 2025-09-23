@@ -379,19 +379,17 @@ class CoppeliaAgent:
                     # Get a list (tuples) with (action_time, target_id) for each episode
                     # Mode A: alternate targets
                     if self.test_scene_mode == "alternate_targets":
-                        print("Alternate targets")
                         logging.info("Test scene mode: alternate_targets")
                         for t in unique_times:
                             for target_id in range(self.num_targets):
                                 self.tuples.extend([(t, target_id)] * reps)
                     # Mode B (default): alternate action times
                     else:
-                        print("Alternate action times")
                         logging.info("Test scene mode: alternate_action_times")
                         for idx, t in enumerate(self.action_times):
                             target_id = idx // block_size
                             self.tuples.append((t, target_id))
-                    print(self.tuples)
+                    logging.debug("Tuples (action_time, target_id) for each episode:", self.tuples)
                 # Get what target will be used for each episode
                 target_idx = min(self.tuples[self.episode_idx][1], self.num_targets - 1)  
 

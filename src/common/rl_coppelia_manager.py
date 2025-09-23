@@ -238,14 +238,14 @@ class RLCoppeliaManager():
         logging.info(f"Environment for training created: {self.env}. Comms port: {self.free_comms_port}")
         
         
-    def start_coppelia_sim(self):
+    def start_coppelia_sim(self, process_name:str):
         """
         Run CoppeliaSim and open the selected scene. It will override the code of the 'Agent_Script' file inside the scene with the
         content of the agent_coppelia_script.py.
 
         Two different instances are needed, so one will be used for training and the other for evaluating during the EvalCallback
         """
-        utils.start_coppelia_and_simulation(self)
+        utils.start_coppelia_and_simulation(self, process_name)
 
 
     def stop_coppelia_sim(self):
@@ -254,8 +254,8 @@ class RLCoppeliaManager():
         """
         utils.stop_coppelia_simulation(self)
 
-        # Uncomment if you want to close CoppeliaSim window
-        # utils.close_coppelia_sim(self.current_coppelia_pid, self.terminal_pid)
+        # Comment/Uncomment if you want to disable/enable CoppeliaSim window auto-closing
+        utils.close_coppelia_sim(self.current_coppelia_pid, self.terminal_pid)
 
         # Remove monitor folder
         if os.path.exists(self.log_monitor):

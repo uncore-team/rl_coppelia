@@ -6,6 +6,28 @@ from PyQt5.QtWidgets import (
     QHBoxLayout, QToolTip, QDialog, QGroupBox, QMessageBox, QComboBox, QDoubleSpinBox,
     QTableWidgetItem, QTableWidget
 )
+from PyQt5.QtGui import QIcon
+import pkg_resources
+
+
+def create_icon_button(tip_text: str, icon_path: str, on_click: callable) -> QPushButton:
+    """
+    Create a button with an icon and tooltip.
+    Args:
+        tip_text (str): The tooltip text to display on hover.
+        icon_path (str): The path to the icon image.
+        on_click (callable): The function to call when the button is clicked.
+    Returns:
+        QPushButton: The created button with the specified icon and tooltip.
+    """
+    button = QPushButton()
+    button.setIcon(QIcon(pkg_resources.resource_filename("rl_coppelia", "../gui/assets/edit_icon.png")))
+    button.setToolTip(tip_text)
+    button.setFixedSize(24, 24)
+    button.setVisible(False)
+    button.clicked.connect(on_click)
+
+    return button
 
 
 def create_styled_button(self, text: str, on_click: callable) -> QPushButton:

@@ -70,8 +70,16 @@ def list_json_files(path: str) -> list[str]:
     return sorted([n for n in os.listdir(path) if n.endswith(".json")])
 
 
-def get_rl_coppelia_path_from_bashrc(self):
-    """Retrieve the rl_coppelia path from ~/.bashrc."""
+def get_rl_coppelia_path_from_bashrc(base_path):
+    """
+    Retrieve the rl_coppelia path from ~/.bashrc.
+    Looks for rl_coppelia in PYTHONPATH or PATH environment variables.
+    If found, returns the parent directory of rl_coppelia.
+    Args:
+        base_path (str): The expected base path to compare against.
+    Returns:
+        str or None: The base path if found, else None.
+    """
     bashrc_path = os.path.expanduser("~/.bashrc")
     if not os.path.exists(bashrc_path):
         return None
@@ -93,9 +101,9 @@ def get_rl_coppelia_path_from_bashrc(self):
                     expanded_path = os.path.expandvars(path)
                     if os.path.exists(expanded_path):
                         base_path = str(Path(expanded_path).parents[1])  # Get the parent directory of rl_coppelia
-                        if base_path != self.base_path:
-                            self.base_path = base_path  # Update the base path
-                            logging.warning(f"Found rl_coppelia path in PYTHONPATH: {base_path}, but it does not match the expected base path: {self.base_path}")
+                        if base_path != base_path:
+                            base_path = base_path  # Update the base path
+                            logging.warning(f"Found rl_coppelia path in PYTHONPATH: {base_path}, but it does not match the expected base path: {base_path}")
                         return base_path  
         
         # Search in PATH it the previous search was unsuccessful
@@ -109,9 +117,9 @@ def get_rl_coppelia_path_from_bashrc(self):
                     expanded_path = os.path.expandvars(path)
                     if os.path.exists(expanded_path):
                         base_path = str(Path(expanded_path).parents[1])  # Get the parent directory of rl_coppelia
-                        if base_path != self.base_path:
-                            self.base_path = base_path
-                            logging.warning(f"Found rl_coppelia path in PYTHONPATH: {base_path}, but it does not match the expected base path: {self.base_path}")
+                        if base_path != base_path:
+                            base_path = base_path
+                            logging.warning(f"Found rl_coppelia path in PYTHONPATH: {base_path}, but it does not match the expected base path: {base_path}")
                         return base_path
                         
     except Exception as e:

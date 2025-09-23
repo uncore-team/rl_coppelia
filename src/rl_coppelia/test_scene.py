@@ -51,7 +51,7 @@ def main(args):
     rl_copp = RLCoppeliaManager(args)
 
     ### Start CoppeliaSim instance
-    rl_copp.start_coppelia_sim()
+    rl_copp.start_coppelia_sim("AutoTest")
 
     ### Create the environment
     rl_copp.create_env()

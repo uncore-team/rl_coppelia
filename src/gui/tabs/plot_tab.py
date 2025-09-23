@@ -1,13 +1,12 @@
 """Train tab: encapsulated UI and logic to start training."""
 
 from __future__ import annotations
-from datetime import datetime
 from typing import Callable, Optional
 import os
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QComboBox, QLineEdit,
-    QHBoxLayout, QSizePolicy, QCheckBox, QSpinBox, QPushButton, QMessageBox,QDialog
+    QHBoxLayout, QSizePolicy, QCheckBox, QSpinBox, QPushButton, QMessageBox
 )
 from PyQt5.QtGui import QIcon
 import pkg_resources
@@ -17,7 +16,7 @@ from gui.services import list_dirs, list_json_files
 from gui.common_ui import create_styled_button  # uses your existing styled button
 
 
-class TrainTab(QWidget):
+class PlotTab(QWidget):
     """Encapsulated Train tab.
     
     Exposes:
@@ -67,7 +66,7 @@ class TrainTab(QWidget):
         self.params_combo.currentTextChanged.connect(self._handle_params_selection)
 
         self.edit_params_btn = QPushButton()
-        self.edit_params_btn.setIcon(QIcon(pkg_resources.resource_filename("rl_coppelia", "../gui/assets/gear_icon.png")))
+        self.edit_params_btn.setIcon(QIcon(pkg_resources.resource_filename("rl_coppelia", "assets/gear_icon.png")))
         self.edit_params_btn.setFixedSize(24, 24)
         self.edit_params_btn.setToolTip("Edit selected parameter file")
         self.edit_params_btn.setVisible(False)
@@ -97,22 +96,14 @@ class TrainTab(QWidget):
         self.start_btn = create_styled_button(self,"Start Training", self._start_train_clicked)
 
         layout = QVBoxLayout(self)
-        
-        # Centered (horizontally and vertically) button layout
-        button_layout = QVBoxLayout()
-        button_layout.addStretch()
-
-        centered_h = QHBoxLayout()
-        centered_h.addStretch()
-        centered_h.addWidget(self.start_btn)
-        centered_h.addStretch()
-
-        button_layout.addLayout(centered_h)
-        button_layout.addStretch()
-
-        # Add everything to the main layout
         layout.addLayout(form)
-        layout.addLayout(button_layout)
+
+        v = QVBoxLayout()
+        from PyQt5.QtWidgets import QHBoxLayout as H
+        v.addStretch()
+        h = H(); h.addStretch(); h.addWidget(self.start_btn); h.addStretch()
+        v.addLayout(h); v.addStretch()
+        layout.addLayout(v)
 
         # initial load
         self.refresh_lists()
@@ -203,29 +194,12 @@ class TrainTab(QWidget):
         visible = bool(text and not text.startswith("Select"))
         self.edit_params_btn.setVisible(visible)
 
-
     def _open_edit_params_dialog(self) -> None:
         """Open your existing EditParamsDialog (if available)."""
         text = self.params_combo.currentText()
         if not text or text in ("Select a configuration file...", "Manual parameters"):
             return
-        
-        # Get the params filename (without path)
-        params_filename = text.split()[0].strip()
-
-        # Instantiate and show the dialog
-        dlg = dialogs.EditParamsDialog(self._get_base_path(), params_filename, self)
-
-        # PyQt5/PyQt6 compatibility
-        exec_fn = getattr(dlg, "exec", None) or getattr(dlg, "exec_", None)
-        result = exec_fn()
-
-        if result == QDialog.Accepted:
-            # Success log
-            self.request_log.emit(
-                f"<span style='color:green;'> --- ✅ Parameters updated successfully in <b>{params_filename}</b>.</span>"
-            )
-
+        # Aquí puedes invocar tu dialogs.EditParamsDialog si ya lo tienes construido.
 
     def _start_train_clicked(self) -> None:
         """Build CLI args and emit start signal."""
@@ -264,12 +238,13 @@ class TrainTab(QWidget):
                 return
 
         # Build args
-        process_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
         args = [
-            "uncore_rl", "train",
+            "rl_coppelia", "train",
             "--robot_name", robot,
-            "--timestamp", str(process_timestamp),
+            "--timestamp", str(timestamp),
             "--verbose", str(self.verbose.value()),
         ]
 

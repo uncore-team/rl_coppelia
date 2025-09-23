@@ -1341,7 +1341,7 @@ def create_discs_under_target(rl_copp_obj):
     return disc_handles  # Return the handles of the created discs
 
 
-def start_coppelia_and_simulation(rl_copp_obj):
+def start_coppelia_and_simulation(rl_copp_obj, process_name:str):
     """
     Run CoppeliaSim if it's not already running and open the scene if it's not loaded.
 
@@ -1399,7 +1399,7 @@ def start_coppelia_and_simulation(rl_copp_obj):
         else:
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             
-        rl_copp_obj.terminal_pid = f"CoppeliaTerminal_{timestamp}"
+        rl_copp_obj.terminal_pid = f"{process_name} - {timestamp}"
 
         if rl_copp_obj.args.no_gui:
             process = subprocess.Popen([
