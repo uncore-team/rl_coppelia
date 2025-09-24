@@ -1,20 +1,17 @@
-"""Train tab: encapsulated UI and logic to start training."""
+"""Test tab: encapsulated UI and logic to start testing a trained agent."""
 
 from __future__ import annotations
 import re
-from typing import Callable, Optional
+from typing import Callable
 import os
-from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QFormLayout, QComboBox, QLineEdit,
-    QHBoxLayout, QSizePolicy, QCheckBox, QSpinBox, QPushButton, QMessageBox,
+    QWidget, QVBoxLayout, QFormLayout, QLineEdit,
+    QHBoxLayout, QCheckBox, QSpinBox, QPushButton, QMessageBox,
     QFileDialog
 )
-from PyQt5.QtGui import QIcon
-import pkg_resources
 
-from gui import dialogs, robot_generator  # uses your existing modules
-from gui.services import get_rl_coppelia_path_from_bashrc, list_dirs, list_json_files, remove_zip_extension
+from gui.services import get_rl_coppelia_path_from_bashrc, remove_zip_extension
 from gui.common_ui import create_styled_button  # uses your existing styled button
 
 

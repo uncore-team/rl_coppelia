@@ -559,7 +559,8 @@ class CustomSceneDialog(QDialog):
         """Load an existing scene from a CSV file."""
         import pandas as pd
 
-        scene_path = os.path.join(self.base_path, "robots", self.robot_name, "scene_configs", folder_name, "scene.csv")
+        # scene_path = os.path.join(self.base_path, "robots", self.robot_name, "scene_configs", folder_name, "scene.csv")
+        scene_path = self.parent._current_scene_csv_path
         if not os.path.isfile(scene_path):
             QMessageBox.warning(self, "File not found", f"Scene CSV not found: {scene_path}")
             return
@@ -619,10 +620,10 @@ class CustomSceneDialog(QDialog):
         super().accept()
         if self.edit_mode:
             QMessageBox.information(self, "Scene modified", f"Scene '{name}' has been modified successfully.")
-            self.parent.logs_text.append(f"<span style='color:green;'> --- </span> Scene '{name}' has been modified successfully.")
+            self.parent.request_log.emit(f"<span style='color:green;'> --- </span> Scene '{name}' has been modified successfully.")
         else:
             QMessageBox.information(self, "Scene created", f"Scene '{name}' has been created successfully.")
-            self.parent.logs_text.append(f"<span style='color:green;'> --- </span> Scene '{name}' has been created successfully.")
+            self.parent.request_log.emit(f"<span style='color:green;'> --- </span> Scene '{name}' has been created successfully.")
 
     def get_selected_scene_folder(self):
         return getattr(self, "selected_scene_folder", None)

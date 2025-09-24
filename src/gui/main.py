@@ -1,41 +1,20 @@
-import csv
 from datetime import datetime
-import glob
-import json
 import os
-import re
-import shutil
 import subprocess
 import sys
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QFormLayout,
-    QLineEdit, QPushButton, QLabel, QCheckBox, QSpinBox, QFileDialog, QLabel,
-    QHBoxLayout, QToolTip, QDialog, QGroupBox, QMessageBox, QComboBox, QDoubleSpinBox,
-    QTableWidgetItem, QTableWidget, QStackedWidget
+    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QPushButton, 
+    QLabel, QLabel, QHBoxLayout, QStackedWidget,QTextEdit, QScrollArea,QProgressBar
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon
 import logging
 
-from matplotlib import pyplot as plt
 from common import utils
-from gui.common_ui import on_tab_changed, refresh_lists
-from rl_coppelia import cli, train, test, plot, auto_training, auto_testing, retrain, sat_training
 from pathlib import Path
-from PyQt5.QtCore import QTimer, QThread, pyqtSignal,QSize,QPoint,QEvent
-from PyQt5.QtWidgets import QProgressBar, QGridLayout, QHBoxLayout, QTextEdit, QSizePolicy, QScrollArea, QAbstractItemView,QListWidgetItem, QListWidget, QComboBox
-from PyQt5.QtGui import QIcon, QPixmap, QIntValidator, QDoubleValidator
-import pkg_resources
-from shutil import which
-import time
-import psutil
-import pandas as pd
-from matplotlib.patches import Circle
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-import numpy as np
 
-from gui import dialogs, robot_generator, common_ui
+import pkg_resources
 from gui.workers import ProcessThread
-from gui.services import capture_cli_output, get_rl_coppelia_path_from_bashrc
 
 from gui.tabs.train_tab import TrainTab
 from gui.tabs.test_tab import TestTab
@@ -50,6 +29,7 @@ from gui.screens.welcome import WelcomeScreen
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.robot = ""
         self.setWindowTitle("UNCORE RL Manager")
         self.setGeometry(200, 200, 500, 300)
 

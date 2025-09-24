@@ -6,11 +6,13 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import time
+from typing import Optional, Tuple
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 from matplotlib import pyplot as plt
 from matplotlib.patches import Ellipse
@@ -477,6 +479,132 @@ def extract_model_id(path):
     if match:
         return match.group(1)
     return None
+
+
+def extract_robot_and_model_id(self, model_name: str) -> Tuple[str, int]:
+    """Extract robot name and numeric model id from a model path.
+
+    Example:
+        'turtleBot_model_1070/turtleBot_model_1070_last.zip'
+        -> ('turtleBot', 1070)
+
+    Args:
+        model_name: A path-like string pointing to a model, possibly with folders.
+
+    Returns:
+        (robot_name, model_id)
+
+    Raises:
+        ValueError: If the pattern '<robot>_model_<id>' cannot be found.
+    """
+    # Keep only the parent dir name: 'turtleBot_model_1070'
+    # Path(...).parts is robust for both / and \ separators
+    try:
+        parent_dir = Path(model_name).parts[0]
+    except Exception:
+        parent_dir = model_name.split("/")[0].split("\\")[0]
+
+    m = re.match(r"^(?P<robot>.+)_model_(?P<id>\d+)$", parent_dir)
+    if not m:
+        raise ValueError("model_name does not match '<robot>_model_<id>' in its parent directory part.")
+
+    robot = m.group("robot")
+    model_id = int(m.group("id"))
+    return robot, model_id
+
+
+def find_model_record_csv(self, base_path: str, robot_name: str, model_id: int) -> Optional[str]:
+    """Find the per-model training CSV for a given robot and model id.
+
+    Expected filename pattern:
+        <robot>_model_<id>_train_YYYY-MM-DD_HH-MM-SS.csv
+
+    Search path:
+        robots/<robot_name>/training_metrics/
+
+    Args:
+        base_path: Project base path.
+        robot_name: e.g., 'turtleBot'
+        model_id: e.g., 1070
+
+    Returns:
+        Absolute path to the CSV if found, else None.
+
+    Notes:
+        If multiple files match (e.g., several training runs), we pick the most recent
+        by parsing the timestamp from the filename; if parsing fails, we fall back to mtime.
+    """
+    import datetime as _dt
+
+    metrics_dir = os.path.join(base_path, "robots", robot_name, "training_metrics")
+
+    if not os.path.isdir(metrics_dir):
+        return None
+
+    pattern = os.path.join(metrics_dir, f"{robot_name}_model_{model_id}_train_*.csv")
+    candidates = glob(pattern)
+
+    if not candidates:
+        return None
+
+    def _ts_from_name(path: str) -> Optional[_dt.datetime]:
+        # filename: <robot>_model_<id>_train_YYYY-MM-DD_HH-MM-SS.csv
+        fname = os.path.basename(path)
+        m = re.search(r"_train_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})\.csv$", fname)
+        if not m:
+            return None
+        date_str = m.group(1)  # YYYY-MM-DD
+        time_str = m.group(2)  # HH-MM-SS
+        try:
+            return _dt.datetime.strptime(date_str + " " + time_str, "%Y-%m-%d %H-%M-%S")
+        except Exception:
+            return None
+
+    # Sort by parsed timestamp desc; fallback to mtime
+    def _sort_key(path: str):
+        ts = _ts_from_name(path)
+        if ts is not None:
+            return (0, ts)  # 0 = has timestamp, order by ts
+        return (1, Path(path).stat().st_mtime)  # 1 = fallback, order by mtime
+
+    candidates.sort(key=_sort_key, reverse=True)
+    return candidates[0]
+
+
+def remove_row_where_first_col_equals(self, csv_path: str, first_col_key: str) -> bool:
+    """Remove rows from CSV where the first column equals 'first_col_key'. Keeps header if present.
+
+    Args:
+        csv_path: Absolute path to the CSV.
+        first_col_key: Target string to match against the first column.
+
+    Returns:
+        True if at least one row was removed, False otherwise.
+    """
+    if not os.path.isfile(csv_path):
+        print("no file")
+        return False
+
+    removed = False
+    with open(csv_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    with open(csv_path, "w", encoding="utf-8", newline="") as f:
+        for idx, line in enumerate(lines):
+            # preserve header if looks like header
+            if idx == 0 and ("Exp_id" in line or "exp_id" in line or "EXP_ID" in line):
+                f.write(line)
+                continue
+            first = line.split(",", 1)[0].strip()
+            print(first)
+            if first == first_col_key:
+
+                removed = True
+                continue
+            f.write(line)
+
+    return removed
+
 
 
 def get_robot_paths(base_dir, robot_name, agent_logs = False):
