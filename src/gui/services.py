@@ -265,8 +265,6 @@ def set_list_placeholder(w, text):
 
 def refresh_lists(self, input_widget, category):
     """Load available <category> names into a dropdown menu."""
-    request_log = pyqtSignal(str)
-
     if category == "robot":
         search_dir = os.path.join(self._get_base_path(), "robots")
         default_text = "Select a robot..."
@@ -348,27 +346,3 @@ def refresh_lists(self, input_widget, category):
     if category == "scene_configs":
         input_widget.insertSeparator(input_widget.count())
         input_widget.addItem("Custom your scene")
-
-
-def on_tab_changed(self, index):
-    """Trigger refresh of file-based inputs when switching tabs."""
-    current_tab = self.tabs.tabText(index)
-
-    if current_tab == "Train":
-        refresh_lists(self.train_params_file_input, category="params_file")
-
-    elif current_tab == "Plot":
-        robot_name = self.plot_robot_name_input.currentText()
-        if robot_name and not robot_name.startswith("Select"):
-            self.update_model_ids_for_selected_robot()
-            refresh_lists(self, self.plot_scene_to_load_folder_input, category="scene_configs")
-
-    elif current_tab == "Test scene":
-        robot_name = self.test_scene_robot_name_input.currentText()
-        if robot_name and not robot_name.startswith("Select"):
-            self.update_model_ids_for_selected_robot()
-            refresh_lists(self,self.test_scene_scene_to_load_folder_input, category="scene_configs")
-    elif current_tab == "Auto Training":
-        robot_name = self.auto_train_robot_name_input.currentText()
-        if robot_name and not robot_name.startswith("Select"):
-            refresh_lists(self, self.auto_train_session_name_input, category="session_folders")

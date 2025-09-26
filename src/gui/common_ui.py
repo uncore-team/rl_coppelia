@@ -1,13 +1,6 @@
-import logging
-import os
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QFormLayout,
-    QLineEdit, QPushButton, QLabel, QCheckBox, QSpinBox, QFileDialog, QLabel,
-    QHBoxLayout, QToolTip, QDialog, QGroupBox, QMessageBox, QComboBox, QDoubleSpinBox,
-    QTableWidgetItem, QTableWidget, QListWidget, QListWidgetItem
-)
+from PyQt5.QtWidgets import QPushButton, QLabel, QLabel
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import pyqtSignal, Qt, QPoint
+from PyQt5.QtCore import Qt, QPoint
 
 import pkg_resources
 
