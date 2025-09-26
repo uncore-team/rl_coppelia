@@ -255,7 +255,7 @@ class RLCoppeliaManager():
         utils.stop_coppelia_simulation(self)
 
         # Comment/Uncomment if you want to disable/enable CoppeliaSim window auto-closing
-        utils.close_coppelia_sim(self.current_coppelia_pid, self.terminal_pid)
+        # utils.close_coppelia_sim(self.current_coppelia_pid, self.terminal_pid)
 
         # Remove monitor folder
         if os.path.exists(self.log_monitor):

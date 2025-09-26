@@ -1574,8 +1574,8 @@ def start_coppelia_and_simulation(rl_copp_obj, process_name:str):
         rl_copp_obj.current_sim.loadScene(rl_copp_obj.args.scene_path)
         logging.info("Scene loaded successfully.")
 
-    # Create target's discs # TODO
-    create_discs_under_target(rl_copp_obj)
+    # Create target's discs # TODO: no needed anymore with the customization scripts, but then it should be removed from the params config json files
+    # create_discs_under_target(rl_copp_obj)
 
     # Update code inside Coppelia's scene
     update_and_copy_script(rl_copp_obj)
