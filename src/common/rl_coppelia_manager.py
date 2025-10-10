@@ -22,6 +22,8 @@ learning tasks using CoppeliaSim as the simulation environment.
 """
 import os
 import shutil
+
+from spindecoupler import RLSide
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import inspect
 import logging
@@ -126,7 +128,8 @@ class RLCoppeliaManager():
         if hasattr(args, "params_file"):
             if args.params_file is None:
                 args.params_file = utils.get_params_file(self.paths,self.args)
-            self.params_env, self.params_train, self.params_test = utils.load_params(args.params_file)
+            source_params_file = os.path.join(self.base_path, "configs", args.params_file)
+            self.params_robot, self.params_env, self.params_train, self.params_test = utils.load_params(source_params_file)
 
         self.current_sim = None
 
@@ -146,6 +149,9 @@ class RLCoppeliaManager():
         # Create coppelia current scene process ID and also terminal ID
         self.current_coppelia_pid = None
         self.terminal_pid = None
+
+        # Set alias for the robot handle in CoppeliaSim scene
+        self.robot_handle_alias = None  # To be defined by child classes
 
         # Autoload plugin modules so they can self-register
         self._autoload_robot_plugins()
@@ -217,14 +223,19 @@ class RLCoppeliaManager():
                 BurgerBotEnv,
                 n_envs=1,
                 monitor_dir=self.log_monitor,
-                env_kwargs={"params_env": self.params_env, "comms_port": self.free_comms_port},
+                env_kwargs={
+                    "params_env": self.params_env, 
+                    "comms_port": self.free_comms_port                },
             )
         elif self.args.robot_name == "turtleBot":
             self.env = make_vec_env(
                 TurtleBotEnv,
                 n_envs=1,
                 monitor_dir=self.log_monitor,
-                env_kwargs={"params_env": self.params_env, "comms_port": self.free_comms_port},
+                env_kwargs={
+                    "params_env": self.params_env, 
+                    "comms_port": self.free_comms_port
+                },
             )
         else:
             # 3) Last resort
@@ -232,11 +243,27 @@ class RLCoppeliaManager():
                 BurgerBotEnv,
                 n_envs=1,
                 monitor_dir=self.log_monitor,
-                env_kwargs={"params_env": self.params_env, "comms_port": self.free_comms_port},
+                env_kwargs={
+                    "params_env": self.params_env, 
+                    "comms_port": self.free_comms_port                },
             )
 
         logging.info(f"Environment for training created: {self.env}. Comms port: {self.free_comms_port}")
+        self.robot_handle_alias = self.env.get_attr('robot_handle_alias')[0]  # Set robot handle alias from env
+        print(self.robot_handle_alias)
+
+
+    def start_communication(self):
+        base_env = utils.unwrap_env(self.env)
         
+        # Open the baseline server on the specified port
+        logging.info(f"Trying to establish communication using the port {self.free_comms_port}")
+        comm = RLSide(port=self.free_comms_port)
+        logging.info(f"Communication opened using port {self.free_comms_port}")
+
+        # Link the comms to the environment
+        base_env._commstoagent = comm
+    
         
     def start_coppelia_sim(self, process_name:str):
         """

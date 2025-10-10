@@ -4,6 +4,7 @@ import math
 import os
 import random
 import sys
+from time import sleep, time
 import pandas as pd
 from common import utils
 from spindecoupler import AgentSide # type: ignore
@@ -18,65 +19,78 @@ class CoppeliaAgent:
         This agent interfaces with the RLSide class (from spindecoupler package) to
         receive actions and return observations in a reinforcement learning (RL) setup. The
         environment simulates the robot's movement in response to actions.
-        
         Args:
-            sim (object): CoppeliaSim simulation object, used to interact with the scene.
-            params_env (dict): Dictionary containing environment configuration parameters.
-            paths (dict): Dictionary containing necessary filesystem paths for logs, configs, and metrics.
-            file_id (str): Unique identifier for the current experiment or training session.
-            comms_port (int, optional): Communication port for connecting with the RL system. Defaults to 49054.
-
+            sim: The CoppeliaSim simulation instance.
+            params_env (dict): Environment parameters loaded from a JSON file.
+            paths (dict): Dictionary containing various paths for saving/loading data.
+            file_id (str): Unique identifier for the current training/testing session.
+            verbose (int): Verbosity level for logging.
+            comms_port (int, optional): Port for communication with the RL side. Defaults to 49054.
         Attributes:
+            _commstoRL: Instance of AgentSide for communication with the RL side.
             _control_timestep (float): Timestep used by the simulation engine.
-            _rltimestep (float): Timestep used by the RL algorithm to issue new actions.
-            _waitingforrlcommands (bool): Whether the agent is waiting for new commands from RL.
+            _rltimestep (float): Timestep for RL actions.
+            _waitingforrlcommands (bool): Flag indicating if the agent is waiting for RL commands.
             _lastaction (dict): The most recent action executed.
-            _lastactiont0_sim (float): Simulation timestamp of the last action start.
-            _lastactiont0_wall (float): Wall-clock timestamp of the last action start.
-            lat_sim (float): Simulated latency between actions.
-            lat_wall (float): Wall-clock latency between actions.
+            _lastactiont0_sim (float): Simulation time when the last action was received.
+            _lastactiont0_wall (float): Wall-clock time when the last action was received.
+            lat_sim (float): Last Action Time (LAT) in simulation time.
+            lat_wall (float): Last Action Time (LAT) in wall-clock time.
             current_sim_offset_time (float): Elapsed simulated time in the current episode.
-            current_wall_offset_time (float): Elapsed real time in the current episode.
-            reward (float): Current step reward.
-            execute_cmd_vel (bool): Whether to send velocity commands to CoppeliaSim.
-            colorID (int): Color identifier for visualizing actions in the simulation.
-            robot (object): Handle to the robot model in the CoppeliaSim scene.
-            robot_baselink (object): Handle to the base of the robot for position tracking.
-            target (object): Handle to the target object.
-            laser (object): Handle to the laser scanner sensor.
-            generator (object): Handle to the obstacle generator object.
-            handle_robot_scripts (object): Script handle for controlling robot motion.
-            handle_laser_get_observation_script (object): Script handle for laser observation extraction.
-            handle_obstaclegenerators_script (object): Script handle for obstacle generation.
-            sim (object): Reference to the CoppeliaSim interface.
-            params_env (dict): Environment parameters.
-            paths (dict): Filesystem paths used during execution.
-            experiment_id (str): Current experiment ID.
-            file_id (str): Alias for experiment_id.
-            save_scene (bool): Whether to save the current scene configuration.
-            scene_configs_path (str): Path to folder containing scene configurations.
-            save_scene_csv_folder (str): Output directory for scene CSVs.
-            save_traj (bool): Whether to save trajectory information.
-            save_trajs_path (str): Directory for saving trajectory CSVs.
-            save_traj_csv_folder (str): Directory for the current trajectory output.
-            model_ids (list): List of model IDs used in the experiment.
-            trajectory (list): List of 2D coordinates forming the robot’s trajectory.
-            episode_idx (int): Current episode number.
-            action_times (list): Optional list of action durations for each episode.
-            scene_to_load_folder (str): Folder name of the scene to load from disk.
-            training_started (bool): Flag that is True once training begins.
-            finish_rec (bool): True when the FINISH command is received from RL.
-            reset_flag (bool): Internal flag to signal that a RESET was requested.
-            crash_flag (bool): Internal flag to indicate that a collision occurred.
-            first_reset_done (bool): Whether the first reset has been completed.
-            _commstoRL (AgentSide): Communication interface with the RL side.
-        
+            current_wall_offset_time (float): Elapsed wall-clock time in the current episode.
+            verbose (int): Verbosity level for logging.
+            reward (float): Reward for the current step.
+            execute_cmd_vel (bool): Flag to indicate if cmd_vel should be executed.
+            colorID (int): Color ID for visualization purposes.
+            robot, robot_baselink, target, inner_targer: Handles for robot and target objects in CoppeliaSim.
+            distance_line: Handle for the debug line showing distance between robot and target.
+            robotRadius (int): Radius of the robot in meters.
+            handle_robot_scripts: Handle for robot script in CoppeliaSim.
+            laser: Handle for laser sensor object, if any.
+            generator: Handle for obstacle generator object, if any.
+            handle_laser_get_observation_script: Handle for laser observation script, if any.
+            handle_obstaclegenerators_script: Handle for obstacle generator script, if any.
+            sim: The CoppeliaSim simulation instance.
+            params_env (dict): Environment parameters loaded from a JSON file.
+            initial_simTime (float): Initial simulation time when the agent starts its first movement.
+            initial_realTime (float): Initial wall-clock time when the agent starts its first movement.
+            paths (dict): Dictionary containing various paths for saving/loading data.
+            first_reset_done (bool): Flag indicating if the first reset has been done.
+            finish_rec (bool): Flag to indicate if Finish flag has been received.
+            episode_start_time_sim (float): Simulation time when the current episode started.
+            episode_start_time_wall (float): Wall-clock time when the current episode started.
+            reset_flag (bool): Flag to indicate if a reset has been requested.
+            crash_flag (bool): Flag to indicate if a crash has occurred.
+            training_started (bool): Flag to indicate if training has started.
+            scene_to_load_folder (str): Folder name for loading preconfigured scenes.
+            id_obstacle (int): Counter for obstacle IDs.
+            action_times (list): List of action times for loading scenes.
+            tuples (list): List of tuples (action_time, target_id) for loading scenes.
+            num_targets (int): Number of targets in the loaded scene.
+            test_scene_mode (str): Mode for loading test scenes ("alternate_targets" or "alternate_action_times").
+            df (pd.DataFrame): DataFrame containing scene configuration loaded from CSV.
+            target_rows (pd.DataFrame): DataFrame containing only target rows from the scene configuration.
+            save_scene (bool): Flag to indicate if the current scene should be saved.
+            scene_configs_path (str): Path to the scene configurations directory.
+            experiment_id (str): Unique identifier for the current training/testing session.
+            episode_idx (int): Current episode index.
+            trajectory (list): List to store the robot's trajectory for the current episode.
+            save_scene_csv_folder (str): Folder path for saving scene CSV files.
+            save_traj (bool): Flag to indicate if trajectories should be saved.
+            model_ids (list): List of model IDs for naming trajectory files.
+            save_trajs_path (str): Path to the directory for saving trajectory files.
+            save_traj_csv_folder (str): Folder path for saving trajectory CSV files.
         Methods:
-            get_observation(): It must be called only by the agent to get an observation from the CoppeliaSim scene.
-            reset_simulator(): It must be called only by the agent to restore the simulation in CoppeliaSim scene.
-            agent_step(): Executes a step in the agent, waits until the current action is finished or read new instructions from the RL.   
-        """
+            get_observation(): Compute the current distance and angle from the robot to the target.
+            get_observation_space(): Returns the observation space of the agent.
+            generate_obs_from_csv(row): Generate an obstacle in the CoppeliaSim scene based on a row from the CSV file.
+            get_random_object_pos(): Get a random robot/target position inside the container.
+            is_position_valid(): Check if a random generated position is valid (no collisions with obstacles)
+            reset_simulator(): Reset the simulator: position the robot and target, and reset the counters.
+            agent_step(robot_name): A step of the agent. Process incoming instructions from the server side and execute actions accordingly.
         
+        """
+
         sim.setFloatParam(sim.floatparam_simulation_time_step,0.05)
         self._control_timestep = sim.getSimulationTimeStep()
         self._rltimestep = params_env["fixed_actime"]
@@ -97,8 +111,11 @@ class CoppeliaAgent:
         self.colorID = 1
         
         self.robot = None
+        self.robotRadius = 0
         self.robot_baselink = None
         self.target = None
+        self.inner_target = None
+        self.distance_line = None
         self.handle_robot_scripts = None
 
         self.laser = None
@@ -161,39 +178,63 @@ class CoppeliaAgent:
         self.model_ids = []
         self.save_trajs_path = self.paths["testing_metrics"]
         self.save_traj_csv_folder = ""
+
+        # For saving obstacles objects generated
+        self.obstacles_objs = None
+
+        # For indicating that the lat reset have been done with the first reset of the scene
+        self.lat_reset = False
         
     
     def get_observation(self):
         """
-        Compute the current distance and angle from the robot to the target.
-        
-        Returns:
-            tuple: distance, angle and laser observations (if there is a laser sensor).
+        Compute the current distance and angle from the robot to the target,
+        and draw a debug line showing the measured distance.
         """
-
-        _, data, _ = self.sim.checkDistance(self.robot_baselink, self.target)
+        # Check distance between robot and target
+        _, data, _ = self.sim.checkDistance(self.robot_baselink, self.inner_target)
         distance = data[6]
-        
+
+        # --- DEBUG: draw line to visualize distance ---
+        if self.verbose ==3:
+            try:
+                # Delete previous debug drawing (if exists)
+                if hasattr(self, "distance_line") and self.distance_line is not None:
+                    self.sim.removeDrawingObject(self.distance_line)
+
+                # Create a new line-drawing object (size=2, color=yellow)
+                self.distance_line = self.sim.addDrawingObject(
+                    self.sim.drawing_lines, 2.0, 0.0, -1, 1, [1, 1, 0]
+                )
+
+                # Add the two endpoints (world coordinates)
+                self.sim.addDrawingObjectItem(self.distance_line, data[0:6])
+
+            except Exception as e:
+                print(f"[DEBUG] Could not draw distance line: {e}")
+
+        # --- Compute relative angle ---
         p1 = self.sim.getObjectPose(self.robot_baselink, -1)
-        p2 = self.sim.getObjectPose(self.target, -1)
-        
+        p2 = self.sim.getObjectPose(self.inner_target, -1)
         twist = self.sim.getObjectOrientation(self.robot_baselink, -1)
         angle = math.atan2(p2[1] - p1[1], p2[0] - p1[0]) - twist[2]
-        
-        # Normalize angle to range [-pi, pi]
-        if angle > math.pi:
-            angle -= 2*math.pi
-        elif angle < -math.pi:
-            angle += 2*math.pi
 
+        # Normalize angle
+        if angle > math.pi:
+            angle -= 2 * math.pi
+        elif angle < -math.pi:
+            angle += 2 * math.pi
+
+        # Laser (optional)
         if self.laser is not None:
-            lasers_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
-            
+            lasers_obs = self.sim.callScriptFunction(
+                'laser_get_observations', self.handle_laser_get_observation_script
+            )
         else:
             lasers_obs = None
 
         return distance, angle, lasers_obs
-        
+
 
     def get_observation_space(self):
         """
@@ -248,26 +289,64 @@ class CoppeliaAgent:
         return
 
 
-    def get_random_target_pos (self):
+    def get_random_object_pos (self, object_type):
         '''
-        Get a random target position inside the container, taking into account the target radius and the container dimensions.
+        Get a random object position inside the container, taking into account the object radius and the container dimensions.
         
+        Args:
+            object_type (string): String to indicate if it is the 'robot' or the 'target'.
         Returns:
-            tuple: x and y coordinates of the target position.
+            tuple: x and y coordinates of the object position.
         '''
+        # Get wall info from its customization script
         raw_container = self.sim.readCustomBufferData(self.container, '__config__')
-        raw_target = self.sim.readCustomBufferData(self.target, '__config__')
         cfg_wall   = self.sim.unpackTable(raw_container) if raw_container else {}
-        cfg_target = self.sim.unpackTable(raw_target) if raw_target else {}
-
         containerSideX    = cfg_wall.get('xSize', None)
         containerSideY    = cfg_wall.get('ySize', None)
-        outerRadius  = cfg_target.get('outerRadius', None)
 
-        targetPosX = random.uniform(-containerSideX/2 + outerRadius, containerSideX/2 - outerRadius)
-        targetPosY = random.uniform(-containerSideY/2 + outerRadius, containerSideY/2 - outerRadius)
+        if object_type == "target":
+            # Get target outer radius from its customization script
+            raw_target = self.sim.readCustomBufferData(self.target, '__config__')
+            cfg_target = self.sim.unpackTable(raw_target) if raw_target else {}
+            objectRadius  = cfg_target.get('outerRadius', None)
+        elif object_type == "robot":
+            objectRadius = self.robotRadius
 
-        return targetPosX, targetPosY 
+        objectPosX = random.uniform(-containerSideX/2 + objectRadius, containerSideX/2 - objectRadius)
+        objectPosY = random.uniform(-containerSideY/2 + objectRadius, containerSideY/2 - objectRadius)
+
+        return objectPosX, objectPosY 
+    
+
+    def is_position_valid(self, object_type, posObjectX, posObjectY):
+        '''
+        Check if the object position is valid (not colliding with any obstacle).
+        
+        Args:
+            object_type (string): String to indicate if it is the 'robot' or the 'target'.
+            posObjectX (float): x coordinate of the target position.
+            posObjectY (float): y coordinate of the target position.
+        Returns:
+            bool: True if the position is valid, False otherwise.
+        '''
+        objs = self.sim.getObjectsInTree(self.obstacles_objs, self.sim.handle_all, 1) or []
+
+        # Calculate the distance between the object proposed position and each obstacle
+        for obj in objs:
+            pos_obstacle = self.sim.getObjectPosition(obj, self.sim.handle_world)  # [x, y, z]
+            dx, dy = (posObjectX - pos_obstacle[0]), (posObjectY - pos_obstacle[1])
+            dist = math.hypot(dx, dy)
+
+            # Get the threshold for each case
+            if object_type == "robot":
+                threshold = self.robotRadius
+            elif object_type == "target":
+                threshold = self.params_env["reward_dist_1"]
+
+            # Check if the distance does not respect the minimum threshold
+            if dist < threshold:
+                return False
+        return True
 
 
     def reset_simulator(self):
@@ -276,9 +355,6 @@ class CoppeliaAgent:
         If there are obstacles, remove them and create new ones.
         """
 
-        
-        
-        
         # Set speed to 0. It's important to do this before setting the position and orientation
         # of the robot, to avoid bugs with Coppelia simulation
         self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
@@ -313,32 +389,68 @@ class CoppeliaAgent:
             
                 logging.info(f"Trajectory saved in CSV: {traj_output_path}")
 
-                
-        # Always remove old obstacles before creating news
-        if self.generator is not None:
-            # Remove old obstacles
-            last_obstacles=self.sim.getObjectsInTree(self.generator,self.sim.handle_all,1) 
-            if len(last_obstacles) > 0:
-                self.sim.removeObjects(last_obstacles)
+        
+        # If 'fixed_obs' flag is not set, remove old obstacles before creating new ones
+        if not self.params_env["fixed_obs"]:
+            logging.info("Resetting simulator changing obstacles positions")
+
+            # Always remove old obstacles before creating new ones
+            if self.generator is not None:
+                # Remove old obstacles
+                last_obstacles=self.sim.getObjectsInTree(self.generator,self.sim.handle_all,1) 
+                if len(last_obstacles) > 0:
+                    self.sim.removeObjects(last_obstacles)
+        else:
+            logging.info("Resetting simulator with fixed obstacles")
         
         # Just place the scene objects at random positions and call 'generate_obs'
         if self.scene_to_load_folder == "" or self.scene_to_load_folder is None:
             # Reset positions and orientation
             current_position = self.sim.getObjectPosition(self.robot_baselink, -1)
-            if current_position != [0, 0, 0.06969]:
-                random_ori = random.uniform(-math.pi, math.pi)
-                self.sim.setObjectPosition(self.robot_baselink, [0, 0, 0.06969],-1)
-                self.sim.setObjectOrientation(self.robot_baselink, [0,0,random_ori],-1)
+            
+            # Robot will be always placed at the center of the scene if the obstacles positions 
+            # are changing between episodes
+            if not self.params_env["fixed_obs"]:
+                if current_position != [0, 0, 0.06969]:
+                    self.sim.setObjectPosition(self.robot_baselink,-1, [0, 0, 0.06969])
+            # Random position for the robot if the obstacles are placed in fixed locations
+            else:
+                if not self.first_reset_done:
+                    self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
+
+                while True:
+                    posX, posY = self.get_random_object_pos('robot')
+                    if self.is_position_valid('robot', posX, posY):
+                        break
+                logging.info(f"Robot new position: {posX}, {posY}")
+                self.sim.setObjectPosition(self.robot_baselink,-1, [posX, posY, 0.06969])
+
+            # The orientation will always be randomized
+            random_ori = random.uniform(-math.pi, math.pi)
+            self.sim.setObjectOrientation(self.robot_baselink,-1,[0,0,random_ori])
 
             # Randomize target position
             current_target_position = self.sim.getObjectPosition(self.target, -1)
             if current_target_position != [0, 0, 0]:
-                posX, posY = self.get_random_target_pos()
-                self.sim.setObjectPosition(self.target, [posX, posY, 0], -1)
+                if not self.params_env["fixed_obs"]:
+                    posX, posY = self.get_random_object_pos('target')
+                    self.sim.setObjectPosition(self.target, -1, [posX, posY, 0])
+                # As the osbtacles are the same as in the previous episode, we need to check that the
+                # new target position is not colliding with any obstacle
+                else:
+                    while True:
+                        posX, posY = self.get_random_object_pos('target')
+                        if self.is_position_valid('target', posX, posY):
+                            break
+                    logging.info(f"Target new position: {posX}, {posY}")
+                    self.sim.setObjectPosition(self.target, -1, [posX, posY, 0])
 
-            if self.generator is not None:
-                # Generate new obstacles
-                self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
+            # If osbtacles are not fixed, generate new ones
+            if not self.params_env["fixed_obs"]:
+                if self.generator is not None:
+                    # Generate new obstacles
+                    logging.info(f"Regenerating new obstacles")
+                    self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
             logging.info("Environment RST done")
 
 
@@ -425,8 +537,7 @@ class CoppeliaAgent:
 
 
         # --- SAVE CURRENT SCENE CONFIGURATION FOR FURTHER TESTING ---
-        if self.save_scene:
-            
+        if self.save_scene:            
             # Create list to save all the elements
             scene_elements = []
 
@@ -501,7 +612,7 @@ class CoppeliaAgent:
             
             # ---TURTLEBOT
             else:
-                if robot_name == "turtlebot":
+                if robot_name == "turtleBot":
                     if self.laser is not None:
                         laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
                         logging.debug(f"Laser values during movement: {laser_obs}")
@@ -514,7 +625,7 @@ class CoppeliaAgent:
                             self.crash_flag = True
             
             # ---BURGERBOT
-                elif robot_name == "burgerbot":
+                elif robot_name == "burgerBot":
                     if self.laser is not None:
                         laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
                         logging.debug(f"Laser values during movement: {laser_obs}")
@@ -525,8 +636,7 @@ class CoppeliaAgent:
             action = self._lastaction
             
         # Execution state --> The action has finished, so it tries to read a new command from RL
-        else:  # waiting for new RL step() or reset()
-            
+        else:  # waiting for new RL step() or reset()            
             # read the last (pending) step()/reset() indicator and then proceed accordingly
             rl_instruction = self._commstoRL.readWhatToDo()
             
@@ -545,16 +655,12 @@ class CoppeliaAgent:
                     if self.params_env["var_action_time_flag"]:
                         self._rltimestep = action["action_time"]
 
-                    # Get actual time of the last action
-                    # if self.episode_start_time == 0:
-                    #     self.episode_start_time = self.initial_simTime
-
-                    if self.first_reset_done:
+                    if self.first_reset_done and not self.lat_reset:
                         self._lastactiont0_sim = 0.0
                         self._lastactiont0_wall = 0.0
                         self.lat_sim = 0.0
                         self.lat_wall = 0.0
-                        self.first_reset_done = False
+                        self.lat_reset = True
                         
 
                     if self.reset_flag:
@@ -644,14 +750,15 @@ class BurgerBotAgent(CoppeliaAgent):
 
         self.robot = sim.getObject("/Burger")
         self.robot_baselink = self.robot
+        self.robotRadius = 0.17 #m
         self.target = sim.getObject("/Target")
+        self.inner_target=sim.getObject("/Target/Inner_disk")
         self.generator=sim.getObject('/ObstaclesGenerator')
         self.container = sim.getObject('/ExternalWall')
         self.laser=sim.getObject('/Burger/Laser')
         self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
         self.handle_robot_scripts = sim.getScript(1, self.robot)
         self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')
-        
 
         logging.info(f"BurgerBot Agent created successfully using port {comms_port}.")
 
@@ -680,13 +787,14 @@ class TurtleBotAgent(CoppeliaAgent):
 
         self.robot=sim.getObject('/Turtlebot2')
         self.robot_baselink=sim.getObject('/Turtlebot2/base_link_respondable')
+        self.robotRadius = 0.3 #m
         self.target=sim.getObject("/Target")
+        self.inner_target=sim.getObject("/Target/Inner_disk")
         self.container = sim.getObject('/ExternalWall')
         self.laser=sim.getObject('/Turtlebot2/fastHokuyo_ROS2')
         self.generator=sim.getObject('/ObstaclesGenerator')
         self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
         self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')
         self.handle_robot_scripts = sim.getScript(1, self.robot)
-        
 
         logging.info(f"TurtleBot Agent created successfully using port {comms_port}.")

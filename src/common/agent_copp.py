@@ -75,6 +75,9 @@ def sysCall_init():
     action_times = None
     test_scene_mode = ""
 
+    # Send verbose value to RObot_Script
+    sim.setInt32Signal('verboseValue', verbose)
+
     # Generate needed routes for logs and tf
     paths = utils.get_robot_paths(base_path, robot_name, agent_logs=True)
     file_id = utils.get_file_index(model_name, paths["tf_logs"], robot_name)
@@ -174,6 +177,7 @@ def sysCall_sensing():
     # FINISH command --> Finish the experiment
     if agent and agent.finish_rec:
         # Stop the robot
+        logging.info("Reset speed to 0")
         sim.callScriptFunction('cmd_vel',agent.handle_robot_scripts,0,0)
         sim.callScriptFunction('draw_path', agent.handle_robot_scripts, 0,0, agent.colorID)
 

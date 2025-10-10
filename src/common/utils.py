@@ -29,8 +29,10 @@ from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.results_plotter import load_results, ts2xy
 from stable_baselines3.common.evaluation import evaluate_policy
 
-AGENT_SCRIPT_COPPELIA = "/Agent_Script"
-AGENT_SCRIPT_PYTHON = "common/agent_copp.py"
+AGENT_SCRIPT_COPPELIA = "/Agent_Script"             # Name of the agent script in CoppeliaSim scene
+ROBOT_SCRIPT_COPPELIA = "/Robot_Script"             # Name of the robot script in CoppeliaSim scene
+AGENT_SCRIPT_PYTHON = "common/agent_copp.py"        # Script with the agent-specific functions: observations, rewards, step, reset, etc.
+ROBOT_SCRIPT_PYTHON = "common/robot_script_copp.py" # Script with the robot-specific functions: cmd_vel, draw path and graphs, ROScomm, etc.
 
 
 # ------------------------------------------
@@ -732,6 +734,7 @@ def load_params(file_path):
         file_path (str): Path to the JSON configuration file.
 
     Returns:
+        params_robot (dict): Parameters for configuring the robot.
         params_env (dict): Parameters for configuring the environment.
         params_train (dict): Parameters for configuring the training process.
         params_test (dict): Parameters for configuring the testing process.
@@ -740,11 +743,12 @@ def load_params(file_path):
         with open(file_path, 'r') as f:
             params_file = json.load(f)
             if params_file :
+                params_robot = params_file["params_robot"]
                 params_env = params_file["params_env"]
                 params_train = params_file["params_train"]
                 params_test = params_file["params_test"]
                 logging.info(f"Configuration loaded successfully from {file_path}.")
-                return params_env, params_train, params_test
+                return params_robot, params_env, params_train, params_test
             else:
                 logging.error("Failed to load configuration. Default values will be used")
                 return _get_default_params()
@@ -1266,24 +1270,47 @@ def is_scene_loaded(sim, scene_path):
         sys.exit()
 
 
-def update_and_copy_script(rl_copp_obj):
+def replace_std_variables(script_content, replacements):
     """
-    Updates and the agent script of the CoppeliaSim scene with the content of the 'rl_coppelia/agent_copp.py'.
-
-    This function loads the agent script from a specified path, updates certain variables 
-    in the script (such as robot name, base path, communication port, and environment parameters), 
-    and sends the updated script content back to the CoppeliaSim scene.
+    Replaces standard variables in the script content with new values.
 
     Args:
-        sim (object): The CoppeliaSim simulation object that provides access to the simulation environment.
-        base_path (str): The base directory where the script is located.
-        args #TODO
-          (str): The name of the robot to be used in the simulation.
-        params_env (dict): A dictionary containing environment parameters to be passed into the script.
-        comms_port (int): The communication port number used for communication with the robot.
+        script_content (str): The original script content.
+        replacements (dict): A dictionary where keys are variable names to be replaced
+                             and values are the new values to replace them with.
+    Returns:
+        str: The updated script content with variables replaced.
+    """
+     # Update standard variables
+    for var, new_value in replacements.items():
+        if isinstance(new_value, str):
+            script_content = re.sub(rf'{var}\s*=\s*["\'].*?["\']', f'{var} = "{new_value}"', script_content)
+            script_content = re.sub(rf'{var}\s*=\s*None', f'{var} = "{new_value}"', script_content)
+        else:
+            script_content = re.sub(rf'{var}\s*=\s*\d+', f'{var} = {new_value}', script_content)
+            script_content = re.sub(rf'{var}\s*=\s*None', f'{var} = {new_value}', script_content)
+
+    return script_content
+
+
+def update_and_copy_script(rl_copp_obj):
+    """
+    Updates and copies both agent and robot scripts of the CoppeliaSim scene 
+    with the content of the Python scripts specified in AGENT_SCRIPT_PYTHON and 
+    ROBOT_SCRIPT_PYTHON.
+
+    This function loads both scripts from the specified paths, updates certain 
+    variables in the scripts (such as robot name, base path, communication port,
+    environment parameters, etc.), and sends the updated script content back to 
+    the CoppeliaSim scene.
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Object containing the simulation object, 
+            base paths, parameters and command line arguments.
 
     Returns:
-        bool: True if the script was successfully updated and copied to CoppeliaSim, False otherwise.
+        bool: True if both scripts were successfully updated and copied to CoppeliaSim, 
+              False otherwise.
 
     Raises:
         Exception: If an error occurs during the script update or copying process.
@@ -1292,127 +1319,138 @@ def update_and_copy_script(rl_copp_obj):
     agent_object = rl_copp_obj.current_sim.getObject(AGENT_SCRIPT_COPPELIA)
     agent_script_handle = rl_copp_obj.current_sim.getScript(1, agent_object)
 
-    # Read Agent_script.py  
+    # Load Robot script
+    print(f"{rl_copp_obj.robot_handle_alias}{ROBOT_SCRIPT_COPPELIA}")
+    robot_object = rl_copp_obj.current_sim.getObject(
+        f"{rl_copp_obj.robot_handle_alias}{ROBOT_SCRIPT_COPPELIA}"
+    )
+    robot_script_handle = rl_copp_obj.current_sim.getScript(1, robot_object)
+
+    # Get paths to the scripts
     agent_script_path = os.path.join(rl_copp_obj.base_path, "src", AGENT_SCRIPT_PYTHON)
+    robot_script_path = os.path.join(rl_copp_obj.base_path, "src", ROBOT_SCRIPT_PYTHON)
+
     logging.info(f"Copying content of {agent_script_path} inside the scene in {AGENT_SCRIPT_COPPELIA}")
+    logging.info(f"Copying content of {robot_script_path} inside the scene in {ROBOT_SCRIPT_COPPELIA}")
 
-    try:
-        with open(agent_script_path, "r") as file:
-            script_content = file.read()
+    # Try to read and update both scripts
+    
+    with open(agent_script_path, "r") as file:
+        agent_script_content = file.read()
 
-        # Dictionary with variables to update
-        if not hasattr(rl_copp_obj.args, "model_name"):
-            
-            rl_copp_obj.args.model_name = None
+    with open(robot_script_path, "r") as file:
+        robot_script_content = file.read()
+
+    # Dictionary with variables to update
+    if not hasattr(rl_copp_obj.args, "model_name"):
+        
+        rl_copp_obj.args.model_name = None
+        model_name = None
+    else: 
+        try:
+            model_name = os.path.basename(rl_copp_obj.args.model_name)
+        except:
             model_name = None
-        else: 
-            try:
-                model_name = os.path.basename(rl_copp_obj.args.model_name)
-            except:
-                model_name = None
 
-        if not hasattr(rl_copp_obj.args, "scene_to_load_folder"):
-            scene_to_load_folder = None
+    if not hasattr(rl_copp_obj.args, "scene_to_load_folder"):
+        scene_to_load_folder = None
+    else:
+        scene_to_load_folder = rl_copp_obj.args.scene_to_load_folder
+
+    if not hasattr(rl_copp_obj.args, "save_scene"):
+        save_scene = None
+    else:
+        save_scene = rl_copp_obj.args.save_scene
+
+    if not hasattr(rl_copp_obj.args, "save_traj"):
+        save_traj = None
+    else:
+        save_traj = rl_copp_obj.args.save_traj
+
+    if not hasattr(rl_copp_obj.args, "model_ids"):
+        model_ids = None
+        action_times = None
+        amp_model_ids = None
+    else:
+        model_ids = rl_copp_obj.args.model_ids
+
+    if not hasattr(rl_copp_obj.args, "test_scene_mode"):
+        test_scene_mode = None
+    else:
+        test_scene_mode = rl_copp_obj.args.test_scene_mode
+
+        # Get how many targets are in the scene
+        scene_configs_path = rl_copp_obj.paths["scene_configs"]
+        scene_path = os.path.join(scene_configs_path, rl_copp_obj.args.scene_to_load_folder)
+        scene_path_csv = find_scene_csv_in_dir(scene_path)
+        if not os.path.exists(scene_path_csv):
+            logging.error(f"[ERROR] CSV scene file not found: {scene_path_csv}")
+            sys.exit()
+        df = pd.read_csv(scene_path_csv)
+        num_targets = (df['type'] == 'target').sum()
+
+        # Create a list of model IDs, repeating each ID for the number of iterations specified
+        amp_model_ids = [model_id for model_id in model_ids for _ in range(rl_copp_obj.args.iters_per_model)]
+        
+        # If the number of targets is greater than 1, repeat the model IDs to match the number of targets
+        amp_model_ids = amp_model_ids * num_targets
+
+        # Set the model IDs in the args
+        rl_copp_obj.args.model_ids = amp_model_ids
+        action_times= get_fixed_actimes(rl_copp_obj)
+
+    replacements_agent = {
+        "robot_name": rl_copp_obj.args.robot_name,
+        "model_name": model_name,
+        "model_ids": amp_model_ids,
+        "base_path": rl_copp_obj.base_path,
+        "comms_port": rl_copp_obj.free_comms_port,
+        "verbose": rl_copp_obj.args.verbose,
+        "scene_to_load_folder": scene_to_load_folder,
+        "save_scene": save_scene,
+        "save_traj": save_traj,
+        "testvar": rl_copp_obj.free_comms_port+1,
+        "action_times": action_times,
+        "test_scene_mode": test_scene_mode
+    }
+
+    replacements_robot = {
+        "verbose": rl_copp_obj.args.verbose,
+        "distance_between_wheels": rl_copp_obj.params_robot["distance_between_wheels"],
+        "wheel_radius": rl_copp_obj.params_robot["wheel_radius"]
+    }
+
+    # Update standard variables
+    agent_script_content = replace_std_variables(agent_script_content, replacements_agent)
+    robot_script_content = replace_std_variables(robot_script_content, replacements_robot)
+    
+    # Format the 'params_env' dictionary for the agent script
+    params_str = "{"
+    for key, value in rl_copp_obj.params_env.items():
+        if isinstance(value, bool):
+            # Convert booleans to the right format (True/False)
+            params_str += f'\n    "{key}": {"True" if value else "False"},'
+        elif isinstance(value, str):
+            # Add quotation marks for strings
+            params_str += f'\n    "{key}": "{value}",'
         else:
-            scene_to_load_folder = rl_copp_obj.args.scene_to_load_folder
+            # Numbers and other types
+            params_str += f'\n    "{key}": {value},'
+    params_str += "\n}"
 
-        if not hasattr(rl_copp_obj.args, "save_scene"):
-            save_scene = None
-        else:
-            save_scene = rl_copp_obj.args.save_scene
+    # Replace the script content with the formatted dictionary.
+    agent_script_content = re.sub(r'params_env\s*=\s*\{\}', f'params_env = {params_str}', agent_script_content)
 
-        if not hasattr(rl_copp_obj.args, "save_traj"):
-            save_traj = None
-        else:
-            save_traj = rl_copp_obj.args.save_traj
+    # Send updated scripts content to the scripts in CoppeliaSim
+    rl_copp_obj.current_sim.setScriptText(agent_script_handle, agent_script_content)
+    rl_copp_obj.current_sim.setScriptText(robot_script_handle, robot_script_content)
 
-        if not hasattr(rl_copp_obj.args, "model_ids"):
-            model_ids = None
-            action_times = None
-            amp_model_ids = None
-        else:
-            model_ids = rl_copp_obj.args.model_ids
+    logging.info("Scripts updated successfully in CoppeliaSim.")
+    return True
 
-        if not hasattr(rl_copp_obj.args, "test_scene_mode"):
-            test_scene_mode = None
-        else:
-            test_scene_mode = rl_copp_obj.args.test_scene_mode
-
-            # Get how many targets are in the scene
-            scene_configs_path = rl_copp_obj.paths["scene_configs"]
-            scene_path = os.path.join(scene_configs_path, rl_copp_obj.args.scene_to_load_folder)
-            scene_path_csv = find_scene_csv_in_dir(scene_path)
-            if not os.path.exists(scene_path_csv):
-                logging.error(f"[ERROR] CSV scene file not found: {scene_path_csv}")
-                sys.exit()
-            df = pd.read_csv(scene_path_csv)
-            num_targets = (df['type'] == 'target').sum()
-
-            # Create a list of model IDs, repeating each ID for the number of iterations specified
-            amp_model_ids = [model_id for model_id in model_ids for _ in range(rl_copp_obj.args.iters_per_model)]
-            
-            # If the number of targets is greater than 1, repeat the model IDs to match the number of targets
-            amp_model_ids = amp_model_ids * num_targets
-
-            # Set the model IDs in the args
-            rl_copp_obj.args.model_ids = amp_model_ids
-            action_times= get_fixed_actimes(rl_copp_obj)
-            print(action_times)
-
-
-        replacements = {
-            "robot_name": rl_copp_obj.args.robot_name,
-            "model_name": model_name,
-            "model_ids": amp_model_ids,
-            "base_path": rl_copp_obj.base_path,
-            "comms_port": rl_copp_obj.free_comms_port,
-            "verbose": rl_copp_obj.args.verbose,
-            "scene_to_load_folder": scene_to_load_folder,
-            "save_scene": save_scene,
-            "save_traj": save_traj,
-            "testvar": rl_copp_obj.free_comms_port+1,
-            "action_times": action_times,
-            "test_scene_mode": test_scene_mode
-        }
-
-        # Update standard variables
-        for var, new_value in replacements.items():
-            if isinstance(new_value, str):
-                script_content = re.sub(rf'{var}\s*=\s*["\'].*?["\']', f'{var} = "{new_value}"', script_content)
-                script_content = re.sub(rf'{var}\s*=\s*None', f'{var} = "{new_value}"', script_content)
-            else:
-                script_content = re.sub(rf'{var}\s*=\s*\d+', f'{var} = {new_value}', script_content)
-                script_content = re.sub(rf'{var}\s*=\s*None', f'{var} = {new_value}', script_content)
-
-        # Format the 'params_env' dictionary
-        params_str = "{"
-        for key, value in rl_copp_obj.params_env.items():
-            if isinstance(value, bool):
-                # Convert booleans to the right format (True/False)
-                params_str += f'\n    "{key}": {"True" if value else "False"},'
-            elif isinstance(value, str):
-                # Add quotation marks for strings
-                params_str += f'\n    "{key}": "{value}",'
-            else:
-                # Numbers and other types
-                params_str += f'\n    "{key}": {value},'
-        params_str += "\n}"
-
-        # Replace the script content with the formatted dictionary.
-        script_content = re.sub(r'params_env\s*=\s*\{\}', f'params_env = {params_str}', script_content)
-
-        # Save the file with the changes
-        # with open(agent_script_path, "w") as file:
-        #     file.write(script_content)
-
-        # Send updated script content to script C in CoppeliaSim
-        rl_copp_obj.current_sim.setScriptText(agent_script_handle, script_content)
-        logging.info("Script updated successfully in CoppeliaSim.")
-        return True
-
-    except Exception as e:
-        logging.error(f"Something happened while trying to update the content of the script inside Coppelia's scene: {e}")
-        # sys.exit()
+    # except Exception as e:
+    #     logging.error(f"Something happened while trying to update the content of the script inside Coppelia's scene: {e}")
+    #     # sys.exit()
 
 
 def create_discs_under_target(rl_copp_obj):
@@ -1509,7 +1547,7 @@ def start_coppelia_and_simulation(rl_copp_obj, process_name:str):
             if rl_copp_obj.args.no_gui:
                 process = subprocess.Popen([
                     "gnome-terminal", 
-                    f"--title={rl_copp_obj.terminal_id}",
+                    f"--title={rl_copp_obj.terminal_pid}",
                     "--",
                     coppelia_exe, "-h"])
             else:
@@ -3488,3 +3526,18 @@ RLCoppeliaManager.register_robot("{robot_name}", _factory)
             f.write(template)
 
     return module_path
+
+
+def unwrap_env(vec_env, idx=0):
+    """
+    Recursively unwrap a vectorized environment to get the base environment.
+    Args:
+        vec_env: The vectorized environment (VecEnv).
+        idx (int): Index of the environment to unwrap (default is 0).
+    Returns:
+        The unwrapped base environment.
+    """
+    env = getattr(vec_env, "envs", [vec_env])[idx]
+    while hasattr(env, "env"):
+        env = env.env
+    return env

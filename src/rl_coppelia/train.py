@@ -52,11 +52,14 @@ def main(args):
     """
     rl_copp = RLCoppeliaManager(args)
 
+    ### Create the environment
+    rl_copp.create_env()
+
     ### Start CoppeliaSim instance
     rl_copp.start_coppelia_sim("Train")
 
-    ### Create the environment
-    rl_copp.create_env()
+    ### Start communication RL - CoppeliaSim
+    rl_copp.start_communication()
 
     ### Train the model
     # Extract the needed paths for training
@@ -127,7 +130,8 @@ def main(args):
             )   
 
     # Make a copy of the configuration file for saving the parameters that will be used for this training
-    params_file_save_path = utils.copy_json_with_id(rl_copp.args.params_file, parameters_used_path, rl_copp.file_id)
+    source_params_file = os.path.join(rl_copp.base_path, "configs", rl_copp.args.params_file)
+    params_file_save_path = utils.copy_json_with_id(source_params_file, parameters_used_path, rl_copp.file_id)
 
     logging.warning("Training will start in few seconds. If you want to end it at any time, press 'F' + Enter key, and then 'Y' + Enter key."
                     " It's not recommended to pause and then resume the training, as it will affect the current episode. That said, grab a cup of coffee and enjoy the process ☕️")

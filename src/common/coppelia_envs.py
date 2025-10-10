@@ -3,10 +3,11 @@ import math
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from spindecoupler import RLSide  # type: ignore
+from abc import ABC, abstractmethod
 
 
-class CoppeliaEnv(gym.Env):
+class CoppeliaEnv(gym.Env, ABC):
+
     def __init__(self, params_env, comms_port=49054):
         """
         Custom environment for simulation agents in CoppeliaSim, inherited from gym.Env.
@@ -39,10 +40,12 @@ class CoppeliaEnv(gym.Env):
         """
         super(CoppeliaEnv, self).__init__()
 
-        # Open the baseline server on the specified port
-        logging.info(f"Trying to establish communication using the port {comms_port}")
-        self._commstoagent = RLSide(port= comms_port)
-        logging.info(f"Communication opened using port {comms_port}")
+        self._commstoagent = None  # To be initialized externally after environment creation
+
+        # # Open the baseline server on the specified port
+        # logging.info(f"Trying to establish communication using the port {comms_port}")
+        # self._commstoagent = RLSide(port= comms_port)
+        # logging.info(f"Communication opened using port {comms_port}")
 
         # Extract the parameters for the environment located inside the 'params_file.json' (by default).
         # Make params_env accessible for the methods of the class
@@ -66,8 +69,19 @@ class CoppeliaEnv(gym.Env):
                 self.action_space= spaces.Box(low=np.array([params_env["bottom_lspeed_limit"], params_env["bottom_aspeed_limit"]],dtype=np.float32), 
                                         high=np.array([params_env["upper_lspeed_limit"],params_env["upper_aspeed_limit"]],dtype=np.float32), dtype=np.float32)
 
-        # Observation space will be defined by child classes, because each robot has different observation spaces
-        self.observation_space = None
+        
+        # Number of laser observations
+        n_lasers = params_env.get("laser_observations", 4)
+
+        # Define observation space
+        if params_env["obs_time"]:
+            low = np.array([0, -math.pi] + [0]*n_lasers + [0], dtype=np.float32)
+            high = np.array([5, math.pi] + [4]*n_lasers + [100], dtype=np.float32)
+        else:
+            low = np.array([0, -math.pi] + [0]*n_lasers, dtype=np.float32)
+            high = np.array([5, math.pi] + [4]*n_lasers, dtype=np.float32)
+
+        self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
         # LAT variables
         self.lat_sim = 0
@@ -91,6 +105,17 @@ class CoppeliaEnv(gym.Env):
         self.initial_ato=0
         self.reset_flag = False
         self.initial_target_distance = 0
+
+        # Name of the robot handle in CoppeliaSim scene
+        self.robot_handle_alias = None  # To be defined by child classes
+
+
+    @abstractmethod
+    def compute_reward(self) -> float:
+        """Compute the reward for the given observation, action, and info.
+        This method should be implemented by subclasses to define the reward logic.
+        """
+        ...
 
 
     def step(self, action):
@@ -144,7 +169,7 @@ class CoppeliaEnv(gym.Env):
         self.truncated = False
 
         # Calculate reward
-        self.reward = self._calculate_reward()
+        self.reward = self.compute_reward()
         logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}. RW: {round(self.reward,4)}")
         if self.lat_sim > (self.params_env["fixed_actime"] + self.tol_lat):
             logging.warning(f"WARNING: LAT is too big for current action time. Lat = {round(self.lat_sim,4)}, A_time = {self.params_env['fixed_actime']}")
@@ -211,7 +236,7 @@ class CoppeliaEnv(gym.Env):
         return (self.observation, self.info) 
     
 
-    def _compute_adjusted_reward(self, max_reward):
+    def compute_adjusted_reward(self, max_reward):
         """
         Compute the adjusted reward based on the time elapsed.
         
@@ -237,11 +262,30 @@ class CoppeliaEnv(gym.Env):
         
         return adjusted_reward
     
-    
 
-    def _calculate_reward(self):
+        
+class BurgerBotEnv(CoppeliaEnv):
+    def __init__(self, params_env, comms_port=49054):
         """
-        Private method to calculate the reward based on distance.
+        Custom environment for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaEnv class.
+
+        Args:
+            params_env (dict): Dictionary of parameters for configuring the environment
+            comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
+
+        Attributes:
+            observation_space (gym.spaces.Box): Observation space of the environment.
+                - distance: [0, 5] m.
+                - angle: [-pi,pi] rads.
+                - time_elapsed: [0, 100] seconds of time consumed by the agent. Optional.
+        """
+        super(BurgerBotEnv, self).__init__(params_env, comms_port)
+
+        # Set robot handle alias
+        self.robot_handle_alias = '/Burger'
+
+    def compute_reward(self):
+        """Compute the reward based on the current observation, action, and info.
 
         Args: None
 
@@ -284,15 +328,15 @@ class CoppeliaEnv(gym.Env):
         if distance < self.params_env["reward_dist_3"]:
             self.target_zone = 3
             self.terminated = True
-            return self._compute_adjusted_reward(self.params_env["reward_3"])
+            return self.compute_adjusted_reward(self.params_env["reward_3"])
         elif distance < self.params_env["reward_dist_2"]:
             self.target_zone = 2
             self.terminated = True
-            return self._compute_adjusted_reward(self.params_env["reward_2"])
+            return self.compute_adjusted_reward(self.params_env["reward_2"])
         elif distance < self.params_env["reward_dist_1"]:
             self.target_zone = 1
             self.terminated = True
-            return self._compute_adjusted_reward(self.params_env["reward_1"])
+            return self.compute_adjusted_reward(self.params_env["reward_1"])
         elif distance > self.params_env["max_dist"] or self.time_elapsed > self.params_env["max_time"]:
             self.terminated = True
             logging.info("Max dist or max time achieved")
@@ -307,10 +351,32 @@ class CoppeliaEnv(gym.Env):
             self.target_zone = 0
             return 0
 
+        
 
-    def _calculate_reward_turtle(self):
+
+class TurtleBotEnv(CoppeliaEnv):
+    def __init__(self, params_env, comms_port=49054):
         """
-        Private method to calculate the reward based on distance.
+        Custom environment for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaEnv class.
+
+        Args:
+            params_env (dict): Dictionary of parameters for configuring the environment
+            comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
+
+        Attributes:
+            observation_space (gym.spaces.Box): Observation space of the environment.
+                - distance: [0, 5] m.
+                - angle: [-pi,pi] rads.
+                - laser_obs: 4 floats in the range [0,4] representing the distance in m. to the closest obstacle.
+                - time_elapsed: [0, 100] seconds of time consumed by the agent. Optional.
+        """
+        super(TurtleBotEnv, self).__init__(params_env, comms_port)
+        
+        # Set robot handle alias
+        self.robot_handle_alias = '/Turtlebot2'
+
+    def compute_reward(self):
+        """Compute the reward based on the current observation, action, and info.
 
         Args: None
 
@@ -354,15 +420,15 @@ class CoppeliaEnv(gym.Env):
         if distance < self.params_env["reward_dist_3"]:
             self.target_zone = 3
             self.terminated = True
-            return self._compute_adjusted_reward(self.params_env["reward_3"])
+            return self.compute_adjusted_reward(self.params_env["reward_3"])
         elif distance < self.params_env["reward_dist_2"]:
             self.target_zone = 2
             self.terminated = True
-            return self._compute_adjusted_reward(self.params_env["reward_2"])
+            return self.compute_adjusted_reward(self.params_env["reward_2"])
         elif distance < self.params_env["reward_dist_1"]:
             self.target_zone = 1
             self.terminated = True
-            return self._compute_adjusted_reward(self.params_env["reward_1"])
+            return self.compute_adjusted_reward(self.params_env["reward_1"])
         elif distance > self.params_env["max_dist"] or self.time_elapsed > self.params_env["max_time"]:
             self.terminated = True
             logging.info("Max dist or max time achieved")
@@ -376,96 +442,5 @@ class CoppeliaEnv(gym.Env):
             self.collision_flag = False
             self.target_zone = 0
             return 0
-        
 
-    def _calculate_reward_old(self):    # DEPRECATED
-        """
-        Private method to calculate the reward based on distance.
-
-        Args: None
-
-        Returns:
-            reward (float): The computed reward.
-        """
-        distance = self.observation["distance"]
-
-        if self.action_dic["finish_flag"]<0.5:
-            logging.info("Agent decided to finish the episode.")
-            self.truncated = True
-            if distance>0.5:
-                return -1000
-            else:
-                return 0
-        else:
-            if distance < 0.015:
-                self.terminated = True
-                return 10000
-                
-            elif distance < 0.05:
-                self.terminated = True
-                return 1000
-                
-            elif distance < 0.25:
-                self.terminated = True
-                return 100
-                
-            elif self.count>150 or distance > 2.5 or self.time_elapsed>80:
-                self.truncated = True
-                return -1000
-                
-            else:
-                self.terminated = False
-                self.truncated = False
-                return 0
-        
-        
-class BurgerBotEnv(CoppeliaEnv):
-    def __init__(self, params_env, comms_port=49054):
-        """
-        Custom environment for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaEnv class.
-
-        Args:
-            params_env (dict): Dictionary of parameters for configuring the environment
-            comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
-
-        Attributes:
-            observation_space (gym.spaces.Box): Observation space of the environment.
-                - distance: [0, 5] m.
-                - angle: [-pi,pi] rads.
-                - time_elapsed: [0, 100] seconds of time consumed by the agent. Optional.
-        """
-        super(BurgerBotEnv, self).__init__(params_env, comms_port)
-
-        # Define observation space
-        if params_env["obs_time"]:
-            self.observation_space= spaces.Box(low=np.array([0,-math.pi, 0, 0, 0, 0, 0, 0, 0, 0, 0],dtype=np.float32), 
-                                            high=np.array([5, math.pi, 4, 4, 4, 4, 4, 4, 4, 4, 100],dtype=np.float32), dtype=np.float32)
-        else: 
-            self.observation_space= spaces.Box(low=np.array([0,-math.pi, 0, 0, 0, 0, 0, 0, 0, 0],dtype=np.float32), 
-                                            high=np.array([5, math.pi, 4, 4, 4, 4, 4, 4, 4, 4],dtype=np.float32), dtype=np.float32)
-
-
-class TurtleBotEnv(CoppeliaEnv):
-    def __init__(self, params_env, comms_port=49054):
-        """
-        Custom environment for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaEnv class.
-
-        Args:
-            params_env (dict): Dictionary of parameters for configuring the environment
-            comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
-
-        Attributes:
-            observation_space (gym.spaces.Box): Observation space of the environment.
-                - distance: [0, 5] m.
-                - angle: [-pi,pi] rads.
-                - laser_obs: 4 floats in the range [0,4] representing the distance in m. to the closest obstacle.
-                - time_elapsed: [0, 100] seconds of time consumed by the agent. Optional.
-        """
-        super(TurtleBotEnv, self).__init__(params_env, comms_port)
-
-        if params_env["obs_time"]:
-            self.observation_space= spaces.Box(low=np.array([0,-math.pi, 0, 0, 0, 0, 0],dtype=np.float32), 
-                                            high=np.array([5, math.pi, 4, 4, 4, 4, 100],dtype=np.float32), dtype=np.float32)
-        else: 
-            self.observation_space= spaces.Box(low=np.array([0,-math.pi, 0, 0, 0, 0],dtype=np.float32), 
-                                            high=np.array([5, math.pi, 4, 4, 4, 4],dtype=np.float32), dtype=np.float32)
+      
