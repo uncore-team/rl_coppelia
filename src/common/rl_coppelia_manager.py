@@ -248,10 +248,9 @@ class RLCoppeliaManager():
                     "comms_port": self.free_comms_port                },
             )
 
-        logging.info(f"Environment for training created: {self.env}. Comms port: {self.free_comms_port}")
         self.robot_handle_alias = self.env.get_attr('robot_handle_alias')[0]  # Set robot handle alias from env
-        print(self.robot_handle_alias)
-
+        logging.info(f"Environment created for robot {self.robot_handle_alias}. Comms port: {self.free_comms_port}")
+        
 
     def start_communication(self):
         base_env = utils.unwrap_env(self.env)

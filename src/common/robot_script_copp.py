@@ -207,8 +207,13 @@ def sysCall_init():
     # HANDLES
     robotHandle = sim.getObject('..')                   # the robot
     robotAlias = sim.getObjectAlias(robotHandle,3)      # robot name
-    footprintHandle= sim.getObject('/base_link_visual')                  
-    laserHandle = sim.getObject('/Laser')
+    footprintHandle= sim.getObject('/base_link_visual')
+    if robotAlias == 'Burger':
+        laserHandle = sim.getObject('/Laser')
+    elif robotAlias == 'Turtlebot2':
+        laserHandle = sim.getObject('/fastHokuyo_ROS2')
+    else:
+        raise RuntimeError(f'[Turtle] Robot alias {robotAlias} not recognized. Available: Burger, Turtlebot2')
     
     motorLeft = sim.getObject("/wheel_left_joint")
     motorRight = sim.getObject("/wheel_right_joint")

@@ -211,7 +211,7 @@ class CoppeliaAgent:
                 self.sim.addDrawingObjectItem(self.distance_line, data[0:6])
 
             except Exception as e:
-                print(f"[DEBUG] Could not draw distance line: {e}")
+                logging.info(f"[DEBUG] Could not draw distance line: {e}")
 
         # --- Compute relative angle ---
         p1 = self.sim.getObjectPose(self.robot_baselink, -1)
