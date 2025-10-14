@@ -4,6 +4,9 @@
 results/*
 configs/*
 !configs/params_file.json
+!configs/params_default_file_burger.json
+!configs/params_default_file_turtle.json
+
 src/rl_coppelia.egg-info/
 .vscode/
 dependencies/rl_spin_decoupler

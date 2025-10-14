@@ -165,6 +165,8 @@ def draw_path(linear, angular, color_id):
 
         current_color_id = color_id  # Update current color
 
+        return
+
 
 def getTransformStamped(objHandle,name,relTo,relToName):
     global sim
