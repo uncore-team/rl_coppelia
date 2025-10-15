@@ -4,6 +4,7 @@
 BASE_DIR="$(pwd)"
 DEPS_DIR="$BASE_DIR/dependencies/rl_spin_decoupler"
 RL_COPPELIA_DIR="$BASE_DIR/src/rl_coppelia"
+SRC_DIR = "$BASE_DIR/src"
 
 # Make the PYTHONPATH change permanent by adding it to the shell's configuration
 SHELL_CONFIG="$HOME/.bashrc"  # Default for bash shell; change to ~/.zshrc for zsh users
@@ -13,8 +14,9 @@ PATH_UPDATED=false
 # Add the export lines to the config file only if they are not already there
 if ! grep -q "export PYTHONPATH=\"$DEPS_DIR" "$SHELL_CONFIG"; then
   echo "export PYTHONPATH=\"$DEPS_DIR:\$PYTHONPATH\"" >> "$SHELL_CONFIG"
+  echo "export PYTHONPATH=\"$SRC_DIR:\$PYTHONPATH\"" >> "$SHELL_CONFIG"
   echo "rl_spin_decoupler has been added to PYTHONPATH in $SHELL_CONFIG"
-  echo "The added line is: PYTHONPATH=\"$DEPS_DIR:\$PYTHONPATH\""
+  echo "The added lines are: PYTHONPATH=\"$DEPS_DIR:\$PYTHONPATH\ and PYTHONPATH=\"$SRC_DIR:\$PYTHONPATH\""
   PATH_UPDATED=true
 else
   echo "rl_spin_decoupler is alreaedy configured in PYTHONPATH in $SHELL_CONFIG"

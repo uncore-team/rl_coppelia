@@ -17,8 +17,10 @@ Features:
     - Captures robot trajectories and can save scene configurations.
 """
 
+import importlib
 import logging
 import os
+import pkgutil
 import shutil
 import sys
 
@@ -44,6 +46,7 @@ sys.path.append(os.path.abspath(os.path.join(project_path,"src")))
 
 from common import utils
 from common.coppelia_agents import BurgerBotAgent, TurtleBotAgent
+from plugins.agents import get_agent_factory
 
 # Global variables for the simulation context
 sim = None
@@ -51,6 +54,23 @@ agent = None
 verbose = 1
 sim_initialized = False
 agent_created = False
+
+
+def _autoload_agent_plugins(base_path):
+    """Import all modules in plugins.agents so they self-register."""
+    src_dir = os.path.join(base_path, "src")
+    if os.path.isdir(src_dir) and src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    try:
+        pkg = importlib.import_module("plugins.agents")
+        for m in pkgutil.iter_modules(pkg.__path__, "plugins.agents."):
+            try:
+                importlib.import_module(m.name)
+            except Exception as exc2:
+                logging.debug(f"Agent plugins: failed to import '{m.name}': {exc2}")
+    except Exception as exc:
+        logging.debug(f"Agent plugins import/iter skipped/failed: {exc}")
+
 
 
 def sysCall_init():
@@ -83,6 +103,8 @@ def sysCall_init():
     file_id = utils.get_file_index(model_name, paths["tf_logs"], robot_name)
     utils.logging_config(paths["script_logs"], comm_side, robot_name, file_id, log_level=logging.INFO, verbose=verbose)
 
+    _autoload_agent_plugins(base_path)
+
     logging.info(" ----- START EXPERIMENT ----- ")
     sim_initialized = True
 
@@ -94,15 +116,29 @@ def sysCall_thread():
     global sim, agent, robot_name, params_env, comms_port, sim_initialized, model_ids, paths, file_id, scene_to_load_folder, save_scene, save_traj, agent_created, action_times, model_name, verbose, test_scene_mode
 
     if sim_initialized:
-        logging.info("inside thread sim_initialized")
+        logging.debug("Inside thread sim_initialized")
+
         # Create agent
-        if robot_name == "turtleBot":
-            agent = TurtleBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
-        elif robot_name == "burgerBot":
-            agent = BurgerBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
-            agent.robot_baselink = agent.robot
-        else:   # by default it will use the BurgerBot configuration
-            agent = BurgerBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
+        factory = get_agent_factory(robot_name)
+        if factory is not None:
+            agent = factory(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
+            logging.info(
+                f"[plugins] Agent created via plugin for '{robot_name}'. "
+                f"Comms port: {comms_port}"
+            )
+        else:
+            logging.info(f"[plugins] No agent plugin found for '{robot_name}'. ")
+
+            # Fallback to hardcoded agents
+            if robot_name == "turtleBot":
+                agent = TurtleBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
+            elif robot_name == "burgerBot":
+                agent = BurgerBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
+                agent.robot_baselink = agent.robot
+            else:
+                raise ValueError(f"Unknown robot name '{robot_name}' and no plugin found.")
+            logging.info(f"Agent created via hardcoded class for '{robot_name}'. Comms port: {comms_port}")
+            
         logging.info("Agent initialized")
 
         # Configure scene and trajectory behavior

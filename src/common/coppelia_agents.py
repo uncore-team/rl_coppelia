@@ -12,7 +12,7 @@ from socketcomms.comms import BaseCommPoint # type: ignore
 
 
 class CoppeliaAgent:
-    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port = 49054) -> None:
+    def __init__(self, sim, params_robot, params_env, paths, file_id, verbose, comms_port = 49054) -> None:
         """
         Custom agent for CoppeliaSim simulations of different robots.
         
@@ -22,6 +22,7 @@ class CoppeliaAgent:
         Args:
             sim: The CoppeliaSim simulation instance.
             params_env (dict): Environment parameters loaded from a JSON file.
+            params_robot (dict): Robot-specific parameters loaded from a JSON file.
             paths (dict): Dictionary containing various paths for saving/loading data.
             file_id (str): Unique identifier for the current training/testing session.
             verbose (int): Verbosity level for logging.
@@ -44,7 +45,6 @@ class CoppeliaAgent:
             colorID (int): Color ID for visualization purposes.
             robot, robot_baselink, target, inner_targer: Handles for robot and target objects in CoppeliaSim.
             distance_line: Handle for the debug line showing distance between robot and target.
-            robotRadius (int): Radius of the robot in meters.
             handle_robot_scripts: Handle for robot script in CoppeliaSim.
             laser: Handle for laser sensor object, if any.
             generator: Handle for obstacle generator object, if any.
@@ -52,6 +52,7 @@ class CoppeliaAgent:
             handle_obstaclegenerators_script: Handle for obstacle generator script, if any.
             sim: The CoppeliaSim simulation instance.
             params_env (dict): Environment parameters loaded from a JSON file.
+            params_robot (dict): Robot-specific parameters loaded from a JSON file.
             initial_simTime (float): Initial simulation time when the agent starts its first movement.
             initial_realTime (float): Initial wall-clock time when the agent starts its first movement.
             paths (dict): Dictionary containing various paths for saving/loading data.
@@ -111,21 +112,21 @@ class CoppeliaAgent:
         self.colorID = 1
         
         self.robot = None
-        self.robotRadius = 0
         self.robot_baselink = None
-        self.target = None
-        self.inner_target = None
         self.distance_line = None
-        self.handle_robot_scripts = None
-
         self.laser = None
-        self.generator = None
-        
-        self.handle_laser_get_observation_script = None
-        self.handle_obstaclegenerators_script = None
+
+        self.target=sim.getObject("/Target")
+        self.inner_target=sim.getObject("/Target/Inner_disk")
+        self.container = sim.getObject('/ExternalWall')
+        self.generator=sim.getObject('/ObstaclesGenerator')
+        self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
+        self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')
+        self.handle_robot_scripts = sim.getScript(1, self.robot)
 
         self.sim = sim
         self.params_env = params_env
+        self.params_robot = params_robot
 
         self.initial_simTime = 0
         self.initial_realTime = 0
@@ -292,6 +293,7 @@ class CoppeliaAgent:
     def get_random_object_pos (self, object_type):
         '''
         Get a random object position inside the container, taking into account the object radius and the container dimensions.
+        It is used for locating the robot and the target. 
         
         Args:
             object_type (string): String to indicate if it is the 'robot' or the 'target'.
@@ -310,7 +312,7 @@ class CoppeliaAgent:
             cfg_target = self.sim.unpackTable(raw_target) if raw_target else {}
             objectRadius  = cfg_target.get('outerRadius', None)
         elif object_type == "robot":
-            objectRadius = self.robotRadius
+            objectRadius = self.params_robot["distance_between_wheels"]/2 + self.params_env["max_crash_dist_critical"] + 0.05 # wheels width aprox
 
         objectPosX = random.uniform(-containerSideX/2 + objectRadius, containerSideX/2 - objectRadius)
         objectPosY = random.uniform(-containerSideY/2 + objectRadius, containerSideY/2 - objectRadius)
@@ -339,7 +341,7 @@ class CoppeliaAgent:
 
             # Get the threshold for each case
             if object_type == "robot":
-                threshold = self.robotRadius
+                threshold = self.params_robot["distance_between_wheels"]/2 + self.params_env["max_crash_dist_critical"] + 0.05
             elif object_type == "target":
                 threshold = self.params_env["reward_dist_1"]
 
@@ -732,69 +734,52 @@ class CoppeliaAgent:
 
 
 class BurgerBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
+    def __init__(self, sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
         """
         Custom agent for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
         Args:
             sim: Coppelia object for handling the scene's objects.
+            params_robot (dict): Dictionary of parameters specific to the robot.
             params_env (dict): Dictionary of parameters for configuring the agent.
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
             
         Attributes:
             robot (CoppeliaObject): Robot object in CoppeliaSim scene.
-            target (CoppeliaObject): Target object in CoppeliaSim scene.
-            handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
+            robot_baselink (CoppeliaObject): Object of the robot's basein CoppeliaSim scene.
+            laser (CoppeliaObject): Lase object in CoppeliaSim scene.
         """
-        super(BurgerBotAgent, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
+        super(BurgerBotAgent, self).__init__(sim, params_robot, params_env, paths, file_id, verbose, comms_port)
 
         self.robot = sim.getObject("/Burger")
         self.robot_baselink = self.robot
-        self.robotRadius = 0.17 #m
-        self.target = sim.getObject("/Target")
-        self.inner_target=sim.getObject("/Target/Inner_disk")
-        self.generator=sim.getObject('/ObstaclesGenerator')
-        self.container = sim.getObject('/ExternalWall')
         self.laser=sim.getObject('/Burger/Laser')
-        self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
-        self.handle_robot_scripts = sim.getScript(1, self.robot)
-        self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')
 
         logging.info(f"BurgerBot Agent created successfully using port {comms_port}.")
 
 
 class TurtleBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
+    def __init__(self, sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
         """
         Custom agent for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
         Args:
             sim: Coppelia object for handling the scene's objects.
+            params_robot (dict): Dictionary of parameters specific to the robot.
             params_env (dict): Dictionary of parameters for configuring the agent.
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
 
         Attributes:
             robot (CoppeliaObject): Robot object in CoppeliaSim scene.
-            target (CoppeliaObject): Target object in CoppeliaSim scene.
             robot_baselink (CoppeliaObject): Object of the robot's basein CoppeliaSim scene.
             laser (CoppeliaObject): Lase object in CoppeliaSim scene.
-            generator (CoppeliaObject): Obstacles' generator object in CoppeliaSim scene.
-            handle_laser_get_observation_script (CoppeliaObject): Handle for using the script which gets the laser observations in CoppeliaSim scene.
-            handle_obstaclegenerators_script (CoppeliaObject): Handle for using the script which generates the obstacles in CoppeliaSim scene.
-            handle_robot_scripts (CoppeliaObject): Handle for using the moving the robot in CoppeliaSim scene.
+
         """
-        super(TurtleBotAgent, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
+        super(TurtleBotAgent, self).__init__(sim, params_robot, params_env, paths, file_id, verbose, comms_port)
 
         self.robot=sim.getObject('/Turtlebot2')
         self.robot_baselink=sim.getObject('/Turtlebot2/base_link_respondable')
-        self.robotRadius = 0.3 #m
-        self.target=sim.getObject("/Target")
-        self.inner_target=sim.getObject("/Target/Inner_disk")
-        self.container = sim.getObject('/ExternalWall')
         self.laser=sim.getObject('/Turtlebot2/fastHokuyo_ROS2')
-        self.generator=sim.getObject('/ObstaclesGenerator')
-        self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
-        self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')
-        self.handle_robot_scripts = sim.getScript(1, self.robot)
+        
 
         logging.info(f"TurtleBot Agent created successfully using port {comms_port}.")

@@ -3541,3 +3541,66 @@ def unwrap_env(vec_env, idx=0):
     while hasattr(env, "env"):
         env = env.env
     return env
+
+
+
+# ------------------------------------
+# ------------------------------------
+# ------- CLI Terminal helpers -------
+# ------------------------------------
+# ------------------------------------
+
+
+def prompt_str(msg: str, *, default: Optional[str] = None, allow_empty: bool = False) -> str:
+    """Prompt for a string with optional default."""
+    while True:
+        prompt = f"{msg}"
+        if default is not None:
+            prompt += f" [{default}]"
+        prompt += ": "
+        val = input(prompt).strip()
+        if not val:
+            if default is not None:
+                return default
+            if allow_empty:
+                return ""
+            print("Please enter a value.")
+            continue
+        return val
+
+
+def prompt_yes_no(msg: str, *, default: Optional[bool] = None) -> bool:
+    """Prompt for a yes/no question."""
+    opt = ""
+    if default is True:
+        opt = " [Y/n]"
+    elif default is False:
+        opt = " [y/N]"
+    ans = input(f"{msg}{opt}: ").strip().lower()
+    if not ans and default is not None:
+        return default
+    return ans in ("y", "yes", "s", "si", "sí", "true", "1")
+
+
+def prompt_int(msg: str, *, default: Optional[int] = None, min_val: Optional[int] = None) -> int:
+    """Prompt for an integer with basic validation."""
+    while True:
+        s = prompt_str(msg, default=None if default is None else str(default))
+        try:
+            v = int(s)
+            if min_val is not None and v < min_val:
+                print(f"Must be >= {min_val}.")
+                continue
+            return v
+        except ValueError:
+            print("Please enter an integer number.")
+
+
+def prompt_float(msg: str, *, default: Optional[float] = None) -> float:
+    """Prompt for a float with basic validation."""
+    while True:
+        s = prompt_str(msg, default=None if default is None else str(default))
+        try:
+            return float(s)
+        except ValueError:
+            print("Please enter a numeric (float) value.")

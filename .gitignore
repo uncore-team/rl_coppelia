@@ -3,7 +3,7 @@
 /rl_coppelia/retrain.py
 results/*
 configs/*
-!configs/params_file.json
+!configs/params_default_file.json
 !configs/params_default_file_burger.json
 !configs/params_default_file_turtle.json
 

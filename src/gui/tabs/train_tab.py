@@ -12,7 +12,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QIcon
 import pkg_resources
 
-from gui import dialogs, robot_generator  # uses your existing modules
+from common import robot_generator
+from gui import dialogs  # uses your existing modules
 from gui.services import list_dirs, list_json_files
 from gui.common_ui import create_styled_button  # uses your existing styled button
 
@@ -48,6 +49,7 @@ class TrainTab(QWidget):
         self.new_robot_label.setPlaceholderText("Introduce name")
         self.new_robot_label.setMaximumWidth(220)
         self.new_robot_label.hide()
+        self.new_robot_label.editingFinished.connect(self._update_scene_from_new_robot_name)
 
         row = QWidget()
         row_l = QHBoxLayout(row)
@@ -174,6 +176,20 @@ class TrainTab(QWidget):
         scene_path = os.path.join(base, "scenes", f"{robot}_scene.ttt")
         self.scene_input.setText(scene_path)
         self._validate_scene()
+
+    
+    def _update_scene_from_new_robot_name(self) -> None:
+        """When user finishes editing new robot name, update scene path."""
+        name = self.new_robot_label.text().strip()
+        if not name:
+            self.scene_input.clear()
+            self.scene_input.setStyleSheet("")
+            return
+        base = self._get_base_path()
+        scene_path = os.path.join(base, "scenes", f"{name}_scene.ttt")
+        self.scene_input.setText(scene_path)
+        self._validate_scene()
+
 
     def _validate_scene(self) -> None:
         """Keep a light validation feedback for scene path."""

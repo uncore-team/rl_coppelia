@@ -108,6 +108,8 @@ class CoppeliaEnv(gym.Env, ABC):
 
         # Name of the robot handle in CoppeliaSim scene
         self.robot_handle_alias = None  # To be defined by child classes
+        self.wheel_radius = None  # To be defined by child classes
+        self.distance_between_wheels = None  # To be defined by child classes
 
 
     @abstractmethod
@@ -408,6 +410,8 @@ class TurtleBotEnv(CoppeliaEnv):
             laser_obs[3] < self.params_env["max_crash_dist_critical"] or
             any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
             ):
+
+             
             logging.info("Crashed")
             self.collision_flag = True
             self.terminated=True

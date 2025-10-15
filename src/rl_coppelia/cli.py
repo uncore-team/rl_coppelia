@@ -3,7 +3,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" # Suppress TensorFlow warnings
 import argparse
 import argcomplete
 from argcomplete.completers import FilesCompleter
-from rl_coppelia import auto_testing, auto_training, plot, sat_training, test_scene, train, test, save, tf_start, retrain
+from rl_coppelia import auto_testing, auto_training, plot, sat_training, test_scene, train, test, save, tf_start, retrain, create_robot
 
 
 # def model_name_completer(prefix, parsed_args, **kwargs):
@@ -53,7 +53,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="rl_coppelia", description="Training and testing CLI")
     subparsers = parser.add_subparsers(dest="command")
 
-    train_parser = subparsers.add_parser("train", help="Train a RL algorithm for robot movement in CoppeliaSim")
+    create_robot_parser = subparsers.add_parser("create_robot", help="Create an environment and its corresponding agent for CoppeliaSim simulation.")
+
+    train_parser = subparsers.add_parser("train", help="Train a RL algorithm for robot movement in CoppeliaSim.")
     train_parser.add_argument("--robot_name", type=str, help="Name for the robot.", required=True)
     train_parser.add_argument("--scene_path", type=str, help="Path to the CoppeliaSim scene file.", required=False)
     train_parser.add_argument("--dis_parallel_mode", action="store_true", help="Disables the parallel training or testing.", required=False)
@@ -63,7 +65,7 @@ def main(argv=None):
     train_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=0, required=False)
 
-    test_parser = subparsers.add_parser("test", help="Test a trained RL algorithm for robot movement in CoppeliaSim")
+    test_parser = subparsers.add_parser("test", help="Test a trained RL algorithm for robot movement in CoppeliaSim.")
     test_parser.add_argument("--model_name", type=str, help="Name of the trained model is required (it must be located under 'models' folder)", required=True)
     test_parser.add_argument("--robot_name", type=str, help="Name for the robot. Default will be burgerBot.", required=False)
     test_parser.add_argument("--scene_path", type=str, help="Path to the CoppeliaSim scene file.", required=False)
@@ -77,7 +79,7 @@ def main(argv=None):
     test_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=0, required=False)
 
-    test_scene_parser = subparsers.add_parser("test_scene", help="Test a trained RL algorithm for robot movement in CoppeliaSim for just one iteration, using a preconfigured scene")
+    test_scene_parser = subparsers.add_parser("test_scene", help="Test a trained RL algorithm for robot movement in CoppeliaSim for just one iteration, using a preconfigured scene.")
     test_scene_parser.add_argument("--model_ids", type=int, nargs='+', help="List with numerical IDs of the different models to be plotted. They must be located inside 'models' folder. Program will take the '_last' one", required=True)
     test_scene_parser.add_argument("--scene_to_load_folder", type=str, help="Folder name, located inside 'scene_configs', that contains the scene be loaded", required=True)
     test_scene_parser.add_argument("--robot_name", type=str, help="Name for the robot.", required=True)
@@ -122,7 +124,7 @@ def main(argv=None):
     sampling_at_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=0, required=False)
 
-    save_parser = subparsers.add_parser("save", help="Save a trained model, along with all the date generated during its training/testing processes")
+    save_parser = subparsers.add_parser("save", help="Save a trained model, along with all the date generated during its training/testing processes.")
     save_parser.add_argument("--model_name", type=str, help="Name of the model to be saved (it must be located under 'models' folder)", required=True)
     save_parser.add_argument("--new_name", type=str, help="New name for saving the model", required=True)
     save_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
@@ -145,7 +147,7 @@ def main(argv=None):
     plot_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=-1, required=False)
 
-    retrain_parser = subparsers.add_parser("retrain", help="Retrain a pretrained RL algorithm for robot movement in CoppeliaSim")
+    retrain_parser = subparsers.add_parser("retrain", help="Retrain a pretrained RL algorithm for robot movement in CoppeliaSim.")
     retrain_parser.add_argument("--model_name", type=str, help="Name of the trained model is required (it must be located under 'models' folder)", required=True)
     retrain_parser.add_argument("--retrain_steps", type=int, help="Number of steps for the retraining. Default = 50.000",required=True, default=50000)
     retrain_parser.add_argument("--scene_path", type=str, help="Path to the CoppeliaSim scene file.", required=False)
@@ -177,6 +179,8 @@ def main(argv=None):
         retrain.main(args)
     elif args.command == "test_scene":
         test_scene.main(args)
+    elif args.command == "create_robot":
+        create_robot.main()
     else:
         parser.print_help() # Show help if no command provided
 

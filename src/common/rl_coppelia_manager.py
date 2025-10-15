@@ -22,6 +22,7 @@ learning tasks using CoppeliaSim as the simulation environment.
 """
 import os
 import shutil
+import sys
 
 from spindecoupler import RLSide
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -34,41 +35,30 @@ from common import utils
 from common.coppelia_envs import BurgerBotEnv, TurtleBotEnv
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import VecEnv
-from typing import Callable, Dict
 import importlib
 import pkgutil
+from plugins.envs import get_env_factory
 
 
 class RLCoppeliaManager():
-    _robot_factories: Dict[str, Callable[["RLCoppeliaManager"], VecEnv]] = {}
-    @classmethod
-    def register_robot(cls, name: str, factory: Callable[["RLCoppeliaManager"], VecEnv]) -> None:
-        """Register a new robot factory by name.
 
-        Args:
-            name: Unique robot name (e.g., "burgerBot").
-            factory: Callable that receives the manager instance and returns a VecEnv.
+    def _autoload_env_plugins(self) -> None:
+        """Autoload env plugins from 'plugins.envs' to populate the registry.
 
-        Notes:
-            Registration is idempotent and overrides existing entries with the same name.
+        This will import every module inside 'src/plugins/envs'.
+        Each plugin should call `RLCoppeliaManager.register_env(...)`.
         """
-        cls._robot_factories[name] = factory
-
-    def _autoload_robot_plugins(self) -> None:
-        """Auto-import robot plugins to populate the registry.
-
-        This will import every module inside 'rl_coppelia.robot_plugins'.
-        Each plugin should call `RLCoppeliaManager.register_robot(...)`.
-
-        Safe to call multiple times; imports are cached by Python.
-        """
+        src_dir = os.path.join(self.base_path, "src")
+        if os.path.isdir(src_dir) and src_dir not in sys.path:
+            sys.path.insert(0, src_dir)
         try:
-            pkg_name = "rl_coppelia.robot_plugins"
-            pkg = importlib.import_module(pkg_name)
-            for m in pkgutil.iter_modules(pkg.__path__, pkg_name + "."):
+            pkg = importlib.import_module("plugins.envs")
+            for m in pkgutil.iter_modules(pkg.__path__, "plugins.envs."):
                 importlib.import_module(m.name)
         except Exception as exc:
-            logging.debug(f"Robot plugins autoload skipped or failed: {exc}")
+            logging.debug(f"Env plugins autoload skipped/failed: {exc}")
+
+
     def __init__(self, args):
         """
         Manages the interactions with the CoppeliaSim simulation environment for robot training.
@@ -154,7 +144,7 @@ class RLCoppeliaManager():
         self.robot_handle_alias = None  # To be defined by child classes
 
         # Autoload plugin modules so they can self-register
-        self._autoload_robot_plugins()
+        self._autoload_env_plugins()
 
 
     def _get_calling_script(self):
@@ -169,33 +159,6 @@ class RLCoppeliaManager():
         return None
 
 
-    # def create_env(self):
-    #     """
-    #     This function creates a custom environment using the CoppeliaEnv child classes (located in coppelia_envs.py script)
-        
-    #     If parallel mode has been selected, it will firstly search for the next free port after the default one (49054). After 
-    #     that, it will create the custom environment depending on the robot name specified by the user, and it will vectorize it.
-
-    #     Two instances are created: ``env``, for training, and ``env_test`` for the EvalCallback that will evaluate the last model every
-    #     x timesteps.
-    #     """
-        
-    #     if self.args.robot_name == "burgerBot":
-    #         self.env = make_vec_env(BurgerBotEnv, n_envs=1, monitor_dir=self.log_monitor,
-    #                         env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
-
-            
-    #     elif self.args.robot_name == "turtleBot":
-    #         self.env = make_vec_env(TurtleBotEnv, n_envs=1, monitor_dir=self.log_monitor,
-    #                         env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
-        
-    #     else:   # by default it uses the BurgerBotEnv environment
-    #         self.env = make_vec_env(BurgerBotEnv, n_envs=1, monitor_dir=self.log_monitor,
-    #                         env_kwargs={'params_env': self.params_env, 'comms_port': self.free_comms_port})
-        
-            
-    #     logging.info(f"Environment for training created: {self.env}. Comms port: {self.free_comms_port}")  
-
     def create_env(self):
         """Create and vectorize the environment for the selected robot.
 
@@ -208,7 +171,7 @@ class RLCoppeliaManager():
             None. Sets `self.env`.
         """
         # 1) Plugin path (recommended)
-        factory = self._robot_factories.get(self.args.robot_name)
+        factory = get_env_factory(self.args.robot_name)
         if factory is not None:
             self.env = factory(self)  # factory receives manager, can access params/ports
             logging.info(

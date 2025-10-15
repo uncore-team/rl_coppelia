@@ -1,0 +1,609 @@
+from __future__ import annotations
+import json
+import os
+import shutil
+import tempfile
+import textwrap
+import re
+from typing import Dict, Any, List, Optional, Tuple
+
+# ------------------------------------
+# ------- AUXILIARY FUNCTIONS --------
+# ------------------------------------
+
+
+def _snake_to_camel(name: str) -> str:
+    """Convert a snake_case or kebab-case string to CamelCase.
+    Examples:
+        "burgerBot" -> "BurgerBot"
+        "my_new-bot" -> "MyNewBot"
+    """
+    parts = [p for p in re.split(r"[_\- ]+", name) if p]
+    return "".join(s.capitalize() for s in parts)
+
+
+def _resolve_space_from_spec(defn: Dict[str, Any]) -> Tuple[int, List[float], List[float], List[str]]:
+    """Resolve a Box space from a unified spec.
+
+    The spec can be either:
+      A) Named variables (recommended):
+         {"vars": [{"name": str, "low": float, "high": float}, ...]}
+      B) Size + broadcastable bounds:
+         {"size": int, "low": float|list[float], "high": float|list[float]}
+
+    Returns:
+        (dim, lows, highs, names)
+        - names may be an empty list if using the size/broadcast form.
+
+    Raises:
+        ValueError: If the specification is invalid.
+    """
+    def _to_list(x: Any, size: int, key: str) -> List[float]:
+        if isinstance(x, (list, tuple)):
+            if len(x) != size:
+                raise ValueError(f"Length of '{key}' must match size={size}.")
+            return [float(v) for v in x]
+        return [float(x)] * size
+
+    lows: List[float] = []
+    highs: List[float] = []
+    names: List[str] = []
+
+    if isinstance(defn, dict) and "vars" in defn and isinstance(defn["vars"], list):
+        for v in defn["vars"]:
+            lows.append(float(v["low"]))
+            highs.append(float(v["high"]))
+            n = v.get("name")
+            if isinstance(n, str) and n:
+                names.append(n)
+            else:
+                names.append(f"var_{len(names)}")
+    else:
+        size = int(defn.get("size", 0))
+        if size <= 0:
+            raise ValueError("Spec must define either 'vars' list or a positive 'size'.")
+        lows = _to_list(defn.get("low", 0.0), size, "low")
+        highs = _to_list(defn.get("high", 1.0), size, "high")
+        names = []  # unnamed case
+
+    dim = len(lows)
+    return dim, lows, highs, names
+
+
+def _assign_handle(var: str, path: str) -> str:
+    '''
+    Helper to generate a line that assigns a Coppelia handle to self.var.
+    If path is empty, generate a commented line with a placeholder.
+    '''
+    if not path:
+        return f"# self.{var} = sim.getObject('/path/to/{var}')"
+    return f"self.{var} = sim.getObject('{path}')"
+
+
+def _deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively update dict `dst` with keys from `src`."""
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _deep_update(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
+
+
+def _derive_generic_env_fields_from_spec(env_spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Build generic env fields (dim_* and *_limits) from the unified env_spec.
+
+    Args:
+        env_spec: Dict with:
+            - "obs": named or size-based space
+            - "act": named or size-based space
+            - "robot_data": optional, handled elsewhere (params_robot)
+
+    Returns:
+        Dict with fields suitable for params_env:
+            {
+              "dim_action_space": int,
+              "action_bottom_limits": List[float],
+              "action_upper_limits": List[float],
+              "dim_observation_space": int,
+              "observation_bottom_limits": List[float],
+              "observation_upper_limits": List[float]
+            }
+    """
+    obs_def = env_spec.get("obs", {})
+    act_def = env_spec.get("act", {})
+
+    dim_obs, obs_lows, obs_highs, _obs_names = _resolve_space_from_spec(obs_def)
+    dim_act, act_lows, act_highs, _act_names = _resolve_space_from_spec(act_def)
+
+    return {
+        "dim_action_space": dim_act,
+        "action_bottom_limits": act_lows,
+        "action_upper_limits": act_highs,
+        "dim_observation_space": dim_obs,
+        "observation_bottom_limits": obs_lows,
+        "observation_upper_limits": obs_highs,
+    }
+
+
+
+def _create_generic_params_file(
+    base_path: str,
+    robot_name: str,
+    env_spec: Dict[str, Any],
+    updates: Optional[Dict[str, Any]] = None,
+    *,
+    template_filename: str = "params_default_file.json"
+) -> str:
+    """Create a new params JSON from the default template (safe copy first).
+
+    Steps:
+      1) Copy `<base_path>/configs/<template_filename>` into
+         `<base_path>/configs/params_default_file_<robot_name>.json`.
+      2) Load that copy.
+      3) Inject generic space fields (dim_*, *_limits) from `env_spec`.
+      4) Inject `params_robot` from `env_spec["robot_data"]`.
+      5) Apply explicit `updates` if provided.
+
+    Args:
+        base_path: Project root.
+        robot_name: Robot name (used for output filename).
+        env_spec: Unified env spec (robot_data, obs, act).
+        updates: Optional explicit overrides for sections.
+        template_filename: Base template JSON name in configs/.
+
+    Returns:
+        Absolute path to the new JSON file.
+    """
+    configs_dir = os.path.join(base_path, "configs")
+    template_path = os.path.join(configs_dir, template_filename)
+    if not os.path.isfile(template_path):
+        raise FileNotFoundError(f"Template not found: {template_path}")
+
+    # --- Step 1: copy original to new file -----------------------------------
+    target_name = f"params_default_file_{robot_name}.json"
+    target_path = os.path.join(configs_dir, target_name)
+    shutil.copyfile(template_path, target_path)
+
+    # --- Step 2: load the new copy -------------------------------------------
+    with open(target_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # Ensure required sections exist
+    data.setdefault("params_env", {})
+    data.setdefault("params_robot", {})
+    data.setdefault("params_train", {})
+    data.setdefault("params_test", {})
+
+    # --- Step 3: inject generic env fields -----------------------------------
+    generic_env = _derive_generic_env_fields_from_spec(env_spec)
+    _deep_update(data["params_env"], generic_env)
+
+    # --- Step 4: inject robot_data -------------------------------------------
+    robot_data = env_spec.get("robot_data")
+    if isinstance(robot_data, dict) and robot_data:
+        _deep_update(data["params_robot"], robot_data)
+
+    # --- Step 5: apply explicit overrides ------------------------------------
+    if updates:
+        _deep_update(data, updates)
+
+    # --- Step 6: write changes atomically ------------------------------------
+    fd, tmp_path = tempfile.mkstemp(prefix=f".{target_name}.", dir=configs_dir, text=True)
+    os.close(fd)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as w:
+            json.dump(data, w, ensure_ascii=False, indent=4)
+            w.write("\n")
+        os.replace(tmp_path, target_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        raise
+
+    return target_path
+
+
+
+# ------------------------------------
+# --------------- ENVS ---------------
+# ------------------------------------
+
+def generate_env_code(robot_name: str, spec: Dict[str, Any]) -> str:
+    """Build the Python source for the new Env class from a unified spec.
+
+    The spec supports two shapes:
+        - Named variables (recommended for readability)
+        - Size + broadcastable bounds
+
+    Spec examples:
+        # A) Named variables
+        spec = {
+            "robot_data": {
+                "wheel_radius": 0.035,
+                "distance_between_wheels": 0.23
+            },
+
+            "obs": {
+                "vars": [
+                    {"name": "distance", "low": 0.0, "high": 10.0},
+                    {"name": "angle",    "low": -3.1416, "high": 3.1416}
+                ]
+            },
+            "act": {
+                "vars": [
+                    {"name": "v",     "low": -1.0, "high": 1.0},
+                    {"name": "omega", "low": -2.0, "high": 2.0}
+                ]
+            }
+        }
+
+        # B) Size + broadcastable bounds (scalars or lists)
+        spec = {
+            "robot_data": {"wheel_radius": 0.035, "distance_between_wheels": 0.23},
+            "obs": {"size": 3, "low": [0, -3.14, 0], "high": [10, 3.14, 100]},
+            "act": {"size": 2, "low": -1.0, "high": 1.0}
+        }
+
+    Args:
+        robot_name: Robot name (e.g., "burgerBot").
+        spec: Dict with 'obs' and 'act' definitions (see examples).
+
+    Returns:
+        Python file content as a string.
+    """
+    class_name = f"{_snake_to_camel(robot_name)}Env"
+
+    # Get obs and act info from spec dict
+    obs_def = spec.get("obs", {})
+    act_def = spec.get("act", {})
+
+    # Resolve spaces
+    obs_dim, obs_names, obs_lows, obs_highs = _resolve_space_from_spec(obs_def)
+    act_dim, act_names, act_lows, act_highs = _resolve_space_from_spec(act_def)
+
+    # Stringify for code
+    obs_low_arr = ", ".join(f"{x:.10g}" for x in obs_lows)
+    obs_high_arr = ", ".join(f"{x:.10g}" for x in obs_highs)
+    act_low_arr = ", ".join(f"{x:.10g}" for x in act_lows)
+    act_high_arr = ", ".join(f"{x:.10g}" for x in act_highs)
+    obs_names_list = ", ".join(repr(n) for n in obs_names) if obs_names else ""
+    act_names_list = ", ".join(repr(n) for n in act_names) if act_names else ""
+
+    doc_obs_names = f"names = [{obs_names_list}]" if obs_names else "names = []  # unnamed (size-based)"
+    doc_act_names = f"names = [{act_names_list}]" if act_names else "names = []  # unnamed (size-based)"
+
+    # Get robot_data if any
+    robot_data = spec.get("robot_data", {})
+    wheel_radius = robot_data["wheel_radius"]
+    distance_between_wheels = robot_data["distance_between_wheels"]
+
+    return textwrap.dedent(f'''\
+        """Auto-generated environment for '{robot_name}'.
+
+        This Env inherits from CoppeliaEnv and defines a Box observation space based on GUI input.
+        """
+
+        import math
+        import numpy as np
+        from gymnasium import spaces
+
+        from common.coppelia_envs import CoppeliaEnv
+
+        class {class_name}(CoppeliaEnv):
+            def __init__(self, params_env, comms_port=49054):
+                """Custom environment for '{robot_name}'.
+
+                Args:
+                    params_env (dict): Environment parameters.
+                    comms_port (int, optional): Port for communication with the agent. Defaults to 49054.
+
+                Notes:
+                    The action and observation spaces are a Box with the variables specified at creation time:
+                    Observation space {doc_obs_names}.
+                    Action space {doc_act_names}.
+
+                """
+                super({class_name}, self).__init__(params_env, comms_port)
+
+                # Define observation space
+                self.observation_space = spaces.Box(
+                    low=np.array([{obs_low_arr}], dtype=np.float32),
+                    high=np.array([{obs_high_arr}], dtype=np.float32),
+                    dtype=np.float32
+                )
+
+                # Define action space
+                self.action_space = spaces.Box(
+                    low=np.array([{act_low_arr}], dtype=np.float32),
+                    high=np.array([{act_high_arr}], dtype=np.float32),
+                    dtype=np.float32
+                )
+
+                # Define robot-specific parameters
+                self.wheel_radius = {wheel_radius}  # meters
+                self.distance_between_wheels = {distance_between_wheels}  # meters
+
+            # TODO: Implement other environment-specific methods if needed,
+            # such as _get_observation(), _compute_reward(), step(), reset(), etc.
+    ''')
+
+
+def generate_env_plugin_code(robot_name: str) -> str:
+    """Build the plugin source that registers the factory for this robot.
+
+    Args:
+        robot_name: Robot name.
+
+    Returns:
+        Python file content as a string.
+    """
+    class_name = f"{_snake_to_camel(robot_name)}Env"
+    return textwrap.dedent(f'''\
+        """Plugin to register '{robot_name}' robot environment.
+
+        Loaded on the RL side. It registers a VecEnv factory on import.
+        """
+
+        from plugins.envs import register_env
+        from stable_baselines3.common.env_util import make_vec_env
+        from robots.{robot_name}.envs import {class_name}
+
+        def make_env(manager: RLCoppeliaManager):
+            """Create a VecEnv instance for '{robot_name}'.
+
+            Args:
+                manager: The current RLCoppeliaManager instance.
+
+            Returns:
+                A vectorized environment (VecEnv) suitable for training/testing.
+            """
+            return make_vec_env(
+                {class_name},
+                n_envs=1,
+                monitor_dir=manager.log_monitor,
+                env_kwargs={{
+                    "params_env": manager.params_env,
+                    "comms_port": manager.free_comms_port,
+                }},
+            )
+
+        # Register on module import
+        register_env("{robot_name}", make_env)
+    ''')
+
+
+def create_robot_env_and_plugin(base_path: str, robot_name: str, spec: dict) -> tuple[str, str]:
+    """Create the env module and the plugin for a new robot.
+
+    Args:
+        base_path: Project root (the parent of 'robots' and 'src').
+        robot_name: New robot name (folder-friendly, e.g., 'myNewBot').
+        spec: Dict as returned by NewEnvDialog.get_spec():
+              {{
+                "include_time": bool,
+                "vars": [{{"name": str, "low": float, "high": float}}, ...]
+              }}
+
+    Returns:
+        (env_file_path, plugin_file_path)
+    """
+    os.makedirs(os.path.join(base_path, "robots", robot_name), exist_ok=True)
+    # robots/<robot>/__init__.py
+    pkg_init = os.path.join(base_path, "robots", robot_name, "__init__.py")
+    if not os.path.exists(pkg_init):
+        with open(pkg_init, "w", encoding="utf-8") as f:
+            f.write("# Package for robot: " + robot_name + "\n")
+
+    # robots/<robot>/envs.py
+    env_path = os.path.join(base_path, "robots", robot_name, "envs.py")
+    env_src = generate_env_code(robot_name, spec)
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.write(env_src)
+
+    # src/plugins/envs/__init__.py
+    plugins_pkg = os.path.join(base_path, "src", "plugins", "envs")
+    os.makedirs(plugins_pkg, exist_ok=True)
+    init_plugins = os.path.join(plugins_pkg, "__init__.py")
+    if not os.path.exists(init_plugins):
+        with open(init_plugins, "w", encoding="utf-8") as f:
+            f.write('"""Env plugins package (RL side). Modules here should register on import."""\n')
+
+    # src/plugins/envs/<robot>.py
+    plugin_path = os.path.join(plugins_pkg, f"{robot_name}.py")
+    plugin_src = generate_env_plugin_code(robot_name)
+    with open(plugin_path, "w", encoding="utf-8") as f:
+        f.write(plugin_src)
+
+    return env_path, plugin_path
+
+
+
+# ------------------------------------
+# -------------- AGENTS --------------
+# ------------------------------------
+
+def generate_agent_code(robot_name: str, spec: dict) -> str:
+    """Build the Python source for the new Agent subclass.
+
+    Args:
+        robot_name: Folder-friendly robot name (e.g., "burgerBot").
+        spec: Dict with needed keys for creating an agent:
+            {
+              "handles": {
+                  "robot": "/Turtlebot2",
+                  "robot_baselink": "/Turtlebot2/base_link_respondable",
+                  "laser": "/Turtlebot2/fastHokuyo_ROS2"   # optional
+              }
+            }
+
+    Returns:
+        Python file content as a string.
+    """
+    class_name = f"{_snake_to_camel(robot_name)}Agent"
+
+    # Extract agent values from spec
+    h = (spec or {}).get("handles", {})
+    robot = h.get("robot", "")
+    robot_bl = h.get("robot_baselink", "")
+    laser = h.get("laser", "")
+
+    robot_line = _assign_handle("robot", robot)
+    robot_bl_line = _assign_handle("robot_baselink", robot_bl)
+    laser_line = _assign_handle("laser", laser)
+
+    return textwrap.dedent(f'''\
+        """Auto-generated agent subclass for '{robot_name}'.
+
+        This class wires only the robot-specific handles. All generic logic and
+        additional scene objects are handled by the base CoppeliaAgent.
+        """
+
+        import logging
+
+        from common.coppelia_agents import CoppeliaAgent
+
+        class {class_name}(CoppeliaAgent):
+            def __init__(self, sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
+                """Custom agent for {robot_name} (auto-generated).
+
+                Args:
+                    sim: Coppelia object for handling the scene's objects.
+                    params_robot (dict): Robot-specific parameters.
+                    params_env (dict): Environment parameters.
+                    paths (dict): Project paths.
+                    file_id (str): Experiment/session ID.
+                    verbose (int): Verbosity.
+                    comms_port (int): Port for RL-side communications. Defaults to 49054.
+                """
+                super({class_name}, self).__init__(sim, params_robot, params_env, paths, file_id, verbose, comms_port)
+
+                # --- Scene handles which are specific for this robot ---
+                {robot_line}
+                {robot_bl_line}
+                {laser_line}
+                
+                logging.info(f"{class_name} created successfully using port {{comms_port}}.")
+    ''')
+
+
+
+def generate_agent_plugin_code(robot_name: str) -> str:
+    """Build a small factory module for the Agent signature."""
+
+    class_name = f"{_snake_to_camel(robot_name)}Agent"
+    return textwrap.dedent(f'''\
+        """Factory for '{robot_name}' agent (auto-generated)."""
+
+        from plugins.agents import register_agent
+        from robots.{robot_name}.agent import {class_name}
+
+        def make_agent(sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
+            """Return an instance of the robot-specific Agent.
+
+            Args:
+                sim: Coppelia API object.
+                params_robot (dict): Robot-specific parameters (e.g., robot_radius).
+                params_env (dict): Environment parameters.
+                paths (dict): Project paths.
+                file_id (str): Experiment/session identifier.
+                verbose (int): Verbosity level.
+                comms_port (int): RL comms port.
+
+            Returns:
+                {class_name}: Configured agent instance.
+            """
+            return {class_name}(sim, params_robot, params_env, paths, file_id, verbose, comms_port)
+        
+        register_agent("{robot_name}", make_agent)
+    ''')
+
+
+def create_robot_agent_and_plugin(base_path: str, robot_name: str, spec: dict) -> tuple[str, str]:
+    """Create the Agent module and its plugin for a new robot (Coppelia side).
+
+    Args:
+        base_path: Project root (parent of 'src' and 'robots').
+        robot_name: New robot name (e.g., 'myNewBot').
+        spec: Dict for agent generator (see generate_agent_code).
+
+    Returns:
+        (agent_file_path, agent_plugin_file_path)
+    """
+    # robots/<robot>/agent.py
+    robot_dir = os.path.join(base_path, "robots", robot_name)
+    os.makedirs(robot_dir, exist_ok=True)
+
+    pkg_init = os.path.join(robot_dir, "__init__.py")
+    if not os.path.exists(pkg_init):
+        with open(pkg_init, "w", encoding="utf-8") as f:
+            f.write("# Package for robot: " + robot_name + "\\n")
+
+    agent_path = os.path.join(robot_dir, "agent.py")
+    agent_src = generate_agent_code(robot_name, spec)
+    with open(agent_path, "w", encoding="utf-8") as f:
+        f.write(agent_src)
+
+    # src/plugins/agents/<robot>.py
+    plugins_pkg = os.path.join(base_path, "src", "plugins", "agents")
+    os.makedirs(plugins_pkg, exist_ok=True)
+    init_plugins = os.path.join(plugins_pkg, "__init__.py")
+    if not os.path.exists(init_plugins):
+        with open(init_plugins, "w", encoding="utf-8") as f:
+            f.write('"""Agent plugins package (Coppelia side). Registers factories on import."""\\n')
+
+    plugin_path = os.path.join(plugins_pkg, f"{robot_name}.py")
+    plugin_src = generate_agent_plugin_code(robot_name)
+    with open(plugin_path, "w", encoding="utf-8") as f:
+        f.write(plugin_src)
+
+    return agent_path, plugin_path
+
+
+# ------------------------------------
+# --------- ONE-SHOT SCAFFOLD --------
+# ------------------------------------
+
+def scaffold_robot(
+    base_path: str,
+    robot_name: str,
+    env_spec: dict,
+    agent_spec: dict,
+    *,
+    params_updates: dict | None = None,
+    template_filename: str = "params_default_file.json"
+) -> dict:
+    """Create Env+plugin, Agent+plugin, and a params JSON for the new robot.
+
+    Args:
+        base_path: Project root (parent of 'src' and 'robots').
+        robot_name: New robot name.
+        env_spec: Unified env spec (robot_data, obs, act).
+        agent_spec: Agent spec (handles).
+        params_updates: Optional overrides to merge into the params JSON (e.g., {"params_env": {"laser_observations": 8}}).
+        template_filename: Template JSON in <base_path>/configs.
+        drop_legacy_limits: Remove legacy per-axis limit keys from params_env.
+
+    Returns:
+        dict with generated paths.
+    """
+    env_path, env_plugin_path = create_robot_env_and_plugin(base_path, robot_name, env_spec)
+    agent_path, agent_plugin_path = create_robot_agent_and_plugin(base_path, robot_name, agent_spec)
+
+    # Create params file for the new robot
+    params_path = _create_generic_params_file(
+        base_path=base_path,
+        robot_name=robot_name,
+        env_spec=env_spec,
+        updates=params_updates,
+        template_filename=template_filename
+    )
+    return {
+        "env": env_path,
+        "env_plugin": env_plugin_path,
+        "agent": agent_path,
+        "agent_plugin": agent_plugin_path,
+        "params_file": params_path,
+    }
