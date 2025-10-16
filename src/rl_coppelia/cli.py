@@ -1,47 +1,9 @@
 import os
+
+from common import utils
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" # Suppress TensorFlow warnings
+os.environ["GRPC_VERBOSITY"] = "ERROR"
 import argparse
-import argcomplete
-from argcomplete.completers import FilesCompleter
-from rl_coppelia import auto_testing, auto_training, plot, sat_training, test_scene, train, test, save, tf_start, retrain, create_robot
-
-
-# def model_name_completer(prefix, parsed_args, **kwargs):
-#     """
-#     Autocompletion function for model names, used in CLI inputs.
-
-#     Args:
-#         prefix (str): Current input prefix typed by the user.
-#         parsed_args (Namespace): Parsed arguments passed so far.
-#         **kwargs: Additional keyword arguments (ignored here).
-
-#     Returns:
-#         list[str]: List of model paths matching the prefix.
-#     """
-#     base_robots_path = os.path.join("rl_coppelia", "robots")    # Base path for robot folders
-#     matches = []
-
-#     if parsed_args.robot_name:
-#         # Search models only in the selected robot's folder
-#         model_dir = os.path.join(base_robots_path, parsed_args.robot_name, "models")
-#         if os.path.isdir(model_dir):
-#             matches.extend([
-#                 os.path.join(parsed_args.robot_name, "models", f)
-#                 for f in os.listdir(model_dir)
-#                 if f.startswith(prefix) # Filter models by prefix
-#             ])
-#     else:
-#         # Search across all robot model folders
-#         for robot_folder in os.listdir(base_robots_path):
-#             model_dir = os.path.join(base_robots_path, robot_folder, "models")
-#             if os.path.isdir(model_dir):
-#                 matches.extend([
-#                     os.path.join(robot_folder, "models", f)
-#                     for f in os.listdir(model_dir)
-#                     if f.startswith(prefix)
-#                 ])
-#     return matches
-
 
 def main(argv=None):
     """
@@ -160,29 +122,41 @@ def main(argv=None):
     args = parser.parse_args(argv)  # Parse CLI arguments (from sys.argv or passed manually)
 
     if args.command == "train":
+        from rl_coppelia import train
         train.main(args)
     elif args.command == "test":
+        from rl_coppelia import test
         test.main(args)
     elif args.command == "auto_training":
+        from rl_coppelia import auto_training
         auto_training.main(args)
     elif args.command == "sat_training":
+        from rl_coppelia import sat_training
         sat_training.main(args)
     elif args.command == "save":
+        from rl_coppelia import save
         save.main(args)
     elif args.command == "tf_start":
+        from rl_coppelia import tf_start
         tf_start.main(args)
     elif args.command == "auto_testing":
+        from rl_coppelia import auto_testing
         auto_testing.main(args)
     elif args.command == "plot":
+        from rl_coppelia import plot
         plot.main(args)
     elif args.command == "retrain":
+        from rl_coppelia import retrain
         retrain.main(args)
     elif args.command == "test_scene":
+        from rl_coppelia import test_scene
         test_scene.main(args)
     elif args.command == "create_robot":
+        from rl_coppelia import create_robot
         create_robot.main()
     else:
         parser.print_help() # Show help if no command provided
 
 if __name__ == "__main__":
+    utils.print_uncore_logo()
     main()

@@ -133,16 +133,20 @@ class CoppeliaAgent:
 
         self.paths = paths
         self.first_reset_done = False
+
+        # Communication
+        self.comms_port = comms_port
+        self._commstoRL = None  # To be initialized externally after agent creation
         
         # AgentSide doesn't have a timeout, so we do this loop in case that Coppelia scene is executed before the RL.
-        while True:
-            try:
-                logging.info(f"Trying to establish communication using the port {comms_port}")
-                self._commstoRL = AgentSide(BaseCommPoint.get_ip(),comms_port)
-                break
-            except:
-                logging.info("Connection with RL failed. Retrying in few secs...")
-                sim.wait(20)
+        # while True:
+        #     try:
+        #         logging.info(f"Trying to establish communication using the port {comms_port}")
+        #         self._commstoRL = AgentSide(BaseCommPoint.get_ip(),comms_port)
+        #         break
+        #     except:
+        #         logging.info("Connection with RL failed. Retrying in few secs...")
+        #         sim.wait(20)
         
         # Process control variables
         self.finish_rec = False
@@ -185,6 +189,15 @@ class CoppeliaAgent:
 
         # For indicating that the lat reset have been done with the first reset of the scene
         self.lat_reset = False
+
+    
+    def start_communication(self):
+        try:
+            logging.info(f"Trying to establish communication using the port {self.comms_port}")
+            self._commstoRL = AgentSide(BaseCommPoint.get_ip(),self.comms_port)
+        except:
+            logging.info("Connection with RL failed. Retrying in few secs...")
+            self.sim.wait(20)
         
     
     def get_observation(self):
@@ -612,29 +625,43 @@ class CoppeliaAgent:
             # finishes, the robot will be slightly further from the robot, and the collision won't be detected anymore. This
             # is not the desired performance: if there was a collision, then we need to know it.
             
-            # ---TURTLEBOT
+            # If agent is still executing last action
             else:
-                if robot_name == "turtleBot":
-                    if self.laser is not None:
-                        laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
-                        logging.debug(f"Laser values during movement: {laser_obs}")
-                        if (
-                            laser_obs[0] < self.params_env["max_crash_dist_critical"] or
-                            laser_obs[3] < self.params_env["max_crash_dist_critical"] or
-                            any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
-                        ) and not self.crash_flag:
-                            logging.info("Crash during action execution, episode will finish once the action completes")
-                            self.crash_flag = True
-            
-            # ---BURGERBOT
-                elif robot_name == "burgerBot":
-                    if self.laser is not None:
-                        laser_obs=self.sim.callScriptFunction('laser_get_observations',self.handle_laser_get_observation_script)
-                        logging.debug(f"Laser values during movement: {laser_obs}")
-                        if any(d < self.params_env["max_crash_dist_critical"] for d in laser_obs) and not self.crash_flag:
-                            logging.info("Crash during action execution, episode will finish once the action completes")
-                            self.crash_flag = True
+                if self.laser is not None and not self.crash_flag:
+                    # Get laser readings once
+                    laser_obs = self.sim.callScriptFunction(
+                        'laser_get_observations',
+                        self.handle_laser_get_observation_script
+                    )
+                    logging.debug(f"Laser values during movement: {laser_obs}")
 
+                    # Rename for simplicity
+                    p = self.params_env
+                    n = int(p["laser_observations"])
+                    crit = p["max_crash_dist_critical"]
+                    norm = p["max_crash_dist"]
+
+                    crashed = False
+
+                    # 4 laser case: turtlebot -> We have a different distance threshold for lateral measurements
+                    if n == 4:
+                        # 4-beam layout: 0,3 -> critical; 1,2 -> normal
+                        if (
+                            laser_obs[0] < crit
+                            or laser_obs[3] < crit
+                            or any(laser_obs[i] < norm for i in (1, 2))
+                        ):
+                            crashed = True
+
+                    # Any setup other than 4 beams: burgerbot -> Same distance threshold for all the laser measurements
+                    else:
+                        if any(d < crit for d in laser_obs):
+                            crashed = True
+
+                    if crashed:
+                        logging.info("Crash during action execution, episode will finish once the action completes")
+                        self.crash_flag = True        
+               
             action = self._lastaction
             
         # Execution state --> The action has finished, so it tries to read a new command from RL
@@ -733,6 +760,10 @@ class CoppeliaAgent:
         return action  # Continue the loop
 
 
+# -----------------------------------------------
+# -------------- Hardcoded classes --------------
+# -----------------------------------------------
+
 class BurgerBotAgent(CoppeliaAgent):
     def __init__(self, sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
         """
@@ -781,5 +812,4 @@ class TurtleBotAgent(CoppeliaAgent):
         self.robot_baselink=sim.getObject('/Turtlebot2/base_link_respondable')
         self.laser=sim.getObject('/Turtlebot2/fastHokuyo_ROS2')
         
-
         logging.info(f"TurtleBot Agent created successfully using port {comms_port}.")

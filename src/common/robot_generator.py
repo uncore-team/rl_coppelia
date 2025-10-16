@@ -126,11 +126,36 @@ def _derive_generic_env_fields_from_spec(env_spec: Dict[str, Any]) -> Dict[str, 
     }
 
 
+def _extract_agent_fields_from_agent_spec(agent_spec: Dict[str, Any]) -> Dict[str, str]:
+    """Extracts agent-related fields (handles + scene name) from agent_spec."""
+    def _ensure_leading_slash(s: str) -> str:
+        if not isinstance(s, str) or not s:
+            return s
+        return s if s.startswith("/") else "/" + s
+
+    result: Dict[str, str] = {}
+
+    # Handles (robot, base, laser)
+    for key in ("robot_handle", "robot_base_handle", "laser_handle"):
+        val = agent_spec.get(key)
+        if val:
+            result[key] = _ensure_leading_slash(val)
+
+    # Scene name
+    scene_name = agent_spec.get("scene_name")
+    if scene_name:
+        if not scene_name.endswith(".ttt"):
+            scene_name += ".ttt"
+        result["scene_name"] = scene_name
+
+    return result
+
 
 def _create_generic_params_file(
     base_path: str,
     robot_name: str,
     env_spec: Dict[str, Any],
+    agent_spec: Dict[str, Any],
     updates: Optional[Dict[str, Any]] = None,
     *,
     template_filename: str = "params_default_file.json"
@@ -143,7 +168,8 @@ def _create_generic_params_file(
       2) Load that copy.
       3) Inject generic space fields (dim_*, *_limits) from `env_spec`.
       4) Inject `params_robot` from `env_spec["robot_data"]`.
-      5) Apply explicit `updates` if provided.
+      5) Inject `params_train` handles from `agent_spec`.
+      6) Apply explicit `updates` if provided.
 
     Args:
         base_path: Project root.
@@ -184,11 +210,16 @@ def _create_generic_params_file(
     if isinstance(robot_data, dict) and robot_data:
         _deep_update(data["params_robot"], robot_data)
 
-    # --- Step 5: apply explicit overrides ------------------------------------
+    # --- Step 5: Inject training handles (robot/laser handles)
+    agent_fields = _extract_agent_fields_from_agent_spec(agent_spec)
+    if agent_fields:
+        _deep_update(data["params_train"], agent_fields)
+
+    # --- Step 6: apply explicit overrides ------------------------------------
     if updates:
         _deep_update(data, updates)
 
-    # --- Step 6: write changes atomically ------------------------------------
+    # --- Step 7: write changes atomically ------------------------------------
     fd, tmp_path = tempfile.mkstemp(prefix=f".{target_name}.", dir=configs_dir, text=True)
     os.close(fd)
     try:
@@ -221,11 +252,6 @@ def generate_env_code(robot_name: str, spec: Dict[str, Any]) -> str:
     Spec examples:
         # A) Named variables
         spec = {
-            "robot_data": {
-                "wheel_radius": 0.035,
-                "distance_between_wheels": 0.23
-            },
-
             "obs": {
                 "vars": [
                     {"name": "distance", "low": 0.0, "high": 10.0},
@@ -242,7 +268,6 @@ def generate_env_code(robot_name: str, spec: Dict[str, Any]) -> str:
 
         # B) Size + broadcastable bounds (scalars or lists)
         spec = {
-            "robot_data": {"wheel_radius": 0.035, "distance_between_wheels": 0.23},
             "obs": {"size": 3, "low": [0, -3.14, 0], "high": [10, 3.14, 100]},
             "act": {"size": 2, "low": -1.0, "high": 1.0}
         }
@@ -261,24 +286,19 @@ def generate_env_code(robot_name: str, spec: Dict[str, Any]) -> str:
     act_def = spec.get("act", {})
 
     # Resolve spaces
-    obs_dim, obs_names, obs_lows, obs_highs = _resolve_space_from_spec(obs_def)
-    act_dim, act_names, act_lows, act_highs = _resolve_space_from_spec(act_def)
+    _obs_dim, obs_lows, obs_highs, obs_names = _resolve_space_from_spec(obs_def)
+    _act_dim, act_lows, act_highs, act_names = _resolve_space_from_spec(act_def)
 
     # Stringify for code
-    obs_low_arr = ", ".join(f"{x:.10g}" for x in obs_lows)
-    obs_high_arr = ", ".join(f"{x:.10g}" for x in obs_highs)
-    act_low_arr = ", ".join(f"{x:.10g}" for x in act_lows)
-    act_high_arr = ", ".join(f"{x:.10g}" for x in act_highs)
+    obs_low_arr = ", ".join(f"{float(x):.10g}" for x in obs_lows)
+    obs_high_arr = ", ".join(f"{float(x):.10g}" for x in obs_highs)
+    act_low_arr = ", ".join(f"{float(x):.10g}" for x in act_lows)
+    act_high_arr = ", ".join(f"{float(x):.10g}" for x in act_highs)
     obs_names_list = ", ".join(repr(n) for n in obs_names) if obs_names else ""
     act_names_list = ", ".join(repr(n) for n in act_names) if act_names else ""
 
     doc_obs_names = f"names = [{obs_names_list}]" if obs_names else "names = []  # unnamed (size-based)"
     doc_act_names = f"names = [{act_names_list}]" if act_names else "names = []  # unnamed (size-based)"
-
-    # Get robot_data if any
-    robot_data = spec.get("robot_data", {})
-    wheel_radius = robot_data["wheel_radius"]
-    distance_between_wheels = robot_data["distance_between_wheels"]
 
     return textwrap.dedent(f'''\
         """Auto-generated environment for '{robot_name}'.
@@ -322,10 +342,6 @@ def generate_env_code(robot_name: str, spec: Dict[str, Any]) -> str:
                     dtype=np.float32
                 )
 
-                # Define robot-specific parameters
-                self.wheel_radius = {wheel_radius}  # meters
-                self.distance_between_wheels = {distance_between_wheels}  # meters
-
             # TODO: Implement other environment-specific methods if needed,
             # such as _get_observation(), _compute_reward(), step(), reset(), etc.
     ''')
@@ -347,6 +363,8 @@ def generate_env_plugin_code(robot_name: str) -> str:
         Loaded on the RL side. It registers a VecEnv factory on import.
         """
 
+        from __future__ import annotations
+        from common.rl_coppelia_manager import RLCoppeliaManager
         from plugins.envs import register_env
         from stable_baselines3.common.env_util import make_vec_env
         from robots.{robot_name}.envs import {class_name}
@@ -597,6 +615,7 @@ def scaffold_robot(
         base_path=base_path,
         robot_name=robot_name,
         env_spec=env_spec,
+        agent_spec=agent_spec,
         updates=params_updates,
         template_filename=template_filename
     )

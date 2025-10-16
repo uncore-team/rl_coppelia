@@ -43,20 +43,112 @@ from plugins.envs import get_env_factory
 class RLCoppeliaManager():
 
     def _autoload_env_plugins(self) -> None:
-        """Autoload env plugins from 'plugins.envs' to populate the registry.
+        """Autoload env plugins from 'plugins.envs' to populate the registry."""
+        import sys, os, importlib, pkgutil, logging, traceback
 
-        This will import every module inside 'src/plugins/envs'.
-        Each plugin should call `RLCoppeliaManager.register_env(...)`.
-        """
         src_dir = os.path.join(self.base_path, "src")
         if os.path.isdir(src_dir) and src_dir not in sys.path:
-            sys.path.insert(0, src_dir)
+            sys.path.insert(0, src_dir)          # para 'plugins.*'
+
+        if self.base_path not in sys.path:
+            sys.path.insert(0, self.base_path)   # para 'robots.*'
+
         try:
             pkg = importlib.import_module("plugins.envs")
-            for m in pkgutil.iter_modules(pkg.__path__, "plugins.envs."):
-                importlib.import_module(m.name)
-        except Exception as exc:
-            logging.debug(f"Env plugins autoload skipped/failed: {exc}")
+            for finder, name, ispkg in pkgutil.iter_modules(pkg.__path__, "plugins.envs."):
+                try:
+                    importlib.import_module(name)
+                    logging.info(f"[plugins] Imported: {name}")
+                except Exception:
+                    logging.error(f"[plugins] Failed to import {name}")
+                    logging.debug(traceback.format_exc())
+        except Exception:
+            logging.error(f"Env plugins autoload failed:\n{traceback.format_exc()}")
+
+    # ---------------------- helpers ----------------------
+
+    def _get_calling_script(self):
+        """
+        Inspects the call stack to find the first script that is not 'rl_coppelia_manager.py'.
+        Returns the base filename (e.g., 'train.py', 'retrain.py').
+        """
+        for frame in inspect.stack():
+            filename = frame.filename
+            if filename.endswith('.py') and not filename.endswith('rl_coppelia_manager.py'): 
+                return os.path.basename(filename)
+        return None
+    
+
+    def _get_base_path(self) -> str:
+        """Return project base path (2 levels up from this file)."""
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+    def _resolve_robot_name(self, args) -> str:
+        """Resolve robot name from args; fallback to model_name prefix if needed."""
+        # If args has robot_name and it is not None, use it
+        rn = getattr(args, "robot_name", None)
+        if rn:
+            return rn
+
+        # Else infer from model_name if available
+        model_name = getattr(args, "model_name", None)
+        if model_name:
+            inferred = model_name.split("_")[0]
+            args.robot_name = inferred  # keep args in sync
+            return inferred
+
+        # As a last resort, raise a clear error
+        raise ValueError("robot_name could not be resolved: provide --robot_name or a valid --model_name.")
+
+
+    def _compute_file_id(self, args) -> str:
+        """Compute the execution ID depending on the calling script."""
+        if self.calling_script != "retrain.py":
+            return utils.get_file_index(args, self.paths["tf_logs"], self.robot_name)
+        return utils.extract_model_id(self.args.model_name)
+
+
+    def _configure_logging(self, args) -> None:
+        """Configure logging based on whether we save files for this flow."""
+        save_files = hasattr(args, "robot_name")  # training/testing flows save logs
+        utils.logging_config(
+            self.paths["script_logs"],
+            "rl",
+            self.robot_name,
+            self.file_id,
+            log_level=logging.INFO,
+            save_files=save_files,
+            verbose=getattr(args, "verbose", 1),
+        )
+
+
+    def _load_params_if_needed(self, args) -> None:
+        """Load params if the flow expects a params file (train/test)."""
+        if not hasattr(args, "params_file"):
+            return
+
+        if args.params_file is None:
+            args.params_file = utils.get_params_file(self.paths, self.args)
+
+        source = os.path.join(self.base_path, "configs", args.params_file)
+        if not os.path.isfile(source):
+            raise FileNotFoundError(f"Params file not found: {source}")
+
+        self.params_robot, self.params_env, self.params_train, self.params_test = utils.load_params(source)
+
+
+    def _select_comms_port(self, args, default_start: int) -> int:
+        """Return a free comms port; honor --dis_parallel_mode."""
+        dis_parallel = getattr(args, "dis_parallel_mode", False)
+        if dis_parallel:
+            return default_start
+        return utils.find_next_free_port(start_port=default_start)
+
+
+    def _snapshot_pids(self) -> dict:
+        """Take a snapshot of current processes (pid -> name)."""
+        return {proc.pid: proc.name() for proc in psutil.process_iter(["pid", "name"])}
 
 
     def __init__(self, args):
@@ -83,80 +175,37 @@ class RLCoppeliaManager():
             args (Namespace): Command-line arguments passed to the script.
         """
         super(RLCoppeliaManager, self).__init__()
-        self.calling_script = self._get_calling_script()
         self.args = args
+        self.calling_script = self._get_calling_script()
 
-        self.base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-        if (not hasattr(args, "robot_name") and hasattr(args, "model_name")) or args.robot_name is None:
-            self.robot_name = args.model_name.split('_')[0]
-            args.robot_name = self.robot_name
-        else:
-            self.robot_name = args.robot_name
-
+        # --- Basic setup ---
+        self.base_path = self._get_base_path()
+        self.robot_name = self._resolve_robot_name(args)
         self.paths = utils.get_robot_paths(self.base_path, self.robot_name)
-
-        # Get the next index for all the files that will be saved during the execution, so we can assign it as an ID to the execution
-        if self.calling_script != "retrain.py":
-            self.file_id = utils.get_file_index (args, self.paths["tf_logs"], self.robot_name)
-        else:
-            self.file_id = utils.extract_model_id (self.args.model_name)
-
-        # Initialize loggin config
-        if hasattr(args, "robot_name"):     # For training or testing
-            utils.logging_config(self.paths["script_logs"], "rl", self.robot_name, self.file_id, 
-                                log_level=logging.INFO, save_files = True, verbose = args.verbose)
-            
-        else:   # Other functions (save, tf_start, etc.)
-            utils.logging_config(self.paths["script_logs"], "rl", self.robot_name, self.file_id, 
-                                log_level=logging.INFO, save_files = False, verbose = args.verbose)
-
-        # Show possible warnings obtained during the parsing arguments function.
+        self.file_id = self._compute_file_id(args)
+        
+        # --- Logging & initial warnings ---
+        self._configure_logging(args)
         utils.initial_warnings(self)
 
-        # In train and test cases   #TODO This will not work for auto_trainings or sat_trainings, as they need different params files
-        if hasattr(args, "params_file"):
-            if args.params_file is None:
-                args.params_file = utils.get_params_file(self.paths,self.args)
-            source_params_file = os.path.join(self.base_path, "configs", args.params_file)
-            self.params_robot, self.params_env, self.params_train, self.params_test = utils.load_params(source_params_file)
 
+        # --- Params (train/test flows) --- #TODO This will not work for auto_trainings or sat_trainings, as they need different params files
+        self._load_params_if_needed(args)
+
+        # --- Runtime state ---
         self.current_sim = None
-
         # The next free port to be used for the communication between the agent (CoppeliaSim) and the RL side (Python)
-        self.free_comms_port = 49054
-
-        if hasattr(args, "dis_parallel_mode") and not self.args.dis_parallel_mode:  # If the parallel mode is not disabled, then it will search for the next free port
-            self.free_comms_port = utils.find_next_free_port(start_port=49054)
-
+        self.free_comms_port = self._select_comms_port(args, default_start=49054)
         # Temporary folder for storing a tensorboard monitor file during training. This is needed for saving a model 
         # based ion the mean reward obtained during training.
         self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
-
         # Get current opened processes in the PC so later we can know which ones are the Coppelia new ones.
-        self.before_pids = {proc.pid: proc.name() for proc in psutil.process_iter(['pid', 'name'])}
-
-        # Create coppelia current scene process ID and also terminal ID
+        self.before_pids = self._snapshot_pids()
         self.current_coppelia_pid = None
         self.terminal_pid = None
 
-        # Set alias for the robot handle in CoppeliaSim scene
-        self.robot_handle_alias = None  # To be defined by child classes
-
-        # Autoload plugin modules so they can self-register
+        # --- Plugins ---
         self._autoload_env_plugins()
-
-
-    def _get_calling_script(self):
-        """
-        Inspects the call stack to find the first script that is not 'rl_coppelia_manager.py'.
-        Returns the base filename (e.g., 'train.py', 'retrain.py').
-        """
-        for frame in inspect.stack():
-            filename = frame.filename
-            if filename.endswith('.py') and not filename.endswith('rl_coppelia_manager.py'): 
-                return os.path.basename(filename)
-        return None
 
 
     def create_env(self):
@@ -165,7 +214,6 @@ class RLCoppeliaManager():
         Priority:
         1) If a plugin factory is registered for `self.args.robot_name`, use it.
         2) Fallback to legacy built-ins (burgerBot / turtleBot).
-        3) As last resort, use BurgerBotEnv by default.
 
         Returns:
             None. Sets `self.env`.
@@ -180,7 +228,7 @@ class RLCoppeliaManager():
             )
             return
 
-        # 2) Legacy fallback (keeps current behavior intact)
+        # 2) Hardcoded environments
         if self.args.robot_name == "burgerBot":
             self.env = make_vec_env(
                 BurgerBotEnv,
@@ -201,18 +249,9 @@ class RLCoppeliaManager():
                 },
             )
         else:
-            # 3) Last resort
-            self.env = make_vec_env(
-                BurgerBotEnv,
-                n_envs=1,
-                monitor_dir=self.log_monitor,
-                env_kwargs={
-                    "params_env": self.params_env, 
-                    "comms_port": self.free_comms_port                },
-            )
+            raise ValueError(f"Unknown robot name '{self.args.robot_name}' and no plugin found.")
 
-        self.robot_handle_alias = self.env.get_attr('robot_handle_alias')[0]  # Set robot handle alias from env
-        logging.info(f"Environment created for robot {self.robot_handle_alias}. Comms port: {self.free_comms_port}")
+        logging.info(f"Environment created for robot {self.args.robot_name}. Comms port: {self.free_comms_port}")
         
 
     def start_communication(self):

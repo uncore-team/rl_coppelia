@@ -42,46 +42,9 @@ class CoppeliaEnv(gym.Env, ABC):
 
         self._commstoagent = None  # To be initialized externally after environment creation
 
-        # # Open the baseline server on the specified port
-        # logging.info(f"Trying to establish communication using the port {comms_port}")
-        # self._commstoagent = RLSide(port= comms_port)
-        # logging.info(f"Communication opened using port {comms_port}")
-
-        # Extract the parameters for the environment located inside the 'params_file.json' (by default).
+        # Extract the parameters for the environment located inside the coresponding params file json.
         # Make params_env accessible for the methods of the class
         self.params_env = params_env
-
-        # Define action space
-        if params_env["finish_episode_flag"]:   # The agent can decide when should the episode finish
-
-            if  not params_env["var_action_time_flag"]:
-                self.action_space= spaces.Box(low=np.array([params_env["bottom_lspeed_limit"], params_env["bottom_aspeed_limit"], 0.0],dtype=np.float32), 
-                                        high=np.array([params_env["upper_lspeed_limit"],params_env["upper_aspeed_limit"], 1.0],dtype=np.float32), dtype=np.float32)
-            else:
-                self.action_space= spaces.Box(low=np.array([params_env["bottom_lspeed_limit"], params_env["bottom_aspeed_limit"], 0.0, params_env["bottom_actime_limit"]],dtype=np.float32), 
-                                        high=np.array([params_env["upper_lspeed_limit"],params_env["upper_aspeed_limit"], 1.0, params_env["upper_actime_limit"]],dtype=np.float32), dtype=np.float32)
-        else:
-
-            if params_env["var_action_time_flag"]:
-                self.action_space= spaces.Box(low=np.array([params_env["bottom_lspeed_limit"], params_env["bottom_aspeed_limit"], params_env["bottom_actime_limit"]],dtype=np.float32), 
-                                        high=np.array([params_env["upper_lspeed_limit"],params_env["upper_aspeed_limit"], params_env["upper_actime_limit"]],dtype=np.float32), dtype=np.float32)
-            else:
-                self.action_space= spaces.Box(low=np.array([params_env["bottom_lspeed_limit"], params_env["bottom_aspeed_limit"]],dtype=np.float32), 
-                                        high=np.array([params_env["upper_lspeed_limit"],params_env["upper_aspeed_limit"]],dtype=np.float32), dtype=np.float32)
-
-        
-        # Number of laser observations
-        n_lasers = params_env.get("laser_observations", 4)
-
-        # Define observation space
-        if params_env["obs_time"]:
-            low = np.array([0, -math.pi] + [0]*n_lasers + [0], dtype=np.float32)
-            high = np.array([5, math.pi] + [4]*n_lasers + [100], dtype=np.float32)
-        else:
-            low = np.array([0, -math.pi] + [0]*n_lasers, dtype=np.float32)
-            high = np.array([5, math.pi] + [4]*n_lasers, dtype=np.float32)
-
-        self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
         # LAT variables
         self.lat_sim = 0
@@ -105,19 +68,6 @@ class CoppeliaEnv(gym.Env, ABC):
         self.initial_ato=0
         self.reset_flag = False
         self.initial_target_distance = 0
-
-        # Name of the robot handle in CoppeliaSim scene
-        self.robot_handle_alias = None  # To be defined by child classes
-        self.wheel_radius = None  # To be defined by child classes
-        self.distance_between_wheels = None  # To be defined by child classes
-
-
-    @abstractmethod
-    def compute_reward(self) -> float:
-        """Compute the reward for the given observation, action, and info.
-        This method should be implemented by subclasses to define the reward logic.
-        """
-        ...
 
 
     def step(self, action):
@@ -238,6 +188,85 @@ class CoppeliaEnv(gym.Env, ABC):
         return (self.observation, self.info) 
     
 
+    def compute_reward(self):
+        """Compute the reward based on the current observation, action, and info.
+
+        Args: None
+
+        Returns:
+            reward (float): The computed reward.
+        """
+        laser_obs = list(self.observation.values())[-self.params_env["laser_observations"]:]
+        distance = self.observation["distance"]
+        p = self.params_env
+
+        # --- Crash detected during the movement by the environment ---
+        if self.crash_flag:
+            logging.info("Crashed detected during the movement")
+            self.collision_flag = True
+            self.terminated=True
+            self.target_zone = 0
+            return p["crash_penalty"]
+
+        # --- If agent can decide to finish episode ---
+        if p["finish_episode_flag"]:
+            if self.action_dic["finish_flag"]<0.5:
+                logging.info("Agent self truncated.")
+                self.truncated = True
+                self.target_zone = 0
+                if distance>p["dist_thresh_finish_flag"]:
+                    return p["finish_flag_penalty"]
+                else:
+                    return 0
+
+        # --- Collision check ---
+        crashed = False
+        if p["laser_observations"] == 4:
+            if (
+                laser_obs[0] < p["max_crash_dist_critical"]
+                or laser_obs[3] < p["max_crash_dist_critical"]
+                or any(laser_obs[i] < p["max_crash_dist"] for i in (1, 2))
+            ):
+                crashed = True
+        else:
+            if any(d < p["max_crash_dist_critical"] for d in laser_obs):
+                crashed = True
+
+        self.collision_flag = crashed
+        if crashed:
+            logging.info("Crashed")
+            self.terminated = True
+            self.target_zone = 0
+            return p["crash_penalty"]
+        
+        # --- Distance-based rewards ---
+        if distance < p["reward_dist_3"]:
+            self.target_zone = 3
+            self.terminated = True
+            return self.compute_adjusted_reward(p["reward_3"])
+        elif distance < p["reward_dist_2"]:
+            self.target_zone = 2
+            self.terminated = True
+            return self.compute_adjusted_reward(p["reward_2"])
+        elif distance < p["reward_dist_1"]:
+            self.target_zone = 1
+            self.terminated = True
+            return self.compute_adjusted_reward(p["reward_1"])
+        elif distance > p["max_dist"] or self.time_elapsed > p["max_time"]:
+            self.terminated = True
+            logging.info("Max dist or max time achieved")
+            self.max_achieved = True
+            self.target_zone = 0
+            return p["overlimit_penalty"]
+        else:
+            self.terminated = False
+            self.truncated = False
+            self.max_achieved = False
+            self.collision_flag = False
+            self.target_zone = 0
+            return 0
+    
+
     def compute_adjusted_reward(self, max_reward):
         """
         Compute the adjusted reward based on the time elapsed.
@@ -265,6 +294,9 @@ class CoppeliaEnv(gym.Env, ABC):
         return adjusted_reward
     
 
+# -----------------------------------------------
+# -------------- Hardcoded classes --------------
+# -----------------------------------------------
         
 class BurgerBotEnv(CoppeliaEnv):
     def __init__(self, params_env, comms_port=49054):
@@ -283,77 +315,15 @@ class BurgerBotEnv(CoppeliaEnv):
         """
         super(BurgerBotEnv, self).__init__(params_env, comms_port)
 
-        # Set robot handle alias
-        self.robot_handle_alias = '/Burger'
+        # Define action space
+        low = np.asarray(params_env["action_bottom_limits"], dtype=np.float32)
+        high = np.asarray(params_env["action_upper_limits"], dtype=np.float32)
+        self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
-    def compute_reward(self):
-        """Compute the reward based on the current observation, action, and info.
-
-        Args: None
-
-        Returns:
-            reward (float): The computed reward.
-        """
-        if "laser_observations" in self.params_env:
-            laser_obs = list(self.observation.values())[-self.params_env["laser_observations"]:]
-        else:
-            laser_obs = list(self.observation.values())[-4:]
-        distance = self.observation["distance"]
-
-        if self.crash_flag:
-            logging.info("Crashed detected during the movement")
-            self.collision_flag = True
-            self.terminated=True
-            self.target_zone = 0
-            return self.params_env["crash_penalty"]
-
-        if self.params_env["finish_episode_flag"]:
-            if self.action_dic["finish_flag"]<0.5:
-                logging.info("Agent self truncated.")
-                self.truncated = True
-                self.target_zone = 0
-                if distance>self.params_env["dist_thresh_finish_flag"]:
-                    return self.params_env["finish_flag_penalty"]
-                else:
-                    return 0
-
-        if any(d < self.params_env["max_crash_dist_critical"] for d in laser_obs):
-            logging.info("Crashed")
-            self.collision_flag = True
-            self.terminated=True
-            self.target_zone = 0
-            return self.params_env["crash_penalty"]
-        
-        else:
-            self.collision_flag = False
-
-        if distance < self.params_env["reward_dist_3"]:
-            self.target_zone = 3
-            self.terminated = True
-            return self.compute_adjusted_reward(self.params_env["reward_3"])
-        elif distance < self.params_env["reward_dist_2"]:
-            self.target_zone = 2
-            self.terminated = True
-            return self.compute_adjusted_reward(self.params_env["reward_2"])
-        elif distance < self.params_env["reward_dist_1"]:
-            self.target_zone = 1
-            self.terminated = True
-            return self.compute_adjusted_reward(self.params_env["reward_1"])
-        elif distance > self.params_env["max_dist"] or self.time_elapsed > self.params_env["max_time"]:
-            self.terminated = True
-            logging.info("Max dist or max time achieved")
-            self.max_achieved = True
-            self.target_zone = 0
-            return self.params_env["overlimit_penalty"]
-        else:
-            self.terminated = False
-            self.truncated = False
-            self.max_achieved = False
-            self.collision_flag = False
-            self.target_zone = 0
-            return 0
-
-        
+        # Define observation space
+        low = np.asarray(params_env["observation_bottom_limits"], dtype=np.float32)
+        high = np.asarray(params_env["observation_upper_limits"], dtype=np.float32)
+        self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
 
 class TurtleBotEnv(CoppeliaEnv):
@@ -373,78 +343,13 @@ class TurtleBotEnv(CoppeliaEnv):
                 - time_elapsed: [0, 100] seconds of time consumed by the agent. Optional.
         """
         super(TurtleBotEnv, self).__init__(params_env, comms_port)
-        
-        # Set robot handle alias
-        self.robot_handle_alias = '/Turtlebot2'
 
-    def compute_reward(self):
-        """Compute the reward based on the current observation, action, and info.
+        # Define action space
+        low = np.asarray(params_env["action_bottom_limits"], dtype=np.float32)
+        high = np.asarray(params_env["action_upper_limits"], dtype=np.float32)
+        self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
-        Args: None
-
-        Returns:
-            reward (float): The computed reward.
-        """
-        laser_obs = list(self.observation.values())[-self.params_env["laser_observations"]:]
-        distance = self.observation["distance"]
-
-        if self.crash_flag:
-            logging.info("Crashed detected during the movement")
-            self.collision_flag = True
-            self.terminated=True
-            self.target_zone = 0
-            return self.params_env["crash_penalty"]
-
-        if self.params_env["finish_episode_flag"]:
-            if self.action_dic["finish_flag"]<0.5:
-                logging.info("Agent self truncated.")
-                self.truncated = True
-                self.target_zone = 0
-                if distance>self.params_env["dist_thresh_finish_flag"]:
-                    return self.params_env["finish_flag_penalty"]
-                else:
-                    return 0
-
-        if (
-            laser_obs[0] < self.params_env["max_crash_dist_critical"] or
-            laser_obs[3] < self.params_env["max_crash_dist_critical"] or
-            any(laser_obs[i] < self.params_env["max_crash_dist"] for i in [1, 2])
-            ):
-
-             
-            logging.info("Crashed")
-            self.collision_flag = True
-            self.terminated=True
-            self.target_zone = 0
-            return self.params_env["crash_penalty"]
-        
-        else:
-            self.collision_flag = False
-
-        if distance < self.params_env["reward_dist_3"]:
-            self.target_zone = 3
-            self.terminated = True
-            return self.compute_adjusted_reward(self.params_env["reward_3"])
-        elif distance < self.params_env["reward_dist_2"]:
-            self.target_zone = 2
-            self.terminated = True
-            return self.compute_adjusted_reward(self.params_env["reward_2"])
-        elif distance < self.params_env["reward_dist_1"]:
-            self.target_zone = 1
-            self.terminated = True
-            return self.compute_adjusted_reward(self.params_env["reward_1"])
-        elif distance > self.params_env["max_dist"] or self.time_elapsed > self.params_env["max_time"]:
-            self.terminated = True
-            logging.info("Max dist or max time achieved")
-            self.max_achieved = True
-            self.target_zone = 0
-            return self.params_env["overlimit_penalty"]
-        else:
-            self.terminated = False
-            self.truncated = False
-            self.max_achieved = False
-            self.collision_flag = False
-            self.target_zone = 0
-            return 0
-
-      
+        # Define observation space
+        low = np.asarray(params_env["observation_bottom_limits"], dtype=np.float32)
+        high = np.asarray(params_env["observation_upper_limits"], dtype=np.float32)
+        self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)

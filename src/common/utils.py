@@ -1,18 +1,19 @@
+import os
 from collections import defaultdict
 import csv
+import curses
 import datetime
 import glob
 import json
 import logging
 from logging.handlers import RotatingFileHandler
-import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import time
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 from matplotlib import pyplot as plt
 from matplotlib.patches import Ellipse
@@ -31,8 +32,8 @@ from stable_baselines3.common.evaluation import evaluate_policy
 
 AGENT_SCRIPT_COPPELIA = "/Agent_Script"             # Name of the agent script in CoppeliaSim scene
 ROBOT_SCRIPT_COPPELIA = "/Robot_Script"             # Name of the robot script in CoppeliaSim scene
-AGENT_SCRIPT_PYTHON = "common/agent_copp.py"        # Script with the agent-specific functions: observations, rewards, step, reset, etc.
-ROBOT_SCRIPT_PYTHON = "common/robot_script_copp.py" # Script with the robot-specific functions: cmd_vel, draw path and graphs, ROScomm, etc.
+AGENT_SCRIPT_PYTHON = "coppelia_scripts/rl_script_copp.py"        # Script with the agent-specific functions: observations, rewards, step, reset, etc.
+ROBOT_SCRIPT_PYTHON = "coppelia_scripts/robot_script_copp.py" # Script with the robot-specific functions: cmd_vel, draw path and graphs, ROScomm, etc.
 
 
 # ------------------------------------------
@@ -55,19 +56,20 @@ def initial_warnings(self):
     Returns: None
     """
 
-    if hasattr(self.args, "robot_name") and not self.args.robot_name:
-        logging.warning("WARNING: '--robot_name' was not specified, so default name 'burgerBot' will be used")
+    # TODO Remove, unnecessary
+    # if hasattr(self.args, "robot_name") and not self.args.robot_name:
+    #     logging.warning("WARNING: '--robot_name' was not specified, so default name 'burgerBot' will be used")
     
     if hasattr(self.args, "params_file") and not self.args.params_file:
         if self.args.command == 'train':
-            self.args.params_file = os.path.join(self.base_path, "configs", "params_default_file.json")
-        logging.warning("WARNING: '--params_file' was not specified, so default file will be used.")
+            self.args.params_file = os.path.join(self.base_path, "configs", f"params_default_file_{self.args.robot_name}.json")
+        logging.warning(f"WARNING: '--params_file' was not specified, so the default file of the selected robot will be used: {self.args.params_file}.")
 
     if hasattr(self.args, "model_name") and not self.args.model_name:  
         logging.warning("WARNING: '--model_name' is required for testing functionality. The testing experiment will use the last saved model.")
 
     if hasattr(self.args, "scene_path") and not self.args.scene_path:
-        logging.warning(f"WARNING: '--scene_path' was not specified, so default one will be used: <robot_name>_scene.ttt. If this doesn't exist, it will use burgerBot_scene.ttt")
+        logging.warning(f"WARNING: '--scene_path' was not specified, so default one will be used: <robot_name>_scene.ttt.")
 
 
 def logging_config(logs_dir, side_name, robot_name, experiment_id, log_level = logging.DEBUG, save_files = True, verbose = 0):
@@ -1316,15 +1318,19 @@ def update_and_copy_script(rl_copp_obj):
         Exception: If an error occurs during the script update or copying process.
     """
     # Load Agent script
-    agent_object = rl_copp_obj.current_sim.getObject(AGENT_SCRIPT_COPPELIA)
-    agent_script_handle = rl_copp_obj.current_sim.getScript(1, agent_object)
+    try:
+        agent_object = rl_copp_obj.current_sim.getObject(AGENT_SCRIPT_COPPELIA)
+        agent_script_handle = rl_copp_obj.current_sim.getScript(1, agent_object)
+    except Exception as e:
+        raise ValueError(f"Error with agent script handle {AGENT_SCRIPT_COPPELIA}")
 
     # Load Robot script
-    print(f"{rl_copp_obj.robot_handle_alias}{ROBOT_SCRIPT_COPPELIA}")
-    robot_object = rl_copp_obj.current_sim.getObject(
-        f"{rl_copp_obj.robot_handle_alias}{ROBOT_SCRIPT_COPPELIA}"
-    )
-    robot_script_handle = rl_copp_obj.current_sim.getScript(1, robot_object)
+    robot_script_copp_path = f"{rl_copp_obj.params_train['robot_handle']}{ROBOT_SCRIPT_COPPELIA}"
+    try:
+        robot_object = rl_copp_obj.current_sim.getObject(robot_script_copp_path)
+        robot_script_handle = rl_copp_obj.current_sim.getScript(1, robot_object)
+    except Exception as e:
+        raise ValueError(f"Error with robot handle or script name {robot_script_copp_path}. Error: {e}")
 
     # Get paths to the scripts
     agent_script_path = os.path.join(rl_copp_obj.base_path, "src", AGENT_SCRIPT_PYTHON)
@@ -1334,7 +1340,6 @@ def update_and_copy_script(rl_copp_obj):
     logging.info(f"Copying content of {robot_script_path} inside the scene in {ROBOT_SCRIPT_COPPELIA}")
 
     # Try to read and update both scripts
-    
     with open(agent_script_path, "r") as file:
         agent_script_content = file.read()
 
@@ -1532,10 +1537,20 @@ def start_coppelia_and_simulation(rl_copp_obj, process_name:str):
 
     # Scene path
     if rl_copp_obj.args.scene_path is None:
-        try:
-            rl_copp_obj.args.scene_path = os.path.join(rl_copp_obj.base_path, "scenes", f"{rl_copp_obj.args.robot_name}_scene.ttt")
-        except:
-            rl_copp_obj.args.scene_path = os.path.join(rl_copp_obj.base_path, "scenes/burgerBot_scene.ttt")
+
+        # Get scene name from params file json
+        scene_name = rl_copp_obj.params_train.get("scene_name", None)
+        if not scene_name:
+            raise ValueError("No 'scene_name' found in params_train.")
+        
+        # Build scene path
+        scene_path = os.path.join(rl_copp_obj.base_path, "scenes", scene_name)
+
+        # Check file existence
+        if not os.path.isfile(scene_path):
+            raise FileNotFoundError(f"Scene file not found: {scene_path}")
+        
+        rl_copp_obj.args.scene_path = scene_path
 
     # Verify if CoppeliaSim is running
     # TODO Check that when we open several instances of CoppeliaSim with the GUI, only
@@ -3604,3 +3619,308 @@ def prompt_float(msg: str, *, default: Optional[float] = None) -> float:
             return float(s)
         except ValueError:
             print("Please enter a numeric (float) value.")
+
+
+def ensure_ttt(name: str) -> str:
+    """Ensure the scene filename ends with .ttt (case-insensitive)."""
+    name = name.strip()
+    return name if name.lower().endswith(".ttt") else f"{name}.ttt"
+
+
+def arrow_menu(options: List[str], title: str = "Select an option") -> str:
+    """Arrow-key menu using curses. Returns the selected option text.
+
+    Controls:
+      - Up/Down arrows to move
+      - Enter to select
+      - 'q' to quit (returns the last highlighted)
+    """
+    idx = 0
+
+    def _draw(stdscr):
+        nonlocal idx
+        curses.curs_set(0)
+        stdscr.nodelay(False)
+        stdscr.keypad(True)
+
+        while True:
+            stdscr.clear()
+            maxy, maxx = stdscr.getmaxyx()
+            stdscr.addstr(0, 0, title[:maxx-1], curses.A_BOLD)
+
+            start_line = 2
+            for i, opt in enumerate(options):
+                prefix = "➤ " if i == idx else "  "
+                line = f"{prefix}{opt}"
+                if i == idx:
+                    stdscr.addstr(start_line + i, 0, line[:maxx-1], curses.A_REVERSE)
+                else:
+                    stdscr.addstr(start_line + i, 0, line[:maxx-1])
+
+            key = stdscr.getch()
+            if key in (curses.KEY_UP, ord('k')):
+                idx = (idx - 1) % len(options)
+            elif key in (curses.KEY_DOWN, ord('j')):
+                idx = (idx + 1) % len(options)
+            elif key in (curses.KEY_ENTER, 10, 13):
+                return
+            elif key in (ord('q'), 27):  # q or ESC
+                return
+
+    curses.wrapper(_draw)
+    return options[idx]
+
+
+def _read_line_with_ctrlb(prompt: str, initial: str = "") -> Tuple[str, bool]:
+    """Read a single line from terminal with support for Ctrl+B (back) and Backspace.
+
+    Returns:
+        (text, back_requested)
+        - back_requested=True if user pressed Ctrl+B at any point.
+    """
+    # Cross-platform raw key reading
+    is_windows = (os.name == "nt")
+    buf = list(initial)
+
+    def _print_prompt_and_buffer():
+        sys.stdout.write("\r" + " " * (len(prompt) + 2 + 256))  # clear-ish line
+        sys.stdout.write("\r" + prompt + ": " + "".join(buf))
+        sys.stdout.flush()
+
+    sys.stdout.write(prompt + ": ")
+    sys.stdout.flush()
+
+    if is_windows:
+        import msvcrt
+        while True:
+            ch = msvcrt.getwch()
+            # Enter
+            if ch in ("\r", "\n"):
+                sys.stdout.write("\n")
+                return ("".join(buf), False)
+            # Ctrl+B -> back
+            if ch == "\x02":
+                sys.stdout.write("\n")
+                return ("", True)
+            # Backspace
+            if ch in ("\b", "\x7f"):
+                if buf:
+                    buf.pop()
+                    # Move cursor back, erase char, move back again
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+                continue
+            # Special keys (arrows, etc.) consume next code
+            if ch in ("\x00", "\xe0"):
+                _ = msvcrt.getwch()
+                continue
+            # Regular char
+            buf.append(ch)
+            sys.stdout.write(ch)
+            sys.stdout.flush()
+    else:
+        import termios, tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                # Enter (CR or LF)
+                if ch in ("\r", "\n"):
+                    sys.stdout.write("\n")
+                    return ("".join(buf), False)
+                # Ctrl+B -> back
+                if ch == "\x02":
+                    sys.stdout.write("\n")
+                    return ("", True)
+                # Backspace (DEL or BS)
+                if ch in ("\x7f", "\b"):
+                    if buf:
+                        buf.pop()
+                        sys.stdout.write("\b \b")
+                        sys.stdout.flush()
+                    continue
+                # Printable char
+                if ch.isprintable():
+                    buf.append(ch)
+                    sys.stdout.write(ch)
+                    sys.stdout.flush()
+                # Ignore others
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def prompt_str_with_back(label: str, default: str = "") -> Tuple[str, bool]:
+    """High-level prompt using _read_line_with_ctrlb with default shown."""
+    if default:
+        label = f"{label} [{default}]"
+    text, back = _read_line_with_ctrlb(label, initial="")
+    if back:
+        return "", True
+    return (text if text else default), False
+
+
+class BackSignal(Exception):
+    """Lightweight signal to move one step back in the wizard."""
+    pass
+
+
+def _read_line_ctrlb(label: str, initial: str = "") -> str:
+    """Read a line with raw key capture. Ctrl+B triggers BackSignal.
+
+    Works on Windows (msvcrt) and POSIX (termios/tty).
+    Backspace works. Enter ends input. Printable chars are appended.
+
+    Raises:
+        BackSignal: if user presses Ctrl+B at any time.
+    """
+    # Print prompt
+    sys.stdout.write(f"{label}: ")
+    sys.stdout.flush()
+
+    buf = list(initial)
+    is_windows = (os.name == "nt")
+
+    def _emit(text: str):
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
+    if is_windows:
+        import msvcrt
+        while True:
+            ch = msvcrt.getwch()
+            # Enter
+            if ch in ("\r", "\n"):
+                _emit("\n")
+                return "".join(buf)
+            # Ctrl+B
+            if ch == "\x02":
+                _emit("\n")
+                raise BackSignal()
+            # Backspace
+            if ch in ("\b", "\x7f"):
+                if buf:
+                    buf.pop()
+                    _emit("\b \b")
+                continue
+            # Special keys (arrows, etc.)
+            if ch in ("\x00", "\xe0"):
+                _ = msvcrt.getwch()
+                continue
+            # Printable
+            if ch:
+                buf.append(ch)
+                _emit(ch)
+    else:
+        import termios, tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                if ch in ("\r", "\n"):
+                    _emit("\n")
+                    return "".join(buf)
+                if ch == "\x02":  # Ctrl+B
+                    _emit("\n")
+                    raise BackSignal()
+                if ch in ("\x7f", "\b"):  # Backspace/Delete
+                    if buf:
+                        buf.pop()
+                        _emit("\b \b")
+                    continue
+                # Printable
+                if ch.isprintable():
+                    buf.append(ch)
+                    _emit(ch)
+                # ignore others
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+class Prompt:
+    """High-level prompt API that supports Ctrl+B (BackSignal) in all inputs."""
+
+    def str(self, label: str, default: Optional[str] = None) -> str:
+        """Ask for a string. Ctrl+B raises BackSignal."""
+        lab = f"{label}" + (f" [{default}]" if default not in (None, "") else "")
+        s = _read_line_ctrlb(lab)
+        return s if s != "" else (default if default is not None else "")
+
+    def float(self, label: str, default: Optional[float] = None) -> float:
+        """Ask for a float. Ctrl+B raises BackSignal."""
+        while True:
+            s = self.str(label, default=None if default is None else str(default))
+            if s == "" and default is not None:
+                return float(default)
+            try:
+                return float(s)
+            except ValueError:
+                print("Valor inválido. Introduce un número (Ctrl+B para volver).")
+
+    def int(self, label: str, default: Optional[int] = None) -> int:
+        """Ask for an int. Ctrl+B raises BackSignal."""
+        while True:
+            s = self.str(label, default=None if default is None else str(default))
+            if s == "" and default is not None:
+                return int(default)
+            try:
+                return int(s)
+            except ValueError:
+                print("Valor inválido. Introduce un entero (Ctrl+B para volver).")
+
+    def confirm(self, label: str, default: bool = True) -> bool:
+        """Yes/No prompt. Ctrl+B raises BackSignal."""
+        suffix = "Y/n" if default else "y/N"
+        ans = self.str(f"{label} ({suffix})", default="y" if default else "n").strip().lower()
+        return ans in ("y", "yes", "s", "si", "sí")
+
+    def choice(self, label: str, options: list[str], default_idx: int = 0) -> str:
+        """Pick from options by index. Ctrl+B raises BackSignal."""
+        for i, opt in enumerate(options):
+            print(f"  [{i}] {opt}")
+        idx = self.int(f"{label} (elige índice)", default=default_idx)
+        if not (0 <= idx < len(options)):
+            print("Índice fuera de rango. Se usará el índice por defecto.")
+            idx = default_idx
+        return options[idx]
+
+
+
+def print_uncore_logo():
+    """Print the UnCoRE logo (ASCII version) with blue color and proper formatting."""
+    blue = "\033[94m"   # Bright blue
+    reset = "\033[0m"   # Reset color
+    logo = r"""
+    
+
+                                                                                                                  
+                                                                                                  :@@@.           
+                                                                                               .*@@@@@@=          
+                                                                                             -@@@@@@@@@@.         
+                                 .@%==.                                          -=.       -@@@@@@@@@@@=          
+                               .@#                                             +@@@@*    .@@@@@@@-.               
+                             .%%.                                              #@@@@@   *@@@@@-                   
+                           .#@.                                                 =@@+  .@@@@@.                     
+                          #@.                                                        :@@@@:        +@@@@@@%:      
+  @@=      %@@@@@@@@.   *@.       .@@@@@@@@@   .@@@@@@@@@@@@@@@@#                    @@@@-       =@@@@@@@@@@@.    
+   %+      @:     .@:   @-        .@      +@   :@.      .....  =@          .#@@-    -@@@@       :@@@@@@@@@@@@@    
+   %+      @:     .@:   @-        .@      +@   :@.     :@====.            :@@@@@+   #@@@=       @@@@@@@@@@@@@@:   
+   %+      @:     .@:   @-        .@      +@   :@.     :@                 .@@@@@-   #@@@+       #@@@@@@@@@@@@@.   
+   %+      @:     .@:   @-        .@      +@   :@.     :@                    :.     .@@@@       .@@@@@@@@@@@@*    
+   %+      @:     .@:   @-        .@      +@   :@.     :@      =@                    %@@@%        *@@@@@@@@@-     
+   +%%%%%%%%.     .*%#. #@.       .%%%%%%%%#   .#      .%%%%%%%%*                    .@@@@@         .=#%*:        
+                         .@#                                                   .@@@@:  %@@@@*                     
+                           -@=                                                 %@@@@@   -@@@@@%.                  
+                             =@:                                               :@@@@-     *@@@@@@@+-.             
+                               *@                                                           #@@@@@@@@@@@          
+                                 %@.                                                          +@@@@@@@@@.         
+                                   -=-                                                          .@@@@@@:          
+                                                                                                   =%+            
+                                                                                                                  
+
+
+    """
+    print(f"{blue}{logo}{reset}")

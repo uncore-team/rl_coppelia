@@ -4,17 +4,8 @@
         "distance_between_wheels": 0.23
     },
     "params_env": {
-        "var_action_time_flag": true,
         "fixed_actime": 0.75,
-        "bottom_actime_limit": 0.2,
-        "upper_actime_limit": 3.0,
-        "bottom_lspeed_limit": 0.1,
-        "upper_lspeed_limit": 0.5,
-        "bottom_aspeed_limit": -0.5,
-        "upper_aspeed_limit": 0.5,
-        "finish_episode_flag": false,
         "dist_thresh_finish_flag": 0.5,
-        "obs_time": false,
         "reward_dist_1": 0.25,
         "reward_1": 0.25,
         "reward_dist_2": 0.125,
@@ -30,14 +21,44 @@
         "max_crash_dist": 0.08,
         "max_crash_dist_critical": 0.13,
         "laser_observations": 4,
-        "fixed_obs": false
+        "fixed_obs": false,
+        "dim_action_space": 2,
+        "action_bottom_limits": [ 
+            0.1,
+            -0.5
+        ],
+        "action_upper_limits": [
+            0.5,
+            0.5
+        ],
+        "dim_observation_space": 6,
+        "observation_bottom_limits": [
+            0.0,
+            -3.141592653589793,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
+        "observation_upper_limits": [
+            5.0,
+            3.141592653589793,
+            4.0,
+            4.0,
+            4.0,
+            4.0
+        ]
     },
     "params_train": {
         "sb3_algorithm": "SAC",
         "policy": "MlpPolicy",
         "total_timesteps": 1000000,
         "callback_frequency": 10000,
-        "n_training_steps": 2048
+        "n_training_steps": 2048,
+        "scene_name": "turtleBot_scene.ttt",
+        "robot_handle": "/Turtlebot2",
+        "robot_base_handle": "/Turtlebot/base_link_visual",
+        "laser_handle": "/Turtlebot/fastHokuyo_ROS2"
     },
     "params_test": {
         "sb3_algorithm": "",
