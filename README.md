@@ -82,11 +82,16 @@ Before using this project, ensure that the following dependencies are installed:
 - **Python 3.x** (preferably 3.6 or later). It has been tested with python 3.8.10.
 - **CoppeliaSim**: The simulator must be installed and configured correctly for the project to work. The project has been tested with CoppeliaSim Edu v4.9.0 (rev. 6) 64bit.
 
-To install the required Python libraries, you can directly use the `install.sh` file included in the root directory of the project. This will also add the rl_spin_decoupler package to the path:
+It is recommended to install all the dependencies within a virtual environment. For that purpose, you will need to install venv package:
+```bash
+sudo apt update
+sudo apt install -y python3-venv
+```
+
+To install the required Python libraries, you can directly use the `install.sh` file included in the root directory of the project. This will add the `rl_spin_decoupler` package and the base directory of the project to the path. It will also create a virtual enviroment and install all the required dependencies within it.
 
 ```bash
-chmod +x install.sh
-source ~/.bashrc
+source install.sh
 ```
 
 If logs say that you need to refresh your bash manually, please run the next command:
