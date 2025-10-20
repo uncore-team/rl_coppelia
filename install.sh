@@ -38,8 +38,6 @@ else
 fi
 echo "➡️  Venv to be used: $VENV_DIR"
 
-VENV_DIR="$BASE_DIR/venv"
-
 # Create the virtual environment folder if it does not exist
 mkdir -p "$(dirname "$VENV_DIR")" 2>/dev/null
 
