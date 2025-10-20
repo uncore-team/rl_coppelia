@@ -61,7 +61,7 @@ Any new robot name used in the `main.py` script will generate a new folder withi
 - **Note 1**: You need to clone this project with its submodule, `rl_spin_decoupler`, which is a repository located at https://github.com/uncore-team/rl_spin_decoupler.git. For doing that, please clone the repository using the next command:
 
 ```bash
-git clone --recurse-submodules git@github.com:uncore-team/rl_coppelia.git
+git clone --recurse-submodules https://github.com:uncore-team/rl_coppelia.git
 ```
 
 If you already cloned it before reading these instructions (don't worry, I never read them neither), please use the next commands:

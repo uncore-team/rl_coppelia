@@ -4,7 +4,7 @@
 BASE_DIR="$(pwd)"
 DEPS_DIR="$BASE_DIR/dependencies/rl_spin_decoupler"
 RL_COPPELIA_DIR="$BASE_DIR/src/rl_coppelia"
-SRC_DIR = "$BASE_DIR/src"
+SRC_DIR="$BASE_DIR/src"
 
 # Make the PYTHONPATH change permanent by adding it to the shell's configuration
 SHELL_CONFIG="$HOME/.bashrc"  # Default for bash shell; change to ~/.zshrc for zsh users
