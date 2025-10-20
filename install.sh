@@ -42,8 +42,19 @@ echo "➡️  Venv to be used: $VENV_DIR"
 mkdir -p "$(dirname "$VENV_DIR")" 2>/dev/null
 
 # Activate the virtual environment
-echo "Activating virtual environment..."
-source "$VENV_DIR/bin/activate"
+if [ ! -d "$VENV_DIR" ]; then
+  echo "Creating the virtual env: $VENV_DIR"
+  python3 -m venv "$VENV_DIR"
+else
+  echo "Venv already exists in: $VENV_DIR"
+fi
+
+echo "Activating venv..."
+# shellcheck source=/dev/null
+source "$VENV_DIR/bin/activate" || {
+  echo "❌ Something failed while activating the venv $VENV_DIR"
+  return 1
+}
 
 # Upgrade pip inside the venv
 echo "Upgrading pip..."
