@@ -39,25 +39,27 @@ command_exists() {
 
 # Expand ~ and make absolute; keep absolute paths if already absolute
 expand_to_abs() {
-  local input="$1"
-  # Fix common typo like ~Documents/... (invalid). Require ~/Documents/...
-  if [[ "$input" =~ ^~[^/].* ]]; then
-    die "Invalid path '${input}'. Did you mean '~/...'? e.g., '~/Documents/venvs'"
+  local p="$1"
+
+  # Reject patterns like ~user/... (we don't support named home expansion here)
+  if [[ "$p" == "~"* && "$p" != "~/"* ]]; then
+    die "Invalid path '${p}'. Did you mean '~/...'? e.g., '~/Documents/venvs'"
   fi
 
-  # Expand leading ~
-  if [[ "$input" == "~/"* ]]; then
-    input="${HOME}/${input#~/}"
+  # Expand leading ~/
+  if [[ "$p" == "~/"* ]]; then
+    p="${HOME}/${p#~/}"
   fi
 
-  # If already absolute, return
-  if [[ "$input" == /* ]]; then
-    printf '%s\n' "$input"
+  # If absolute already, normalize and return
+  if [[ "$p" == /* ]]; then
+    # Normalize to a physical absolute path (best-effort)
+    printf '%s\n' "$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)/$(basename -- "$p")"
     return 0
   fi
 
-  # Otherwise, make it absolute from current working directory
-  printf '%s\n' "$(cd -- "$PWD" && cd -- "$(dirname -- "$input")" 2>/dev/null && pwd -P)/$(basename -- "$input")"
+  # Make relative paths absolute based on current working directory
+  printf '%s\n' "$(cd -P -- "$PWD" 2>/dev/null && cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)/$(basename -- "$p")"
 }
 
 # Choose python interpreter
