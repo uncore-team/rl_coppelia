@@ -95,7 +95,8 @@ class CoppeliaEnv(gym.Env, ABC):
         # Make sure that action is a numpy array of 1D, because when testing it can be 2D
         action = action.flatten()   
 
-        self.action_dic = {"linear": action[0],"angular": action[1]}
+        # TODO This needs to be generic
+        self.action_dic = {"linear": action[0],"angular": action[1], "timestep": action[2]}
 
         # Send action to agent and receive an observation.
         logging.info(f"Send act to agent: { {key: round(value, 3) for key, value in self.action_dic.items()} }.")
@@ -130,7 +131,8 @@ class CoppeliaEnv(gym.Env, ABC):
             "linear_speed":self.action_dic["linear"],
             "angular_speed":self.action_dic["angular"],
             "lat_sim":self.lat_sim,
-            "lat_wall":self.lat_wall
+            "lat_wall":self.lat_wall,
+            "timestep":self.action_dic["timestep"]
             }
 
         return self.observation, self.reward, self.terminated, self.truncated, self.info
