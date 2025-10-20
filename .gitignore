@@ -4,8 +4,8 @@
 results/*
 configs/*
 !configs/params_default_file.json
-!configs/params_default_file_burger.json
-!configs/params_default_file_turtle.json
+!configs/params_default_file_burgerBot.json
+!configs/params_default_file_turtleBot.json
 
 src/rl_coppelia.egg-info/
 .vscode/
@@ -15,11 +15,6 @@ tmp/*
 requirements (copy).txt
 requirements.txt.save
 requirements copy 2.txt
-scenes/burgerBot_scene_old.ttt
-scenes/burgerBotReal_scene (copy).ttt
-scenes/burgerBot_scene_backup.ttt
-scenes/burgerBot_scene.zip
-scenes/burgerBot3_scene.ttt
-scenes/scene_notes.txt
-scenes/turtleBot_scene_backup_251002.ttt
-scenes/turtleBot_scene_backup_251010.ttt
+scenes/*
+!scenes/burgerBot_scene.ttt
+!scenes/turtleBot_scene.ttt
