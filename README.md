@@ -71,6 +71,13 @@ git submodule init
 git submodule update
 ```
 
+If `dependencies/rl_spin_decoupler` folder is empty, you will have to synchronize it manually with the remote repo:
+
+```bash
+git submodule sync --recursive
+git submodule update --init --recursive --progress --jobs 4
+```
+
 At this point, the repository and it's submodule should be correctly cloned.
 
 - **Note 2**: When running train/test functionalities, the content inside `rl_script_copp` and `agent_script_copp` will be copied into the `Robot_Script` and `Agent_Script` CoppeliaSim scripts, respectively. Just keep it in mind in case you need to make a backup of your scene.
