@@ -44,29 +44,35 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# Expand ~ and make absolute (no eval, no cd). Does NOT support ~user.
 expand_to_abs() {
   local p="$1"
+  "$PY" - "$p" <<'PYCODE'
+import os, sys, pathlib
 
-  # Reject unsupported ~user patterns (only ~/ is allowed)
-  if [[ "$p" == "~"* && "$p" != "~/"* ]]; then
-    die "Invalid path '${p}'. Use '~/...' (e.g., '~/Documents/venvs')."
-  fi
+if len(sys.argv) < 2:
+    print(os.getcwd())
+    sys.exit(0)
 
-  # Expand leading ~/
-  if [[ "$p" == "~/"* ]]; then
-    p="${HOME}/${p#~/}"
-  fi
+s = sys.argv[1]
 
-  # Absolute path: return as-is (collapse double slashes only)
-  if [[ "$p" == /* ]]; then
-    printf '%s\n' "$p" | sed -e 's://:/:g'
-    return 0
-  fi
+# Trim outer quotes if any (common when user pastes with quotes)
+if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+    s = s[1:-1]
 
-  # Relative path: prepend physical PWD
-  printf '%s\n' "$(pwd -P)/$p" | sed -e 's://:/:g'
+# Expand ~ and $VARS
+s = os.path.expandvars(os.path.expanduser(s))
+
+# Make absolute if needed
+p = pathlib.Path(s)
+if not p.is_absolute():
+    p = pathlib.Path(os.getcwd()) / p
+
+# Normalize but don't require existence
+print(str(p.resolve(strict=False)))
+PYCODE
 }
+
+
 
 
 
@@ -100,10 +106,13 @@ HAS_CENTRAL="${HAS_CENTRAL:-N}"
 if [[ "$HAS_CENTRAL" =~ ^[Yy]$ ]]; then
   read -r -p "Enter the venv base path (e.g., ~/.venvs): " VENV_BASE_INPUT
   VENV_BASE_INPUT="${VENV_BASE_INPUT:-$HOME/.venvs}"
+  # sanitize trailing/leading spaces and CR
+  VENV_BASE_INPUT="$(printf '%s' "$VENV_BASE_INPUT" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
   VENV_BASE_DIR="$(expand_to_abs "$VENV_BASE_INPUT")"
 
   read -r -p "Name for the venv (default: uncore_rl_venv): " VENV_NAME
   VENV_NAME="${VENV_NAME:-uncore_rl_venv}"
+  
   VENV_DIR="${VENV_BASE_DIR}/${VENV_NAME}"
 else
   VENV_BASE_DIR="${HOME}/.venvs"
