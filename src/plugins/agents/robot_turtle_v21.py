@@ -1,9 +1,9 @@
-"""Factory for 'newbot_9' agent (auto-generated)."""
+"""Factory for 'robot_turtle_v21' agent (auto-generated)."""
 
 from plugins.agents import register_agent
-from robots.newbot_9.agent import Newbot9Agent
+from robots.robot_turtle_v21.agent import RobotTurtleV21Agent
 
-def make_agent(sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
+def make_agent(sim, params_env, paths, file_id, verbose, comms_port=49054):
     """Return an instance of the robot-specific Agent.
 
     Args:
@@ -16,8 +16,8 @@ def make_agent(sim, params_robot, params_env, paths, file_id, verbose, comms_por
         comms_port (int): RL comms port.
 
     Returns:
-        Newbot9Agent: Configured agent instance.
+        RobotTurtleV21Agent: Configured agent instance.
     """
-    return Newbot9Agent(sim, params_robot, params_env, paths, file_id, verbose, comms_port)
+    return RobotTurtleV21Agent(sim, params_env, paths, file_id, verbose, comms_port)
 
-register_agent("newbot_9", make_agent)
+register_agent("robot_turtle_v21", make_agent)

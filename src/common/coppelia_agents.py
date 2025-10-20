@@ -12,7 +12,7 @@ from socketcomms.comms import BaseCommPoint # type: ignore
 
 
 class CoppeliaAgent:
-    def __init__(self, sim, params_robot, params_env, paths, file_id, verbose, comms_port = 49054) -> None:
+    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port = 49054) -> None:
         """
         Custom agent for CoppeliaSim simulations of different robots.
         
@@ -22,7 +22,6 @@ class CoppeliaAgent:
         Args:
             sim: The CoppeliaSim simulation instance.
             params_env (dict): Environment parameters loaded from a JSON file.
-            params_robot (dict): Robot-specific parameters loaded from a JSON file.
             paths (dict): Dictionary containing various paths for saving/loading data.
             file_id (str): Unique identifier for the current training/testing session.
             verbose (int): Verbosity level for logging.
@@ -52,7 +51,6 @@ class CoppeliaAgent:
             handle_obstaclegenerators_script: Handle for obstacle generator script, if any.
             sim: The CoppeliaSim simulation instance.
             params_env (dict): Environment parameters loaded from a JSON file.
-            params_robot (dict): Robot-specific parameters loaded from a JSON file.
             initial_simTime (float): Initial simulation time when the agent starts its first movement.
             initial_realTime (float): Initial wall-clock time when the agent starts its first movement.
             paths (dict): Dictionary containing various paths for saving/loading data.
@@ -88,7 +86,7 @@ class CoppeliaAgent:
             get_random_object_pos(): Get a random robot/target position inside the container.
             is_position_valid(): Check if a random generated position is valid (no collisions with obstacles)
             reset_simulator(): Reset the simulator: position the robot and target, and reset the counters.
-            agent_step(robot_name): A step of the agent. Process incoming instructions from the server side and execute actions accordingly.
+            agent_step(): A step of the agent. Process incoming instructions from the server side and execute actions accordingly.
         
         """
 
@@ -120,13 +118,12 @@ class CoppeliaAgent:
         self.inner_target=sim.getObject("/Target/Inner_disk")
         self.container = sim.getObject('/ExternalWall')
         self.generator=sim.getObject('/ObstaclesGenerator')
-        self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
-        self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')
-        self.handle_robot_scripts = sim.getScript(1, self.robot)
+        self.handle_laser_get_observation_script=None
+        self.handle_robot_scripts = None
+        self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')        
 
         self.sim = sim
         self.params_env = params_env
-        self.params_robot = params_robot
 
         self.initial_simTime = 0
         self.initial_realTime = 0
@@ -137,16 +134,6 @@ class CoppeliaAgent:
         # Communication
         self.comms_port = comms_port
         self._commstoRL = None  # To be initialized externally after agent creation
-        
-        # AgentSide doesn't have a timeout, so we do this loop in case that Coppelia scene is executed before the RL.
-        # while True:
-        #     try:
-        #         logging.info(f"Trying to establish communication using the port {comms_port}")
-        #         self._commstoRL = AgentSide(BaseCommPoint.get_ip(),comms_port)
-        #         break
-        #     except:
-        #         logging.info("Connection with RL failed. Retrying in few secs...")
-        #         sim.wait(20)
         
         # Process control variables
         self.finish_rec = False
@@ -192,12 +179,15 @@ class CoppeliaAgent:
 
     
     def start_communication(self):
-        try:
-            logging.info(f"Trying to establish communication using the port {self.comms_port}")
-            self._commstoRL = AgentSide(BaseCommPoint.get_ip(),self.comms_port)
-        except:
-            logging.info("Connection with RL failed. Retrying in few secs...")
-            self.sim.wait(20)
+        while True:
+            try:
+                logging.info(f"Trying to establish communication using the port {self.comms_port}")
+                self._commstoRL = AgentSide(BaseCommPoint.get_ip(),self.comms_port)
+                logging.info("Communication with RL established successfully")
+                break
+            except:
+                logging.info("Connection with RL failed. Retrying in few secs...")
+                self.sim.wait(20)
         
     
     def get_observation(self):
@@ -267,9 +257,9 @@ class CoppeliaAgent:
             for i, val in enumerate(laser_obs):
                 observation_space[f"laser_obs{i}"] = val
 
-        # Add action time to the observation if required
-        if self.params_env["obs_time"]:
-            observation_space["action_time"] = self._rltimestep
+        # Add action time to the observation if required    # TODO This belongs to the old version, we need to automatize observation_space creation
+        # if self.params_env["obs_time"]:
+        #     observation_space["action_time"] = self._rltimestep
 
         return observation_space
 
@@ -588,11 +578,11 @@ class CoppeliaAgent:
             self.first_reset_done = True
 
 
-    def agent_step(self, robot_name):
+    def agent_step(self):
         """
         A step of the agent. Process incoming instructions from the server side and execute actions accordingly.
         Args:
-            robot_name (str): Name of the robot in the CoppeliaSim scene.
+            self: The CoppeliaAgent instance.
         Returns:
             dict: The action to be executed.
         """
@@ -664,7 +654,7 @@ class CoppeliaAgent:
                
             action = self._lastaction
             
-        # Execution state --> The action has finished, so it tries to read a new command from RL
+        # Execution/ Reading state --> The action has finished, so it tries to read a new command from RL
         else:  # waiting for new RL step() or reset()            
             # read the last (pending) step()/reset() indicator and then proceed accordingly
             rl_instruction = self._commstoRL.readWhatToDo()
@@ -681,8 +671,8 @@ class CoppeliaAgent:
                     logging.info(f"Action rec: { {key: round(value, 3) for key, value in action.items()} }")
                 
                     # Update action time if it's variable
-                    if self.params_env["var_action_time_flag"]:
-                        self._rltimestep = action["action_time"]
+                    # if self.params_env["var_action_time_flag"]:
+                    #     self._rltimestep = action["action_time"]
 
                     if self.first_reset_done and not self.lat_reset:
                         self._lastactiont0_sim = 0.0
@@ -765,7 +755,7 @@ class CoppeliaAgent:
 # -----------------------------------------------
 
 class BurgerBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
+    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
         """
         Custom agent for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
@@ -780,17 +770,19 @@ class BurgerBotAgent(CoppeliaAgent):
             robot_baselink (CoppeliaObject): Object of the robot's basein CoppeliaSim scene.
             laser (CoppeliaObject): Lase object in CoppeliaSim scene.
         """
-        super(BurgerBotAgent, self).__init__(sim, params_robot, params_env, paths, file_id, verbose, comms_port)
+        super(BurgerBotAgent, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
 
         self.robot = sim.getObject("/Burger")
         self.robot_baselink = self.robot
         self.laser=sim.getObject('/Burger/Laser')
+        self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
+        self.handle_robot_scripts = sim.getScript(1, self.robot)
 
         logging.info(f"BurgerBot Agent created successfully using port {comms_port}.")
 
 
 class TurtleBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
+    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
         """
         Custom agent for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
@@ -806,10 +798,12 @@ class TurtleBotAgent(CoppeliaAgent):
             laser (CoppeliaObject): Lase object in CoppeliaSim scene.
 
         """
-        super(TurtleBotAgent, self).__init__(sim, params_robot, params_env, paths, file_id, verbose, comms_port)
+        super(TurtleBotAgent, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
 
         self.robot=sim.getObject('/Turtlebot2')
         self.robot_baselink=sim.getObject('/Turtlebot2/base_link_respondable')
         self.laser=sim.getObject('/Turtlebot2/fastHokuyo_ROS2')
+        self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
+        self.handle_robot_scripts = sim.getScript(1, self.robot)
         
         logging.info(f"TurtleBot Agent created successfully using port {comms_port}.")

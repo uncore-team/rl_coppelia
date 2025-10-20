@@ -23,6 +23,7 @@ import os
 import pkgutil
 import shutil
 import sys
+import traceback
 
 # Locate rl_coppelia installation and append the source folder to sys.path
 project_folder = shutil.which("rl_coppelia")
@@ -60,18 +61,22 @@ def _autoload_agent_plugins(base_path):
     """Import all modules in plugins.agents so they self-register."""
     src_dir = os.path.join(base_path, "src")
     if os.path.isdir(src_dir) and src_dir not in sys.path:
-        sys.path.insert(0, src_dir)
+        sys.path.insert(0, src_dir)         # for 'plugins.*'
+
+    if base_path not in sys.path:
+            sys.path.insert(0, base_path)   # para 'agents.*'
     try:
         pkg = importlib.import_module("plugins.agents")
-        for m in pkgutil.iter_modules(pkg.__path__, "plugins.agents."):
+        for finder, name, ispkg in pkgutil.iter_modules(pkg.__path__, "plugins.agents."):
             try:
-                importlib.import_module(m.name)
-            except Exception as exc2:
-                logging.debug(f"Agent plugins: failed to import '{m.name}': {exc2}")
-    except Exception as exc:
-        logging.debug(f"Agent plugins import/iter skipped/failed: {exc}")
-
-
+                importlib.import_module(name)
+                logging.info(f"[plugins] Imported: {name}")
+            except Exception:
+                logging.error(f"[plugins] Failed to import {name}")
+                logging.debug(traceback.format_exc())
+    except Exception:
+        logging.error(f"Agent plugins autoload failed:\n{traceback.format_exc()}")
+        
 
 def sysCall_init():
     """

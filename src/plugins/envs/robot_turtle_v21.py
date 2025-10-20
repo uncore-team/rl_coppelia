@@ -1,15 +1,16 @@
-"""Plugin to register 'newbot_9' robot environment.
+"""Plugin to register 'robot_turtle_v21' robot environment.
 
 Loaded on the RL side. It registers a VecEnv factory on import.
 """
+
 from __future__ import annotations
 from common.rl_coppelia_manager import RLCoppeliaManager
 from plugins.envs import register_env
 from stable_baselines3.common.env_util import make_vec_env
-from robots.newbot_9.envs import Newbot9Env
+from robots.robot_turtle_v21.envs import RobotTurtleV21Env
 
 def make_env(manager: RLCoppeliaManager):
-    """Create a VecEnv instance for 'newbot_9'.
+    """Create a VecEnv instance for 'robot_turtle_v21'.
 
     Args:
         manager: The current RLCoppeliaManager instance.
@@ -18,7 +19,7 @@ def make_env(manager: RLCoppeliaManager):
         A vectorized environment (VecEnv) suitable for training/testing.
     """
     return make_vec_env(
-        Newbot9Env,
+        RobotTurtleV21Env,
         n_envs=1,
         monitor_dir=manager.log_monitor,
         env_kwargs={
@@ -28,4 +29,4 @@ def make_env(manager: RLCoppeliaManager):
     )
 
 # Register on module import
-register_env("newbot_9", make_env)
+register_env("robot_turtle_v21", make_env)

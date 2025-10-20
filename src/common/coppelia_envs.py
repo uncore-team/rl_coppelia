@@ -95,19 +95,7 @@ class CoppeliaEnv(gym.Env, ABC):
         # Make sure that action is a numpy array of 1D, because when testing it can be 2D
         action = action.flatten()   
 
-        # Manage different possibilities: 
-        # [linear, angular, finish_flag] / [linear, angular, finish_flag, action_time] / [linear, angular, action_time] / [linear, angular]
-
-        if self.params_env["finish_episode_flag"]:
-            if not self.params_env["var_action_time_flag"]:
-                self.action_dic = {"linear": action[0],"angular": action[1], "finish_flag": action[2]}
-            else:
-                self.action_dic = {"linear": action[0],"angular": action[1],"finish_flag": action[2], "action_time": action[3]}
-        else:
-            if self.params_env["var_action_time_flag"]:
-                self.action_dic = {"linear": action[0],"angular": action[1],"action_time": action[2]}
-            else:
-                self.action_dic = {"linear": action[0],"angular": action[1]}
+        self.action_dic = {"linear": action[0],"angular": action[1]}
 
         # Send action to agent and receive an observation.
         logging.info(f"Send act to agent: { {key: round(value, 3) for key, value in self.action_dic.items()} }.")
@@ -209,15 +197,15 @@ class CoppeliaEnv(gym.Env, ABC):
             return p["crash_penalty"]
 
         # --- If agent can decide to finish episode ---
-        if p["finish_episode_flag"]:
-            if self.action_dic["finish_flag"]<0.5:
-                logging.info("Agent self truncated.")
-                self.truncated = True
-                self.target_zone = 0
-                if distance>p["dist_thresh_finish_flag"]:
-                    return p["finish_flag_penalty"]
-                else:
-                    return 0
+        # if p["finish_episode_flag"]:
+        #     if self.action_dic["finish_flag"]<0.5:
+        #         logging.info("Agent self truncated.")
+        #         self.truncated = True
+        #         self.target_zone = 0
+        #         if distance>p["dist_thresh_finish_flag"]:
+        #             return p["finish_flag_penalty"]
+        #         else:
+        #             return 0
 
         # --- Collision check ---
         crashed = False

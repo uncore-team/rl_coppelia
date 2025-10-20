@@ -121,6 +121,9 @@ def main(argv=None):
 
     args = parser.parse_args(argv)  # Parse CLI arguments (from sys.argv or passed manually)
 
+    # Print UnCORE logo
+    utils.print_uncore_logo()
+
     if args.command == "train":
         from rl_coppelia import train
         train.main(args)
@@ -158,5 +161,4 @@ def main(argv=None):
         parser.print_help() # Show help if no command provided
 
 if __name__ == "__main__":
-    utils.print_uncore_logo()
     main()

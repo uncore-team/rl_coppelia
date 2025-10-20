@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 from matplotlib import pyplot as plt
 from matplotlib.patches import Ellipse
@@ -1422,7 +1422,10 @@ def update_and_copy_script(rl_copp_obj):
     replacements_robot = {
         "verbose": rl_copp_obj.args.verbose,
         "distance_between_wheels": rl_copp_obj.params_robot["distance_between_wheels"],
-        "wheel_radius": rl_copp_obj.params_robot["wheel_radius"]
+        "wheel_radius": rl_copp_obj.params_robot["wheel_radius"],
+        "robot_alias": rl_copp_obj.params_train["robot_handle"],
+        "robot_base_alias": rl_copp_obj.params_train["robot_base_handle"],
+        "laser_alias": rl_copp_obj.params_train["laser_handle"]
     }
 
     # Update standard variables
@@ -3566,59 +3569,59 @@ def unwrap_env(vec_env, idx=0):
 # ------------------------------------
 
 
-def prompt_str(msg: str, *, default: Optional[str] = None, allow_empty: bool = False) -> str:
-    """Prompt for a string with optional default."""
-    while True:
-        prompt = f"{msg}"
-        if default is not None:
-            prompt += f" [{default}]"
-        prompt += ": "
-        val = input(prompt).strip()
-        if not val:
-            if default is not None:
-                return default
-            if allow_empty:
-                return ""
-            print("Please enter a value.")
-            continue
-        return val
+# def prompt_str(msg: str, *, default: Optional[str] = None, allow_empty: bool = False) -> str:
+#     """Prompt for a string with optional default."""
+#     while True:
+#         prompt = f"{msg}"
+#         if default is not None:
+#             prompt += f" [{default}]"
+#         prompt += ": "
+#         val = input(prompt).strip()
+#         if not val:
+#             if default is not None:
+#                 return default
+#             if allow_empty:
+#                 return ""
+#             print("Please enter a value.")
+#             continue
+#         return val
 
 
-def prompt_yes_no(msg: str, *, default: Optional[bool] = None) -> bool:
-    """Prompt for a yes/no question."""
-    opt = ""
-    if default is True:
-        opt = " [Y/n]"
-    elif default is False:
-        opt = " [y/N]"
-    ans = input(f"{msg}{opt}: ").strip().lower()
-    if not ans and default is not None:
-        return default
-    return ans in ("y", "yes", "s", "si", "sí", "true", "1")
+# def prompt_yes_no(msg: str, *, default: Optional[bool] = None) -> bool:
+#     """Prompt for a yes/no question."""
+#     opt = ""
+#     if default is True:
+#         opt = " [Y/n]"
+#     elif default is False:
+#         opt = " [y/N]"
+#     ans = input(f"{msg}{opt}: ").strip().lower()
+#     if not ans and default is not None:
+#         return default
+#     return ans in ("y", "yes", "s", "si", "sí", "true", "1")
 
 
-def prompt_int(msg: str, *, default: Optional[int] = None, min_val: Optional[int] = None) -> int:
-    """Prompt for an integer with basic validation."""
-    while True:
-        s = prompt_str(msg, default=None if default is None else str(default))
-        try:
-            v = int(s)
-            if min_val is not None and v < min_val:
-                print(f"Must be >= {min_val}.")
-                continue
-            return v
-        except ValueError:
-            print("Please enter an integer number.")
+# def prompt_int(msg: str, *, default: Optional[int] = None, min_val: Optional[int] = None) -> int:
+#     """Prompt for an integer with basic validation."""
+#     while True:
+#         s = prompt_str(msg, default=None if default is None else str(default))
+#         try:
+#             v = int(s)
+#             if min_val is not None and v < min_val:
+#                 print(f"Must be >= {min_val}.")
+#                 continue
+#             return v
+#         except ValueError:
+#             print("Please enter an integer number.")
 
 
-def prompt_float(msg: str, *, default: Optional[float] = None) -> float:
-    """Prompt for a float with basic validation."""
-    while True:
-        s = prompt_str(msg, default=None if default is None else str(default))
-        try:
-            return float(s)
-        except ValueError:
-            print("Please enter a numeric (float) value.")
+# def prompt_float(msg: str, *, default: Optional[float] = None) -> float:
+#     """Prompt for a float with basic validation."""
+#     while True:
+#         s = prompt_str(msg, default=None if default is None else str(default))
+#         try:
+#             return float(s)
+#         except ValueError:
+#             print("Please enter a numeric (float) value.")
 
 
 def ensure_ttt(name: str) -> str:
@@ -3671,147 +3674,122 @@ def arrow_menu(options: List[str], title: str = "Select an option") -> str:
     return options[idx]
 
 
-def _read_line_with_ctrlb(prompt: str, initial: str = "") -> Tuple[str, bool]:
-    """Read a single line from terminal with support for Ctrl+B (back) and Backspace.
+def prompt_str(label: str, default: Optional[str] = None, allow_empty: bool = True) -> str:
+    """Ask for a string with Ctrl+B and Ctrl+C support."""
+    while True:
+        s = _read_line_ctrlb(label, default=default)
+        if s == "" and default is not None:
+            return default
+        if not allow_empty and s.strip() == "":
+            print("This field cannot be empty. (Ctrl+B to go back)")
+            continue
+        return s
 
-    Returns:
-        (text, back_requested)
-        - back_requested=True if user pressed Ctrl+B at any point.
-    """
-    # Cross-platform raw key reading
-    is_windows = (os.name == "nt")
-    buf = list(initial)
 
-    def _print_prompt_and_buffer():
-        sys.stdout.write("\r" + " " * (len(prompt) + 2 + 256))  # clear-ish line
-        sys.stdout.write("\r" + prompt + ": " + "".join(buf))
-        sys.stdout.flush()
-
-    sys.stdout.write(prompt + ": ")
-    sys.stdout.flush()
-
-    if is_windows:
-        import msvcrt
-        while True:
-            ch = msvcrt.getwch()
-            # Enter
-            if ch in ("\r", "\n"):
-                sys.stdout.write("\n")
-                return ("".join(buf), False)
-            # Ctrl+B -> back
-            if ch == "\x02":
-                sys.stdout.write("\n")
-                return ("", True)
-            # Backspace
-            if ch in ("\b", "\x7f"):
-                if buf:
-                    buf.pop()
-                    # Move cursor back, erase char, move back again
-                    sys.stdout.write("\b \b")
-                    sys.stdout.flush()
+def prompt_int(label: str, default: Optional[int] = None,
+               min_val: Optional[int] = None, max_val: Optional[int] = None) -> int:
+    """Ask for an integer with optional bounds."""
+    while True:
+        s = _read_line_ctrlb(label, default=None if default is None else str(default))
+        if s == "" and default is not None:
+            v = default
+        else:
+            try:
+                v = int(s)
+            except ValueError:
+                print("Invalid integer. (Ctrl+B to go back)")
                 continue
-            # Special keys (arrows, etc.) consume next code
-            if ch in ("\x00", "\xe0"):
-                _ = msvcrt.getwch()
+        if min_val is not None and v < min_val:
+            print(f"Value must be >= {min_val}. (Ctrl+B to go back)")
+            continue
+        if max_val is not None and v > max_val:
+            print(f"Value must be <= {max_val}. (Ctrl+B to go back)")
+            continue
+        return v
+
+
+def prompt_float(label: str, default: Optional[float] = None,
+                 min_val: Optional[float] = None, max_val: Optional[float] = None) -> float:
+    """Ask for a float with optional bounds."""
+    while True:
+        s = _read_line_ctrlb(label, default=None if default is None else str(default))
+        if s == "" and default is not None:
+            v = default
+        else:
+            try:
+                v = float(s)
+            except ValueError:
+                print("Invalid number. (Ctrl+B to go back)")
                 continue
-            # Regular char
-            buf.append(ch)
-            sys.stdout.write(ch)
-            sys.stdout.flush()
-    else:
-        import termios, tty
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
-            while True:
-                ch = sys.stdin.read(1)
-                # Enter (CR or LF)
-                if ch in ("\r", "\n"):
-                    sys.stdout.write("\n")
-                    return ("".join(buf), False)
-                # Ctrl+B -> back
-                if ch == "\x02":
-                    sys.stdout.write("\n")
-                    return ("", True)
-                # Backspace (DEL or BS)
-                if ch in ("\x7f", "\b"):
-                    if buf:
-                        buf.pop()
-                        sys.stdout.write("\b \b")
-                        sys.stdout.flush()
-                    continue
-                # Printable char
-                if ch.isprintable():
-                    buf.append(ch)
-                    sys.stdout.write(ch)
-                    sys.stdout.flush()
-                # Ignore others
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        if min_val is not None and v < min_val:
+            print(f"Value must be >= {min_val}. (Ctrl+B to go back)")
+            continue
+        if max_val is not None and v > max_val:
+            print(f"Value must be <= {max_val}. (Ctrl+B to go back)")
+            continue
+        return v
 
 
-def prompt_str_with_back(label: str, default: str = "") -> Tuple[str, bool]:
-    """High-level prompt using _read_line_with_ctrlb with default shown."""
-    if default:
-        label = f"{label} [{default}]"
-    text, back = _read_line_with_ctrlb(label, initial="")
-    if back:
-        return "", True
-    return (text if text else default), False
+def prompt_choice(label: str, options: Iterable[str], default_idx: int = 0) -> str:
+    """Ask user to pick an option by index."""
+    opts = list(options)
+    for i, opt in enumerate(opts):
+        print(f"  [{i}] {opt}")
+    idx = prompt_int(f"{label} (pick index)", default=default_idx,
+                     min_val=0, max_val=len(opts) - 1)
+    return opts[idx]
 
+
+def prompt_confirm(label: str, default: bool = True) -> bool:
+    """Yes/No prompt with Ctrl+B and Ctrl+C support."""
+    suffix = "Y/n" if default else "y/N"
+    ans = prompt_str(f"{label} ({suffix})", default="y" if default else "n").strip().lower()
+    return ans in ("y", "yes")
 
 class BackSignal(Exception):
-    """Lightweight signal to move one step back in the wizard."""
+    """Internal signal to go back one step (raised on Ctrl+B)."""
     pass
 
-
-def _read_line_ctrlb(label: str, initial: str = "") -> str:
-    """Read a line with raw key capture. Ctrl+B triggers BackSignal.
-
-    Works on Windows (msvcrt) and POSIX (termios/tty).
-    Backspace works. Enter ends input. Printable chars are appended.
-
-    Raises:
-        BackSignal: if user presses Ctrl+B at any time.
+def _read_line_ctrlb(label: str, default: Optional[str] = None) -> str:
+    """Read a line (Windows + POSIX) with:
+       - Ctrl+B -> back one step (BackSignal)
+       - Ctrl+C -> cancel (KeyboardInterrupt)
+       - Clean line (no weird indentation)
     """
-    # Print prompt
-    sys.stdout.write(f"{label}: ")
+    import os, sys
+    # Start on a fresh line, move to column 0, clear line
+    sys.stdout.write("\n\r\033[2K")
+    # Prompt (no leading spaces)
+    if default not in (None, ""):
+        sys.stdout.write(f"{label} [{default}]: ")
+    else:
+        sys.stdout.write(f"{label}: ")
     sys.stdout.flush()
 
-    buf = list(initial)
-    is_windows = (os.name == "nt")
+    buf: List[str] = []
 
-    def _emit(text: str):
-        sys.stdout.write(text)
-        sys.stdout.flush()
-
-    if is_windows:
+    if os.name == "nt":
         import msvcrt
         while True:
             ch = msvcrt.getwch()
-            # Enter
             if ch in ("\r", "\n"):
-                _emit("\n")
-                return "".join(buf)
-            # Ctrl+B
-            if ch == "\x02":
-                _emit("\n")
+                sys.stdout.write("\n"); sys.stdout.flush()
+                text = "".join(buf)
+                return text if text or default is None else str(default)
+            if ch == "\x03":  # Ctrl+C
+                sys.stdout.write("\n"); sys.stdout.flush()
+                raise KeyboardInterrupt
+            if ch == "\x02":  # Ctrl+B
+                sys.stdout.write("\n"); sys.stdout.flush()
                 raise BackSignal()
-            # Backspace
-            if ch in ("\b", "\x7f"):
+            if ch in ("\b", "\x7f"):  # Backspace
                 if buf:
-                    buf.pop()
-                    _emit("\b \b")
+                    buf.pop(); sys.stdout.write("\b \b"); sys.stdout.flush()
                 continue
-            # Special keys (arrows, etc.)
-            if ch in ("\x00", "\xe0"):
+            if ch in ("\x00", "\xe0"):  # special keys
                 _ = msvcrt.getwch()
                 continue
-            # Printable
-            if ch:
-                buf.append(ch)
-                _emit(ch)
+            buf.append(ch); sys.stdout.write(ch); sys.stdout.flush()
     else:
         import termios, tty
         fd = sys.stdin.fileno()
@@ -3821,71 +3799,25 @@ def _read_line_ctrlb(label: str, initial: str = "") -> str:
             while True:
                 ch = sys.stdin.read(1)
                 if ch in ("\r", "\n"):
-                    _emit("\n")
-                    return "".join(buf)
+                    sys.stdout.write("\n"); sys.stdout.flush()
+                    text = "".join(buf)
+                    return text if text or default is None else str(default)
+                if ch == "\x03":  # Ctrl+C
+                    sys.stdout.write("\n"); sys.stdout.flush()
+                    raise KeyboardInterrupt
                 if ch == "\x02":  # Ctrl+B
-                    _emit("\n")
+                    sys.stdout.write("\n"); sys.stdout.flush()
                     raise BackSignal()
-                if ch in ("\x7f", "\b"):  # Backspace/Delete
+                if ch in ("\x7f", "\b"):
                     if buf:
-                        buf.pop()
-                        _emit("\b \b")
+                        buf.pop(); sys.stdout.write("\b \b"); sys.stdout.flush()
                     continue
-                # Printable
                 if ch.isprintable():
-                    buf.append(ch)
-                    _emit(ch)
-                # ignore others
+                    buf.append(ch); sys.stdout.write(ch); sys.stdout.flush()
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-class Prompt:
-    """High-level prompt API that supports Ctrl+B (BackSignal) in all inputs."""
-
-    def str(self, label: str, default: Optional[str] = None) -> str:
-        """Ask for a string. Ctrl+B raises BackSignal."""
-        lab = f"{label}" + (f" [{default}]" if default not in (None, "") else "")
-        s = _read_line_ctrlb(lab)
-        return s if s != "" else (default if default is not None else "")
-
-    def float(self, label: str, default: Optional[float] = None) -> float:
-        """Ask for a float. Ctrl+B raises BackSignal."""
-        while True:
-            s = self.str(label, default=None if default is None else str(default))
-            if s == "" and default is not None:
-                return float(default)
-            try:
-                return float(s)
-            except ValueError:
-                print("Valor inválido. Introduce un número (Ctrl+B para volver).")
-
-    def int(self, label: str, default: Optional[int] = None) -> int:
-        """Ask for an int. Ctrl+B raises BackSignal."""
-        while True:
-            s = self.str(label, default=None if default is None else str(default))
-            if s == "" and default is not None:
-                return int(default)
-            try:
-                return int(s)
-            except ValueError:
-                print("Valor inválido. Introduce un entero (Ctrl+B para volver).")
-
-    def confirm(self, label: str, default: bool = True) -> bool:
-        """Yes/No prompt. Ctrl+B raises BackSignal."""
-        suffix = "Y/n" if default else "y/N"
-        ans = self.str(f"{label} ({suffix})", default="y" if default else "n").strip().lower()
-        return ans in ("y", "yes", "s", "si", "sí")
-
-    def choice(self, label: str, options: list[str], default_idx: int = 0) -> str:
-        """Pick from options by index. Ctrl+B raises BackSignal."""
-        for i, opt in enumerate(options):
-            print(f"  [{i}] {opt}")
-        idx = self.int(f"{label} (elige índice)", default=default_idx)
-        if not (0 <= idx < len(options)):
-            print("Índice fuera de rango. Se usará el índice por defecto.")
-            idx = default_idx
-        return options[idx]
 
 
 

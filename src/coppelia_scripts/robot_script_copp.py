@@ -41,6 +41,9 @@ robotHandle = -1
 footprintHandle = -1
 robot_initial_pose_handle = -1
 robotAlias = ""
+robot_alias = ""        # received from params file
+robot_base_alias = ""   # received from params file
+laser_alias = ""        # received from params file
 motorLeft = -1
 motorRight = -1
 laserHandle = -1
@@ -70,6 +73,8 @@ current_color_id = globals().get('current_color_id', 1)
 # Other control variables
 graphStartTime = 0
 verbose = None
+
+
 
 
 # -------------------------------
@@ -161,7 +166,7 @@ def draw_path(linear, angular, color_id):
         # Draw the current point in the trajectory
         p = sim.getObjectPosition(footprintHandle, -1)
         sim.addDrawingObjectItem(poseGtList[color_id], p)
-        print('[draw_path] point:', p)
+        logging.debug('[draw_path] point:', p)
 
         current_color_id = color_id  # Update current color
 
@@ -207,17 +212,14 @@ def sysCall_init():
     # HANDLES
     robotHandle = sim.getObject('..')                   # the robot
     robotAlias = sim.getObjectAlias(robotHandle,3)      # robot name
-    footprintHandle= sim.getObject('/base_link_visual')
-    laserHandle = sim.getObject('/fastHokuyo_ROS2')
-    else:
-        laserHandle = sim.getObject('/Laser')
-    else:
-        raise RuntimeError(f'[Turtle] Robot alias {robotAlias} not recognized. Available: Burger, Turtlebot2')
-    
+    if f"/{robotAlias}" != robot_alias:
+        logging.warning(f"[Turtle] Warning: robot alias from params file '{robot_alias}' does not match the robot alias in the scene '/{robotAlias}'")
+    robotHandle = sim.getObject(robot_base_alias) 
+    footprintHandle= sim.getObject(robot_base_alias)
+    laserHandle = sim.getObject(laser_alias)
     motorLeft = sim.getObject("/wheel_left_joint")
     motorRight = sim.getObject("/wheel_right_joint")
 
-    
     # INITIAL POSE
     # Create a dummy to set the initial robot pose (used on odometry estimation)
     robot_initial_pose_handle = sim.createDummy(0.1)

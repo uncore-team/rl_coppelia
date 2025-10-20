@@ -38,20 +38,19 @@ from stable_baselines3.common.vec_env import VecEnv
 import importlib
 import pkgutil
 from plugins.envs import get_env_factory
+import traceback
 
 
 class RLCoppeliaManager():
 
     def _autoload_env_plugins(self) -> None:
         """Autoload env plugins from 'plugins.envs' to populate the registry."""
-        import sys, os, importlib, pkgutil, logging, traceback
-
         src_dir = os.path.join(self.base_path, "src")
         if os.path.isdir(src_dir) and src_dir not in sys.path:
-            sys.path.insert(0, src_dir)          # para 'plugins.*'
+            sys.path.insert(0, src_dir)          # for 'plugins.*'
 
         if self.base_path not in sys.path:
-            sys.path.insert(0, self.base_path)   # para 'robots.*'
+            sys.path.insert(0, self.base_path)   # for 'envs.*'
 
         try:
             pkg = importlib.import_module("plugins.envs")
@@ -94,7 +93,7 @@ class RLCoppeliaManager():
         # Else infer from model_name if available
         model_name = getattr(args, "model_name", None)
         if model_name:
-            inferred = model_name.split("_")[0]
+            inferred = model_name.split("_model")[0]
             args.robot_name = inferred  # keep args in sync
             return inferred
 

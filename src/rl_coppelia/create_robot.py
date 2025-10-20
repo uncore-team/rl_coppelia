@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import sys
 import termios
@@ -11,338 +12,212 @@ from common import robot_generator, utils
 # ------ SPEC BUILDING LOGIC -------
 # ---------------------------------
 
-def _build_action_spec() -> Dict[str, Any]:
-    """Interactively build the action space spec asking for variable names first.
 
-    The user provides a name for each action dimension before entering its bounds.
-    Names are stored in env_spec['act']['vars'].
+# ------- ACTION SPEC -------
+
+def _build_action_spec() -> Dict[str, Any]:
+    """Interactively build the action space spec.
+
+    Returns:
+        {
+          "names": List[str],
+          "low":   List[float],
+          "high":  List[float]
+        }
     """
-    print("\n-- Action space --")
+    print("\n***** Action space *****")
+
     n_act = utils.prompt_int("Number of action variables", min_val=1)
-    vars_list: List[Dict[str, Any]] = []
+
+    # Ask if the user wants to name each variable
+    use_names = utils.prompt_confirm("Do you want to name each action variable?", default=True)
+
+    names: List[str] = []
+    lows: List[float] = []
+    highs: List[float] = []
 
     for i in range(n_act):
-        default_name = f"act_{i}"
-        name = utils.prompt_str(f"  · Action var {i+1} name", default=default_name)
-        low = utils.prompt_float(f"    Bottom limit for '{name}'")
-        high = utils.prompt_float(f"    Upper limit for '{name}'")
-        vars_list.append({"name": name, "low": low, "high": high})
-
-    return {"vars": vars_list}
-
-
-def _build_obs_spec() -> Dict[str, Any]:
-    """Interactively build the observation space spec asking for names first.
-
-    - Optionally includes laser observations; user can auto-name (laser_obs0..N-1)
-      or provide custom names for each laser dimension.
-    - Then asks for additional (non-laser) observation variables, prompting first
-      for the variable name, then for the bounds.
-    """
-    print("\n-- Observation space --")
-    vars_list: List[Dict[str, Any]] = []
-
-    # ----- Laser observations (optional) -----
-    include_laser = utils.prompt_yes_no("Include laser observations?", default=False)
-    laser_count = 0
-    if include_laser:
-        laser_count = utils.prompt_int("  Number of laser observations", min_val=1)
-        laser_low = utils.prompt_float("  Bottom limit for all laser observations", default=0.0)
-        laser_high = utils.prompt_float("  Upper limit for all laser observations", default=10.0)
-
-        custom_names = utils.prompt_yes_no("  Do you want to name each laser variable?", default=False)
-        if custom_names:
-            for i in range(laser_count):
-                default_name = f"laser_obs{i}"
-                name = utils.prompt_str(f"    · Laser var {i+1} name", default=default_name)
-                vars_list.append({"name": name, "low": laser_low, "high": laser_high})
+        idx = i + 1
+        if use_names:
+            name = utils.prompt_str(f"- Name for action {idx}", default=f"act_{idx}")
         else:
-            for i in range(laser_count):
-                name = f"laser_obs{i}"
-                vars_list.append({"name": name, "low": laser_low, "high": laser_high})
+            name = f"act_{idx}"
 
-    # ----- Additional scalar observations -----
-    n_obs_extra = utils.prompt_int(
-        "Number of additional (non-laser) observation variables",
-        default=0, min_val=0
-    )
-    for i in range(n_obs_extra):
-        default_name = f"obs_{i}"
-        name = utils.prompt_str(f"  · Obs var {i+1} name", default=default_name)
-        low = utils.prompt_float(f"    Bottom limit for '{name}'")
-        high = utils.prompt_float(f"    Upper limit for '{name}'")
-        vars_list.append({"name": name, "low": low, "high": high})
+        low = utils.prompt_float(f"-- Lower limit for '{name}'")
 
-    # Nota: devolvemos también laser_count para rellenar params_updates["params_env"]["laser_observations"]
-    return {"vars": vars_list}, laser_count
+        high = utils.prompt_float(f"-- Upper limit for '{name}'",
+                                     min_val=low if low is not None else None)
 
+        names.append(name)
+        lows.append(float(low))
+        highs.append(float(high))
+
+    return {"names": names, "low": lows, "high": highs}
+
+
+# ------- OBSERVATION SPEC -------
+
+def _build_obs_spec() -> Tuple[Dict[str, Any], int]:
+    """Interactively build a generic observation space spec.
+
+    This function does NOT assume any fixed variables. It asks:
+      1) Number of laser observations (N_lasers).
+      2) Whether to name each laser variable.
+      3) A common lower/upper bound for all laser observations.
+      4) Number of extra (non-laser) observations.
+      5) For each extra observation: name, lower bound, upper bound.
+
+    Returns:
+        Tuple[dict, int]: (obs_spec, n_lasers)
+            obs_spec = {
+                "names": List[str],
+                "low":   List[float],
+                "high":  List[float],
+            }
+            n_lasers = number of laser observations
+    """
+    print("\n***** Observation space *****")
+
+    # 1) Number of lasers
+    n_lasers = utils.prompt_int("Number of laser observations", min_val=0)
+
+    # 2) Laser naming
+    laser_names: List[str] = []
+    if n_lasers > 0:
+        if utils.prompt_confirm("Do you want to name each laser variable?", default=False):
+            for i in range(n_lasers):
+                nm = utils.prompt_str(f"- Name for laser {i}", default=f"laser_obs_{i}", allow_empty=False)
+                laser_names.append(nm)
+        else:
+            laser_names = [f"laser_obs{i}" for i in range(n_lasers)]
+
+    # 3) Common limits for all lasers (with local back support)
+    laser_low, laser_high = None, None
+    if n_lasers > 0:
+
+        laser_low = utils.prompt_float("-- Lower limit for all laser observations", min_val=0.0)
+        laser_high = utils.prompt_float(
+            "-- Upper limit for all laser observations",
+            min_val=laser_low if laser_low is not None else None
+        )
+
+    # 4) Non-laser observations
+    n_extra = utils.prompt_int("Number of non-laser observations")
+
+    extra_names: List[str] = []
+    extra_lows: List[float] = []
+    extra_highs: List[float] = []
+
+    for j in range(n_extra):
+        # Name for extra variable
+        nm = utils.prompt_str(f"- Name for observation {j+1}", default=f"obs{j+1}", allow_empty=False)
+
+        low = utils.prompt_float(f"-- Lower limit for '{nm}'")
+
+        high = utils.prompt_float(
+            f"-- Upper limit for '{nm}'",
+            min_val=low if low is not None else None
+        )
+
+        extra_names.append(nm)
+        extra_lows.append(float(low))
+        extra_highs.append(float(high))
+
+    # Assemble final spec
+    names: List[str] = []
+    lows: List[float] = []
+    highs: List[float] = []
+
+    if n_lasers > 0:
+        names.extend(laser_names)
+        lows.extend([laser_low] * n_lasers)    # type: ignore[arg-type]
+        highs.extend([laser_high] * n_lasers)  # type: ignore[arg-type]
+
+    if n_extra > 0:
+        names.extend(extra_names)
+        lows.extend(extra_lows)
+        highs.extend(extra_highs)
+
+    obs_spec = {"names": names, "low": lows, "high": highs}
+    return obs_spec, n_lasers
+
+
+# ----------------------------- ROBOT DATA ------------------------------
 
 def _build_robot_data() -> Dict[str, Any]:
-    """Prompt for basic robot kinematics."""
-    print("\n-- Robot data --")
-    dbw = utils.prompt_float("distance_between_wheels (m)")
-    wr = utils.prompt_float("wheel_radius (m)")
-    return {"distance_between_wheels": dbw, "wheel_radius": wr}
-
-
-def _build_agent_handles() -> Dict[str, Any]:
-    """Prompt for scene handles used by the Agent in Coppelia."""
-    print("\n-- Scene handles (Coppelia) --")
-    h_robot = utils.prompt_str("  robot (e.g., /Turtlebot2)")
-    h_baselink = utils.prompt_str("  robot_baselink (e.g., /Turtlebot2/base_link_respondable)")
-    use_laser = utils.prompt_yes_no("  Has laser handle?", default=True)
-    h_laser = utils.prompt_str("  laser (e.g., /Turtlebot2/fastHokuyo_ROS2)", allow_empty=not use_laser) if use_laser else ""
-
-    def _starts_with_bar(h):
-        """Ensure that the string starts with a backslash ('\\')."""
-        if not h.startswith("\\"):
-            h = "\\" + h
-        return h
+    """Interactively build robot-specific data (generic fields)."""
+    print("\n***** Robot data *****")
+    # Keep it minimal/generic; extend as needed for your project
+    wheel_radius = utils.prompt_float("- Wheel radius (m)", default=0.033, min_val=0.0)
+    distance_between_wheels   = utils.prompt_float("- Distance between wheels (m)",   default=0.16,  min_val=0.0)
 
     return {
-        "robot": _starts_with_bar(h_robot),
-        "robot_baselink": _starts_with_bar(h_baselink),
-        "laser": _starts_with_bar(h_laser) or ""
+        "wheel_radius": wheel_radius,
+        "distance_between_wheels": distance_between_wheels,
     }
 
+
+# ------------------------------ SCENE PICK -----------------------------
 
 def _pick_scene(base_path: str) -> str:
-    """Let the user pick a .ttt scene from <base_path>/scenes with an arrow menu.
-
-    Falls back to manual input if no scenes are found or curses fails.
-    Adds '.ttt' automatically if missing.
-    """
+    """Pick a .ttt scene from <base_path>/scenes or type a new name."""
     scenes_dir = os.path.join(base_path, "scenes")
-    os.makedirs(scenes_dir, exist_ok=True)
-
     try:
-        files = sorted(
-            [f for f in os.listdir(scenes_dir) if f.lower().endswith(".ttt")]
-        )
-    except Exception as e:
-        logging.warning(f"Could not list scenes in {scenes_dir}: {e}")
+        files = sorted([f for f in os.listdir(scenes_dir) if f.lower().endswith(".ttt")])
+    except Exception:
         files = []
 
-    # Always include a "type manually" option
-    MANUAL = "Type a custom scene name..."
-    options = files + [MANUAL] if files else [MANUAL]
-
-    # Try curses menu; fallback to manual prompt if curses fails
-    chosen = None
-    try:
-        chosen = utils.arrow_menu(options, title=f"Select a Coppelia scene ({scenes_dir})")
-    except Exception as e:
-        logging.warning(f"Curses menu failed, falling back to manual input: {e}")
-        chosen = MANUAL
-
-    if chosen == MANUAL:
-        typed = utils.prompt_str("Scene name (without or with .ttt)")
-        return utils.ensure_ttt(typed)
-
-    # Picked an existing file
-    return utils.ensure_ttt(chosen)
-
-
-# def interactive_create_specs(base_path: str) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-#     """Run an interactive session and return all specs.
-
-#     Args:
-#         base_path (str): Base directory of the project
-
-#     Returns:
-#         (robot_name, env_spec, agent_spec, params_updates)
-#         - params_updates: extra params to write into params JSON (e.g., laser_observations)
-#     """
-
-#     utils.print_uncore_logo()
-
-#     print("------ Create Robot (Env + Agent) ------")
-#     robot_name = utils.prompt_str("Robot name")
-
-#     # Spaces
-#     act_spec = _build_action_spec()
-#     obs_spec, laser_count = _build_obs_spec()
-
-#     # Robot data
-#     robot_data = _build_robot_data()
-
-#     print("\n-- Scene selection --")
-#     scene_name = _pick_scene(base_path)
-#     print(f"Scene name: {scene_name}")
-
-#     # Agent handles
-#     handles = _build_agent_handles()
-
-#     env_spec = {
-#         "robot_data": robot_data,
-#         "obs": obs_spec,
-#         "act": act_spec,
-#     }
-#     agent_spec = {
-#         "handles": handles
-#     }
-
-#     # Params JSON extra updates
-#     params_updates: Dict[str, Any] = {"params_env": {}}
-#     if laser_count > 0:
-#         params_updates["params_env"]["laser_observations"] = laser_count
-
-#     return robot_name, env_spec, agent_spec, params_updates
-
-
-class _BackSignal(Exception):
-    """Internal signal to go back one step (raised on Ctrl+B)."""
-    pass
-
-def _read_line_ctrlb(label: str, default: Optional[str] = None) -> str:
-    """Lee una línea con soporte Ctrl+B y Ctrl+C (cross-platform POSIX).
-    - Enter -> devuelve texto (o default si vacío y default existe)
-    - Ctrl+B -> lanza _BackSignal para retroceder
-    - Ctrl+C -> lanza KeyboardInterrupt (cancelación normal)
-    """
-    # Prompt limpio sin indentaciones raras
-    prompt = f"\n{label}"
-    if default not in (None, ""):
-        prompt += f" [{default}]"
-    prompt += ": "
-    sys.stdout.write(prompt)
-    sys.stdout.flush()
-
-    buf: List[str] = []
-
-    if os.name == "nt":
-        import msvcrt
-        while True:
-            ch = msvcrt.getwch()
-            if ch in ("\r", "\n"):               # Enter
-                sys.stdout.write("\n"); sys.stdout.flush()
-                text = "".join(buf)
-                return text if text or default is None else str(default)
-            if ch == "\x03":                     # Ctrl+C
-                sys.stdout.write("\n"); sys.stdout.flush()
-                raise KeyboardInterrupt
-            if ch == "\x02":                     # Ctrl+B
-                sys.stdout.write("\n"); sys.stdout.flush()
-                raise _BackSignal()
-            if ch in ("\b", "\x7f"):             # Backspace
-                if buf:
-                    buf.pop(); sys.stdout.write("\b \b"); sys.stdout.flush()
-                continue
-            if ch in ("\x00", "\xe0"):           # Teclas especiales -> consume siguiente
-                _ = msvcrt.getwch()
-                continue
-            buf.append(ch); sys.stdout.write(ch); sys.stdout.flush()
+    if files:
+        for i, f in enumerate(files):
+            print(f"  [{i}] {f}")
+        idx = utils.prompt_int("Pick scene (index)", min_val=0, max_val=len(files) - 1)
+        scene = files[idx]
     else:
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
-            while True:
-                ch = sys.stdin.read(1)
-                if ch in ("\r", "\n"):           # Enter
-                    sys.stdout.write("\n"); sys.stdout.flush()
-                    text = "".join(buf)
-                    return text if text or default is None else str(default)
-                if ch == "\x03":                 # Ctrl+C
-                    sys.stdout.write("\n"); sys.stdout.flush()
-                    raise KeyboardInterrupt
-                if ch == "\x02":                 # Ctrl+B
-                    sys.stdout.write("\n"); sys.stdout.flush()
-                    raise _BackSignal()
-                if ch in ("\x7f", "\b"):         # Backspace
-                    if buf:
-                        buf.pop(); sys.stdout.write("\b \b"); sys.stdout.flush()
-                    continue
-                if ch.isprintable():
-                    buf.append(ch); sys.stdout.write(ch); sys.stdout.flush()
-                # ignora no imprimibles
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        scene = utils.prompt_str("Scene name (will end with .ttt)", default="default.ttt", allow_empty=False)
+        if not scene.endswith(".ttt"):
+            scene += ".ttt"
 
-def _patch_utils_prompts():
-    """Devuelve (wrappers, restore_fn). Los wrappers reemplazan utils.prompt_* con soporte Ctrl+B."""
+    return scene
 
-    orig = {
-        "str": getattr(utils, "prompt_str", None),
-        "int": getattr(utils, "prompt_int", None),
-        "float": getattr(utils, "prompt_float", None),
-        "choice": getattr(utils, "prompt_choice", None),
-        "confirm": getattr(utils, "prompt_confirm", None),
+
+# --------------------------- AGENT HANDLES -----------------------------
+
+def _build_agent_handles() -> Dict[str, Any]:
+    """Ask for agent handles (robot, base, laser)."""
+
+    def ensure_leading_slash(s: str) -> str:
+        return s if (not s or s.startswith("/")) else "/" + s
+
+    print("\n***** Agent handles *****")
+    rh = utils.prompt_str("robot_handle", default="/Turtlebot2", allow_empty=False)
+    rb = utils.prompt_str("robot_base_handle", default="/Turtlebot2/base_link_respondable", allow_empty=False)
+    lh = utils.prompt_str("laser_handle", default="/Turtlebot2/fastHokuyo_ROS2", allow_empty=False)
+
+    return {
+        "robot_handle": ensure_leading_slash(rh),
+        "robot_base_handle": ensure_leading_slash(rb),
+        "laser_handle": ensure_leading_slash(lh),
     }
 
-    def prompt_str(label: str, default: Optional[str] = None) -> str:
-        return _read_line_ctrlb(label, default=default)
-
-    def prompt_int(label: str, default: Optional[int] = None) -> int:
-        while True:
-            s = _read_line_ctrlb(label, default=None if default is None else str(default))
-            if s == "" and default is not None:
-                return int(default)
-            try:
-                return int(s)
-            except ValueError:
-                print("Valor inválido. Introduce un entero (Ctrl+B para volver).")
-
-    def prompt_float(label: str, default: Optional[float] = None) -> float:
-        while True:
-            s = _read_line_ctrlb(label, default=None if default is None else str(default))
-            if s == "" and default is not None:
-                return float(default)
-            try:
-                return float(s)
-            except ValueError:
-                print("Valor inválido. Introduce un número (Ctrl+B para volver).")
-
-    def prompt_choice(label: str, options: Iterable[str], default_idx: int = 0) -> str:
-        opts = list(options)
-        for i, opt in enumerate(opts):
-            print(f"  [{i}] {opt}")
-        idx = prompt_int(f"{label} (elige índice)", default=default_idx)
-        if 0 <= idx < len(opts):
-            return opts[idx]
-        print("Índice fuera de rango. Usando el índice por defecto.")
-        return opts[default_idx]
-
-    def prompt_confirm(label: str, default: bool = True) -> bool:
-        suf = "Y/n" if default else "y/N"
-        ans = prompt_str(f"{label} ({suf})", default="y" if default else "n").strip().lower()
-        return ans in ("y", "yes", "s", "si", "sí")
-
-    # monkey-patch
-    utils.prompt_str = prompt_str
-    utils.prompt_int = prompt_int
-    utils.prompt_float = prompt_float
-    utils.prompt_choice = prompt_choice
-    utils.prompt_confirm = prompt_confirm
-
-    def restore():
-        # restaura sólo si existían
-        if orig["str"] is not None:    utils.prompt_str = orig["str"]
-        if orig["int"] is not None:    utils.prompt_int = orig["int"]
-        if orig["float"] is not None:  utils.prompt_float = orig["float"]
-        if orig["choice"] is not None: utils.prompt_choice = orig["choice"]
-        if orig["confirm"] is not None:utils.prompt_confirm = orig["confirm"]
-
-    return restore
-
-# ===================== Tu función, genérica como antes =====================
 
 def interactive_create_specs(base_path: str) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-    """Run an interactive session and return all specs.
+    """Run an interactive session (Ctrl+B = back, Ctrl+C = cancel) and return all specs.
 
-    Igual que antes, pero:
-      - Ctrl+B retrocede de paso.
-      - Ctrl+C cancela (KeyboardInterrupt normal).
-      - Sin indentaciones raras en los prompts.
+    Workflow:
+      1) Ask robot name
+      2) Build action space
+      3) Build observation space
+      4) Build robot data
+      5) Select scene
+      6) Build agent handles
+
+    Returns:
+        (robot_name, env_spec, agent_spec, params_updates)
     """
-    utils.print_uncore_logo()
     print("------ Create Robot (Env + Agent) ------")
-    print("ℹ️  Ctrl+B: volver al paso anterior · Ctrl+C: cancelar\n")
+    print("ℹ️  Ctrl+B: go back one step · Ctrl+C: cancel\n")
 
-    # Activa prompts con Ctrl+B en todo el flujo (también dentro de tus builders)
-    restore_prompts = _patch_utils_prompts()
-
-    # Estado
+    # Shared state
     robot_name: str = ""
     act_spec: Dict[str, Any] = {}
     obs_spec: Dict[str, Any] = {}
@@ -351,15 +226,16 @@ def interactive_create_specs(base_path: str) -> Tuple[str, Dict[str, Any], Dict[
     handles: Dict[str, Any] = {}
     laser_count: int = 0
 
+    # ---------- Wizard steps ----------
     def step_robot_name():
         nonlocal robot_name
-        robot_name = utils.prompt_str("Robot name")
+        robot_name = utils.prompt_str("Robot name", allow_empty=False)
 
-    def step_spaces_action():
+    def step_action_spec():
         nonlocal act_spec
-        act_spec = _build_action_spec()  # usa utils.prompt_* (ya parcheados)
+        act_spec = _build_action_spec()  # usa utils.prompt_* (Ctrl+B/C integrados)
 
-    def step_spaces_obs():
+    def step_obs_spec():
         nonlocal obs_spec, laser_count
         obs_spec, laser_count = _build_obs_spec()
 
@@ -369,7 +245,7 @@ def interactive_create_specs(base_path: str) -> Tuple[str, Dict[str, Any], Dict[
 
     def step_scene():
         nonlocal scene_name
-        print("\n-- Scene selection --")
+        print("\n***** Scene selection *****")
         scene_name = _pick_scene(base_path)
         print(f"Scene name: {scene_name}")
 
@@ -379,29 +255,28 @@ def interactive_create_specs(base_path: str) -> Tuple[str, Dict[str, Any], Dict[
 
     steps: list[Callable[[], None]] = [
         step_robot_name,
-        step_spaces_action,
-        step_spaces_obs,
+        step_action_spec,
+        step_obs_spec,
         step_robot_data,
         step_scene,
         step_handles,
     ]
 
+    # ---------- Run wizard with Ctrl+B/C support ----------
     i = 0
     try:
         while 0 <= i < len(steps):
             try:
                 steps[i]()
                 i += 1
-            except _BackSignal:
+            except utils.BackSignal:
+                # Move one step back — no “jumping” multiple steps
                 i = max(0, i - 1)
     except KeyboardInterrupt:
-        print("\n⛔ Operación cancelada por el usuario (Ctrl+C).")
+        print("\n⛔ Operation cancelled by user (Ctrl+C).")
         raise
-    finally:
-        # Restaurar los prompts originales, pase lo que pase
-        restore_prompts()
 
-    # Construcción EXACTAMENTE como antes (genérico):
+    # ---------- Build output ----------
     env_spec = {
         "robot_data": robot_data,
         "obs": obs_spec,
@@ -409,8 +284,7 @@ def interactive_create_specs(base_path: str) -> Tuple[str, Dict[str, Any], Dict[
     }
     agent_spec = {
         "handles": handles,
-        # Si ya migraste a incluir escena aquí, puedes añadir:
-        # "scene_name": scene_name,
+        "scene_name": scene_name if scene_name.endswith(".ttt") else scene_name + ".ttt",
     }
 
     params_updates: Dict[str, Any] = {"params_env": {}}

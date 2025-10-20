@@ -6,6 +6,7 @@ import tempfile
 import textwrap
 import re
 from typing import Dict, Any, List, Optional, Tuple
+import warnings
 
 # ------------------------------------
 # ------- AUXILIARY FUNCTIONS --------
@@ -22,60 +23,169 @@ def _snake_to_camel(name: str) -> str:
     return "".join(s.capitalize() for s in parts)
 
 
-def _resolve_space_from_spec(defn: Dict[str, Any]) -> Tuple[int, List[float], List[float], List[str]]:
-    """Resolve a Box space from a unified spec.
+# def _resolve_space_from_spec(spec: dict) -> tuple[int, list[float], list[float], list[str]]:
+#     """Resolve a Box-like space from multiple spec formats.
 
-    The spec can be either:
-      A) Named variables (recommended):
-         {"vars": [{"name": str, "low": float, "high": float}, ...]}
-      B) Size + broadcastable bounds:
-         {"size": int, "low": float|list[float], "high": float|list[float]}
+#     Supported formats:
+#       1) Dict with 'vars' list:
+#          {
+#            "vars": [
+#              {"name": "vlin", "low": 0.0, "high": 2.0},
+#              {"name": "vang", "low": -0.4, "high": 0.4},
+#            ]
+#          }
+
+#       2) Dict with parallel arrays:
+#          {
+#            "names": ["vlin", "vang"],
+#            "low":   [0.0, -0.4],
+#            "high":  [2.0,  0.4]
+#          }
+
+#       3) Dict with 'size' (optionally 'names' and/or scalar 'low'/'high'):
+#          {
+#            "size": 2,
+#            "names": ["vlin", "vang"],              # optional
+#            "low":  0.0,                            # optional (scalar -> expanded)
+#            "high": 1.0                             # optional (scalar -> expanded)
+#          }
+#          If 'low'/'high' are not provided, defaults to 0.0 / 1.0 are used.
+
+#     Returns:
+#         tuple:
+#             dim (int): number of variables
+#             lows (List[float]): per-dimension lower bounds
+#             highs (List[float]): per-dimension upper bounds
+#             names (List[str]): per-dimension variable names
+
+#     Raises:
+#         ValueError: on malformed specs or inconsistent sizes/ranges.
+#     """
+#     def _check_ranges(lows: list[float], highs: list[float], names: list[str]) -> None:
+#         if not (len(lows) == len(highs) == len(names)):
+#             raise ValueError("Lengths of 'names', 'low', and 'high' must match.")
+#         for i, (lo, hi) in enumerate(zip(lows, highs)):
+#             if lo >= hi:
+#                 raise ValueError(f"Invalid range for '{names[i]}' (index {i}): low >= high ({lo} >= {hi}).")
+
+#     # --- Case 1: "vars" list -------------------------------------------------
+#     if "vars" in spec:
+#         vars_list = spec["vars"]
+#         if not isinstance(vars_list, list) or len(vars_list) == 0:
+#             raise ValueError("'vars' must be a non-empty list.")
+#         names: list[str] = []
+#         lows: list[float] = []
+#         highs: list[float] = []
+#         for i, v in enumerate(vars_list):
+#             if not isinstance(v, dict):
+#                 raise ValueError(f"Each item in 'vars' must be a dict (got {type(v)} at index {i}).")
+#             name = v.get("name", f"x{i}")
+#             if "low" not in v or "high" not in v:
+#                 raise ValueError(f"Missing 'low'/'high' in vars[{i}] ('{name}').")
+#             lo = float(v["low"])
+#             hi = float(v["high"])
+#             names.append(str(name))
+#             lows.append(lo)
+#             highs.append(hi)
+#         _check_ranges(lows, highs, names)
+#         return len(names), lows, highs, names
+
+#     # --- Case 2: parallel arrays "names"/"low"/"high" ------------------------
+#     has_parallel = all(k in spec for k in ("names", "low", "high"))
+#     if has_parallel:
+#         names_raw = spec["names"]
+#         lows_raw = spec["low"]
+#         highs_raw = spec["high"]
+#         if not (isinstance(names_raw, list) and isinstance(lows_raw, list) and isinstance(highs_raw, list)):
+#             raise ValueError("'names', 'low', and 'high' must be lists in this format.")
+#         if not (len(names_raw) > 0 and len(names_raw) == len(lows_raw) == len(highs_raw)):
+#             raise ValueError("Mismatched or empty 'names'/'low'/'high' lists.")
+#         names = [str(n) for n in names_raw]
+#         lows = [float(x) for x in lows_raw]
+#         highs = [float(x) for x in highs_raw]
+#         _check_ranges(lows, highs, names)
+#         return len(names), lows, highs, names
+
+#     # --- Case 3: "size" (+ optional names & scalar bounds) -------------------
+#     if "size" in spec:
+#         size = int(spec["size"])
+#         if size <= 0:
+#             raise ValueError("'size' must be a positive integer.")
+#         # Optional names
+#         names_raw = spec.get("names")
+#         if names_raw is not None:
+#             if not (isinstance(names_raw, list) and len(names_raw) == size):
+#                 raise ValueError(f"'names' must be a list of length {size} when provided.")
+#             names = [str(n) for n in names_raw]
+#         else:
+#             names = [f"x{i}" for i in range(size)]
+#         # Optional scalar bounds
+#         low_val = spec.get("low", 0.0)
+#         high_val = spec.get("high", 1.0)
+#         # If provided as lists, accept and validate lengths; else expand scalars
+#         if isinstance(low_val, list) or isinstance(high_val, list):
+#             if not (isinstance(low_val, list) and isinstance(high_val, list)):
+#                 raise ValueError("If 'low' or 'high' are lists, both must be lists of same length == size.")
+#             if not (len(low_val) == len(high_val) == size):
+#                 raise ValueError(f"'low'/'high' lists must have length == size ({size}).")
+#             lows = [float(x) for x in low_val]
+#             highs = [float(x) for x in high_val]
+#         else:
+#             lo = float(low_val)
+#             hi = float(high_val)
+#             lows = [lo] * size
+#             highs = [hi] * size
+#         _check_ranges(lows, highs, names)
+#         return size, lows, highs, names
+
+#     # --- Fallback: unsupported format ---------------------------------------
+#     raise ValueError("Spec must define 'vars', or 'names'/'low'/'high', or a positive 'size'.")
+
+
+def _resolve_space_from_spec(spec: dict) -> tuple[int, list[float], list[float], list[str]]:
+    """Resolve a Box-like space from the wizard spec format.
+
+    Expected format:
+        {
+          "names": [str, ...],
+          "low":   [float, ...],
+          "high":  [float, ...]
+        }
 
     Returns:
         (dim, lows, highs, names)
-        - names may be an empty list if using the size/broadcast form.
-
-    Raises:
-        ValueError: If the specification is invalid.
     """
-    def _to_list(x: Any, size: int, key: str) -> List[float]:
-        if isinstance(x, (list, tuple)):
-            if len(x) != size:
-                raise ValueError(f"Length of '{key}' must match size={size}.")
-            return [float(v) for v in x]
-        return [float(x)] * size
+    if not all(k in spec for k in ("names", "low", "high")):
+        raise ValueError("Spec must contain 'names', 'low', and 'high' lists.")
 
-    lows: List[float] = []
-    highs: List[float] = []
-    names: List[str] = []
+    names = spec["names"]
+    lows = spec["low"]
+    highs = spec["high"]
 
-    if isinstance(defn, dict) and "vars" in defn and isinstance(defn["vars"], list):
-        for v in defn["vars"]:
-            lows.append(float(v["low"]))
-            highs.append(float(v["high"]))
-            n = v.get("name")
-            if isinstance(n, str) and n:
-                names.append(n)
-            else:
-                names.append(f"var_{len(names)}")
-    else:
-        size = int(defn.get("size", 0))
-        if size <= 0:
-            raise ValueError("Spec must define either 'vars' list or a positive 'size'.")
-        lows = _to_list(defn.get("low", 0.0), size, "low")
-        highs = _to_list(defn.get("high", 1.0), size, "high")
-        names = []  # unnamed case
+    if not (isinstance(names, list) and isinstance(lows, list) and isinstance(highs, list)):
+        raise ValueError("'names', 'low', and 'high' must be lists.")
+    if not (len(names) == len(lows) == len(highs)):
+        raise ValueError("Lengths of 'names', 'low', and 'high' must match.")
+    if len(names) == 0:
+        raise ValueError("Empty observation/action space definition.")
 
-    dim = len(lows)
-    return dim, lows, highs, names
+    # Optional sanity check
+    for i, (lo, hi) in enumerate(zip(lows, highs)):
+        if lo >= hi:
+            raise ValueError(
+                f"Invalid range for '{names[i]}' (index {i}): low >= high ({lo} >= {hi})."
+            )
+
+    return len(names), [float(x) for x in lows], [float(x) for x in highs], [str(n) for n in names]
 
 
 def _assign_handle(var: str, path: str) -> str:
     '''
     Helper to generate a line that assigns a Coppelia handle to self.var.
-    If path is empty, generate a commented line with a placeholder.
+    If path is empty, r.
     '''
     if not path:
+        warnings.warn(f"No path provided for handle '{var}'; leaving unassigned.")
         return f"# self.{var} = sim.getObject('/path/to/{var}')"
     return f"self.{var} = sim.getObject('{path}')"
 
@@ -464,9 +574,9 @@ def generate_agent_code(robot_name: str, spec: dict) -> str:
 
     # Extract agent values from spec
     h = (spec or {}).get("handles", {})
-    robot = h.get("robot", "")
-    robot_bl = h.get("robot_baselink", "")
-    laser = h.get("laser", "")
+    robot = h.get("robot_handle", "")
+    robot_bl = h.get("robot_base_handle", "")
+    laser = h.get("laser_handle", "")
 
     robot_line = _assign_handle("robot", robot)
     robot_bl_line = _assign_handle("robot_baselink", robot_bl)
@@ -502,6 +612,8 @@ def generate_agent_code(robot_name: str, spec: dict) -> str:
                 {robot_line}
                 {robot_bl_line}
                 {laser_line}
+                self.handle_laser_get_observation_script=sim.getScript(1,{laser},'laser_get_observations')
+                self.handle_robot_scripts = sim.getScript(1, {robot})
                 
                 logging.info(f"{class_name} created successfully using port {{comms_port}}.")
     ''')

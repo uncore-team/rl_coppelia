@@ -190,17 +190,21 @@ def main(args):
         convergence_time = 0.0
 
     # Construct the dictionary with some data to store in the records file
-    data_to_store ={
-        "Algorithm" : rl_copp.params_train["sb3_algorithm"],
-        "Policy" : rl_copp.params_train["policy"],
-        "Action time (s)" : rl_copp.params_env["fixed_actime"],
-        "Time to converge (h)" : convergence_time,
-        **last_metric_row,
-        "Params file" : os.path.basename(params_file_save_path)
-    }
+    if last_metric_row != {}:
+        data_to_store ={
+            "Algorithm" : rl_copp.params_train["sb3_algorithm"],
+            "Policy" : rl_copp.params_train["policy"],
+            "Action time (s)" : rl_copp.params_env["fixed_actime"],
+            "Time to converge (h)" : convergence_time,
+            **last_metric_row,
+            "Params file" : os.path.basename(params_file_save_path)
+        }
 
-    # Update the train record.
-    utils.update_records_file (records_csv_name, model_name, start_time, end_time, data_to_store)
+        # Update the train record.
+        utils.update_records_file (records_csv_name, model_name, start_time, end_time, data_to_store)
+    
+    else:
+        logging.error("No data was stored in the training records file because no metrics were obtained from tensorboard logs.")
     
     # Send a FINISH command to the agent
     rl_copp.env.envs[0].unwrapped._commstoagent.stepExpFinished()   # Unwrapped is needed so we can access the attributes of our wrapped env 
