@@ -1,3 +1,0 @@
-[submodule "dependencies/rl_spin_decoupler"]
-	path = dependencies/rl_spin_decoupler
-	url = https://github.com/uncore-team/rl_spin_decoupler.git
