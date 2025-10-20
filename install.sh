@@ -44,11 +44,11 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# Expand ~ and make absolute without using eval; reject ~user/ patterns.
+# Expand ~ and make absolute (no eval, no cd). Does NOT support ~user.
 expand_to_abs() {
   local p="$1"
 
-  # Reject ~user/... (unsupported)
+  # Reject unsupported ~user patterns (only ~/ is allowed)
   if [[ "$p" == "~"* && "$p" != "~/"* ]]; then
     die "Invalid path '${p}'. Use '~/...' (e.g., '~/Documents/venvs')."
   fi
@@ -58,24 +58,17 @@ expand_to_abs() {
     p="${HOME}/${p#~/}"
   fi
 
-  # If absolute, normalize with best-effort
+  # Absolute path: return as-is (collapse double slashes only)
   if [[ "$p" == /* ]]; then
-    # If dirname doesn't exist yet (e.g., you plan to create it), avoid cd failures:
-    local d b
-    d="$(dirname -- "$p")"
-    b="$(basename -- "$p")"
-    if [[ -d "$d" ]]; then
-      printf '%s/%s\n' "$(cd -P -- "$d" && pwd -P)" "$b"
-    else
-      # Parent doesn't exist yet: build from physical $PWD to avoid surprises
-      printf '%s/%s/%s\n' "$(pwd -P)" "${d#/}" "$b" | sed -e 's://:/:g'
-    fi
+    printf '%s\n' "$p" | sed -e 's://:/:g'
     return 0
   fi
 
-  # Relative path → absolutiza desde $PWD físico
-  printf '%s/%s\n' "$(pwd -P)" "$p" | sed -e 's://:/:g'
+  # Relative path: prepend physical PWD
+  printf '%s\n' "$(pwd -P)/$p" | sed -e 's://:/:g'
 }
+
+
 
 
 # Choose python interpreter
