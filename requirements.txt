@@ -57,8 +57,7 @@ opencv-python-headless==4.11.0.86
 opt_einsum==3.4.0
 packaging==24.2
 pandas==2.0.3
-pillow==10.4.0
-pkg_resources==0.0.0
+pillow
 protobuf==4.25.6
 psutil==7.0.0
 pyasn1==0.6.1
