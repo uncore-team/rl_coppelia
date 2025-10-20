@@ -1,1 +1,0 @@
-Any new robot name used in the main.py script will generate a new folder with all the data generated during the training or inference of that robot.
