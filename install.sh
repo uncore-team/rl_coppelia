@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Debug trap: prints failing line and keeps window open if KEEP_OPEN=1
+trap 'rc=$?; echo "❌ Error (exit $rc) at line $LINENO: ${BASH_COMMAND}"; 
+      if [[ "${KEEP_OPEN:-0}" == "1" ]]; then read -rp "Press Enter to close..."; fi; exit $rc' ERR
+
+# Enable xtrace if DEBUG=1
+if [[ "${DEBUG:-0}" == "1" ]]; then set -x; fi
+
 # Check if the script is being sourced or executed
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   echo "Please 'source' this script, do not execute it."
@@ -37,13 +44,13 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# Expand ~ and make absolute; keep absolute paths if already absolute
+# Expand ~ and make absolute without using eval; reject ~user/ patterns.
 expand_to_abs() {
   local p="$1"
 
-  # Reject patterns like ~user/... (we don't support named home expansion here)
+  # Reject ~user/... (unsupported)
   if [[ "$p" == "~"* && "$p" != "~/"* ]]; then
-    die "Invalid path '${p}'. Did you mean '~/...'? e.g., '~/Documents/venvs'"
+    die "Invalid path '${p}'. Use '~/...' (e.g., '~/Documents/venvs')."
   fi
 
   # Expand leading ~/
@@ -51,16 +58,25 @@ expand_to_abs() {
     p="${HOME}/${p#~/}"
   fi
 
-  # If absolute already, normalize and return
+  # If absolute, normalize with best-effort
   if [[ "$p" == /* ]]; then
-    # Normalize to a physical absolute path (best-effort)
-    printf '%s\n' "$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)/$(basename -- "$p")"
+    # If dirname doesn't exist yet (e.g., you plan to create it), avoid cd failures:
+    local d b
+    d="$(dirname -- "$p")"
+    b="$(basename -- "$p")"
+    if [[ -d "$d" ]]; then
+      printf '%s/%s\n' "$(cd -P -- "$d" && pwd -P)" "$b"
+    else
+      # Parent doesn't exist yet: build from physical $PWD to avoid surprises
+      printf '%s/%s/%s\n' "$(pwd -P)" "${d#/}" "$b" | sed -e 's://:/:g'
+    fi
     return 0
   fi
 
-  # Make relative paths absolute based on current working directory
-  printf '%s\n' "$(cd -P -- "$PWD" 2>/dev/null && cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)/$(basename -- "$p")"
+  # Relative path → absolutiza desde $PWD físico
+  printf '%s/%s\n' "$(pwd -P)" "$p" | sed -e 's://:/:g'
 }
+
 
 # Choose python interpreter
 choose_python() {
