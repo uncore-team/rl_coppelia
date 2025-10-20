@@ -86,11 +86,15 @@ To install the required Python libraries, you can directly use the `install.sh` 
 
 ```bash
 chmod +x install.sh
-./install.sh
 source ~/.bashrc
 ```
 
-Last command is important to refresh the changes made in the path. After that, don't forget to activate again your virtualenv (in case you were using one).
+If logs say that you need to refresh your bash manually, please run the next command:
+```bash
+source ~/.bashrc
+```
+
+After that, don't forget to activate again your virtualenv, which has been automatically created during the installation.
 
 Everything should be already installed, including the `rl_coppelia` package. In fact, it is installed in editable mode (-e), so any changes you make in the code will be automatically reflected without needing to reinstall the package.
 

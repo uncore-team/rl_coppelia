@@ -9,6 +9,49 @@ SRC_DIR="$BASE_DIR/src"
 # Make the PYTHONPATH change permanent by adding it to the shell's configuration
 SHELL_CONFIG="$HOME/.bashrc"  # Default for bash shell; change to ~/.zshrc for zsh users
 
+expand_path() {
+  local input="$1"
+  eval echo "$input"
+}
+
+# --- Create and activate environment ---
+echo ""
+read -r -p "Do you have a folder with your virtual environments (venvs)? [y/N]: " HAS_CENTRAL
+HAS_CENTRAL="${HAS_CENTRAL:-N}"
+
+if [[ "$HAS_CENTRAL" =~ ^[Yy]$ ]]; then
+  # Ask for base path of venvs
+  read -r -p "Introduce venv folder path (ej. ~/.venvs): " VENV_BASE_INPUT
+  VENV_BASE_INPUT="${VENV_BASE_INPUT:-$HOME/.venvs}"
+  VENV_BASE_DIR="$(expand_path "$VENV_BASE_INPUT")"
+
+  # Name for the venv
+  read -r -p "Name for the venv (default: uncore_rl_venv): " VENV_NAME
+  VENV_NAME="${VENV_NAME:-uncore_rl_venv}"
+  VENV_DIR="$VENV_BASE_DIR/$VENV_NAME"
+  
+else
+  # Creating venv folder inside HOME
+  VENV_BASE_DIR="$HOME/.venvs"
+  VENV_NAME="uncore_rl_venv"
+  VENV_DIR="$VENV_BASE_DIR/$VENV_NAME"
+fi
+echo "➡️  Venv to be used: $VENV_DIR"
+
+VENV_DIR="$BASE_DIR/venv"
+
+# Create the virtual environment folder if it does not exist
+mkdir -p "$(dirname "$VENV_DIR")" 2>/dev/null
+
+# Activate the virtual environment
+echo "Activating virtual environment..."
+source "$VENV_DIR/bin/activate"
+
+# Upgrade pip inside the venv
+echo "Upgrading pip..."
+pip install --upgrade pip
+
+# --- Update shell configuration ---
 PATH_UPDATED=false
 
 # Add the export lines to the config file only if they are not already there
@@ -32,12 +75,17 @@ else
 fi
 
 if [ "$PATH_UPDATED" = true ]; then
-  echo "IMPORTANT: Please execute 'source $SHELL_CONFIG' for applying the changes."
+  
+  if [ "$0" != "$BASH_SOURCE" ]; then
+    echo "🔁 Applying environment changes..."
+    source "$SHELL_CONFIG"
+    echo "✅ Environment variables updated!"
+  else
+    echo "IMPORTANT: Please execute 'source $SHELL_CONFIG' for applying the changes."
+  fi
 fi
 
-# Install all the required packages (including 'rl_coppelia' package in editable mode
+# --- Install python dependencies ---
+echo "Installing Python dependencies..."
 pip install -r requirements.txt
 pip install -e .
-
-# Reload the shell configuration so the change takes effect immediately
-source "$SHELL_CONFIG"
