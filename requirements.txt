@@ -60,6 +60,7 @@ pandas==2.0.3
 pillow
 protobuf==4.25.6
 psutil==7.0.0
+pyyaml
 pyasn1==0.6.1
 pyasn1_modules==0.4.1
 pygame==2.6.1
@@ -93,6 +94,7 @@ threadpoolctl==3.5.0
 torch
 tqdm==4.67.1
 triton==3.0.0
+typeguard
 typing_extensions==4.5.0
 tzdata==2025.1
 urllib3==2.2.3
