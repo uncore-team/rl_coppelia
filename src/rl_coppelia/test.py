@@ -181,8 +181,7 @@ def main(args):
                     otherdata_writer.writerow([n_ep, info["linear_speed"], info["angular_speed"], info["lat_sim"], info["lat_wall"]])    # saves also the episode number
             
             
-            # Call get_metrics(), so we will have the total time of the iteration
-            # and the final distance to the targe
+            # Call get_metrics() to get the needed metrics from the episode
             init_target_distance, final_target_distance, time_reach_target, reward_target, timesteps_count, collision_flag, max_achieved, target_zone = utils.get_metrics_test(rl_copp.env.envs[0].unwrapped)
             
             if terminated:

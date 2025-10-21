@@ -52,15 +52,14 @@ nvidia-nccl-cu12
 nvidia-nvjitlink-cu12
 nvidia-nvtx-cu12
 oauthlib==3.2.2
-opencv-python==4.11.0.86
 opencv-python-headless==4.11.0.86
 opt_einsum==3.4.0
 packaging==24.2
 pandas==2.0.3
-pillow==10.4.0
-pkg_resources==0.0.0
+pillow
 protobuf==4.25.6
 psutil==7.0.0
+pyyaml
 pyasn1==0.6.1
 pyasn1_modules==0.4.1
 pygame==2.6.1
@@ -94,6 +93,7 @@ threadpoolctl==3.5.0
 torch
 tqdm==4.67.1
 triton==3.0.0
+typeguard
 typing_extensions==4.5.0
 tzdata==2025.1
 urllib3==2.2.3

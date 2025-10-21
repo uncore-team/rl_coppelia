@@ -191,11 +191,11 @@ def sysCall_sensing():
     """
     Called at each simulation step. Executes the agent's action and logs trajectories.
     """
-    global sim, agent, verbose, agent_created, robot_name
+    global sim, agent, verbose, agent_created
     
     if agent and not agent.finish_rec and agent_created:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
-        action = agent.agent_step(robot_name)
+        action = agent.agent_step()
 
         # If an action is received, execute it
         if action is not None:
