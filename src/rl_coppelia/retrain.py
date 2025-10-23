@@ -85,7 +85,7 @@ def main(args):
     # Get the algorithm used for the previous training of the model
     train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv 
     try:
-        retrain_algorithm = utils.get_algorithm_for_model(model_name, train_records_csv_name)
+        retrain_algorithm = utils.get_data_from_training_csv(model_name, train_records_csv_name, "Algorithm")
     except: # SAC by default
         retrain_algorithm = "SAC"
 

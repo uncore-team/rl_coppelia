@@ -1,5 +1,7 @@
 import logging
 import math
+import re
+from typing import Any, Dict, List, Sequence
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -70,6 +72,53 @@ class CoppeliaEnv(gym.Env, ABC):
         self.initial_target_distance = 0
 
 
+    def _map_action_vector(self, action: np.ndarray) -> Dict[str, float]:
+        """Map a numeric action vector into a dict using configured action_names."""
+        a = np.asarray(action, dtype=np.float32).flatten()
+        dim_action = int(self.params_env.get("dim_action_space", 0))
+        action_names = self.params_env.get("action_names", [])
+
+        if a.shape[0] != dim_action:
+            raise ValueError(
+                f"Action space dimension expected: {dim_action}, "
+                f"Actually received: {a.shape[0]}."
+            )
+        return {action_names[i]: float(a[i]) for i in range(dim_action)}
+    
+    
+    def _laser_sort_key(self, name: str) -> int:
+        """Sort key for 'laser_obsN' names. Non-num suffix -> +inf to ir al final."""
+        m = re.match(r"^laser_obs(\d+)$", name)
+        return int(m.group(1)) if m else 10**9  # big number pushes weird names to the end
+
+
+    def _extract_laser_from_obs_dict(self, obs_dict: Dict[str, Any]) -> List[float]:
+        """Return laser readings from a dict observation using names, not position.
+
+        - If `params_env["observation_names"]` existe, se usa para fijar el orden.
+        - Si no, se descubre por las claves de `obs_dict` que empiezan por 'laser_obs'.
+        - Se ordenan por el sufijo numérico: laser_obs0, laser_obs1, ...
+
+        Returns:
+            list[float]: Laser distances en orden consistente.
+        """
+        # Prefer official order from params (si está)
+        names_from_params: Sequence[str] = self.params_env.get("observation_names", []) or []
+        if names_from_params:
+            laser_names = [n for n in names_from_params if isinstance(n, str) and n.startswith("laser_obs")]
+            laser_names = sorted(laser_names, key=self._laser_sort_key)
+        else:
+            # Fallback: detectar por claves del propio dict
+            laser_names = sorted(
+                [k for k in obs_dict.keys() if isinstance(k, str) and k.startswith("laser_obs")],
+                key=self._laser_sort_key
+            )
+
+        # Filtrar por si algún nombre no está en el dict y devolver en orden
+        return [float(obs_dict[n]) for n in laser_names if n in obs_dict]
+
+
+
     def step(self, action):
         """
         Execute one time step within the environment.
@@ -96,7 +145,7 @@ class CoppeliaEnv(gym.Env, ABC):
         action = action.flatten()   
 
         # TODO This needs to be generic
-        self.action_dic = {"linear": action[0],"angular": action[1], "timestep": action[2]}
+        self.action_dic = self._map_action_vector(action)
 
         # Send action to agent and receive an observation.
         logging.info(f"Send act to agent: { {key: round(value, 3) for key, value in self.action_dic.items()} }.")
@@ -112,8 +161,8 @@ class CoppeliaEnv(gym.Env, ABC):
         # Calculate reward
         self.reward = self.compute_reward()
         logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}. RW: {round(self.reward,4)}")
-        if self.lat_sim > (self.params_env["fixed_actime"] + self.tol_lat):
-            logging.warning(f"WARNING: LAT is too big for current action time. Lat = {round(self.lat_sim,4)}, A_time = {self.params_env['fixed_actime']}")
+        # if self.lat_sim > (self.params_env["fixed_actime"] + self.tol_lat):   #TODO This doesn't work if timestep is flexible
+        #     logging.warning(f"WARNING: LAT is too big for current action time. Lat = {round(self.lat_sim,4)}, A_time = {self.params_env['fixed_actime']}")
 
         # Update episode
         if self.reward !=0:
@@ -128,11 +177,9 @@ class CoppeliaEnv(gym.Env, ABC):
         self.info = {
             "terminated": self.terminated, 
             "truncated": self.truncated, 
-            "linear_speed":self.action_dic["linear"],
-            "angular_speed":self.action_dic["angular"],
             "lat_sim":self.lat_sim,
             "lat_wall":self.lat_wall,
-            "timestep":self.action_dic["timestep"]
+            "actions":self.action_dic
             }
 
         return self.observation, self.reward, self.terminated, self.truncated, self.info
@@ -186,7 +233,7 @@ class CoppeliaEnv(gym.Env, ABC):
         Returns:
             reward (float): The computed reward.
         """
-        laser_obs = list(self.observation.values())[-self.params_env["laser_observations"]:]
+        laser_obs = self._extract_laser_from_obs_dict(self.observation)
         distance = self.observation["distance"]
         p = self.params_env
 

@@ -78,7 +78,7 @@ def main(args):
     model_name = os.path.splitext(os.path.basename(rl_copp.args.model_name))[0] # Get the model name from the model file path.
     train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
     try:
-        rl_copp.params_test["sb3_algorithm"] = utils.get_algorithm_for_model(model_name, train_records_csv_name)
+        rl_copp.params_test["sb3_algorithm"] = utils.get_data_from_training_csv(model_name, train_records_csv_name, "Algorithm")
     except:
         rl_copp.params_test["sb3_algorithm"] = rl_copp.params_train["sb3_algorithm"]
 
@@ -119,7 +119,7 @@ def main(args):
         n_iter = rl_copp.params_test['testing_iterations']
     logging.info(f"Running tests for {n_iter} iterations.")
 
-    # Set headers for the different csv files that will be saved
+    # --- Set headers for the different csv files that will be saved
     metrics_headers = [
                 'Initial distance (m)', 
                 'Reached distance (m)', 
@@ -133,9 +133,13 @@ def main(args):
                 'Max limits achieved',
                 'Distance traveled (m)'
             ]
-    otherdata_headers = ["Episode number", "Linear speed", "Angular speed", "LAT-Sim (s)", "LAT-Wall (s)"]
+    # We construct these headers using action and observation names from the environment
+    otherdata_headers = ["Episode number", "LAT-Sim (s)", "LAT-Wall (s)"]
+    action_names = rl_copp.env.envs[0].unwrapped.params_env.get("action_names", [])
+    observation_names = rl_copp.env.envs[0].unwrapped.params_env.get("observation_names", [])
+    otherdata_headers = otherdata_headers + action_names + observation_names
 
-    # Open a csv file to store the metrics
+    # --- Open a csv file to store the metrics
     with open(experiment_csv_path, mode='w', newline='') as metrics_file:
         metrics_writer = csv.writer(metrics_file)
         metrics_writer.writerow(metrics_headers)
@@ -167,7 +171,7 @@ def main(args):
                 action, _states = model.predict(observation, deterministic=True)
                 observation, _, terminated, truncated, info = rl_copp.env.envs[0].step(action)
                 
-                # Write speeds of the robot and LATs for each testing step
+                # Write observations, actions and LATs for each testing step
                 try:
                     with open(otherdata_csv_path, mode="r") as f:
                         pass
@@ -178,7 +182,11 @@ def main(args):
 
                 with open(otherdata_csv_path, mode='a', newline='') as speed_file:
                     otherdata_writer = csv.writer(speed_file)
-                    otherdata_writer.writerow([n_ep, info["linear_speed"], info["angular_speed"], info["lat_sim"], info["lat_wall"]])    # saves also the episode number
+                    action_values = [round(v,4) for v in info["actions"].values()]
+                    obs_values = [round(float(v), 4) for v in observation.tolist()]
+                    lat_values = [info["lat_sim"], info["lat_wall"]]
+                    row = [n_ep] + lat_values + action_values + obs_values
+                    otherdata_writer.writerow(row)
             
             
             # Call get_metrics() to get the needed metrics from the episode

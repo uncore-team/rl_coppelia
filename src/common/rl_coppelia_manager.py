@@ -191,20 +191,22 @@ class RLCoppeliaManager():
         # --- Params (train/test flows) --- #TODO This will not work for auto_trainings or sat_trainings, as they need different params files
         self._load_params_if_needed(args)
 
-        # --- Runtime state ---
-        self.current_sim = None
-        # The next free port to be used for the communication between the agent (CoppeliaSim) and the RL side (Python)
-        self.free_comms_port = self._select_comms_port(args, default_start=49054)
-        # Temporary folder for storing a tensorboard monitor file during training. This is needed for saving a model 
-        # based ion the mean reward obtained during training.
-        self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
-        # Get current opened processes in the PC so later we can know which ones are the Coppelia new ones.
-        self.before_pids = self._snapshot_pids()
-        self.current_coppelia_pid = None
-        self.terminal_pid = None
+        # Next steps will be skipped in case of running 'plot.py'
+        if self.calling_script != "plot.py":
+            # --- Runtime state ---
+            self.current_sim = None
+            # The next free port to be used for the communication between the agent (CoppeliaSim) and the RL side (Python)
+            self.free_comms_port = self._select_comms_port(args, default_start=49054)
+            # Temporary folder for storing a tensorboard monitor file during training. This is needed for saving a model 
+            # based ion the mean reward obtained during training.
+            self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
+            # Get current opened processes in the PC so later we can know which ones are the Coppelia new ones.
+            self.before_pids = self._snapshot_pids()
+            self.current_coppelia_pid = None
+            self.terminal_pid = None
 
-        # --- Plugins ---
-        self._autoload_env_plugins()
+            # --- Plugins ---
+            self._autoload_env_plugins()
 
 
     def create_env(self):

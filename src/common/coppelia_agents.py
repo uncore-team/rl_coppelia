@@ -5,6 +5,7 @@ import os
 import random
 import sys
 from time import sleep, time
+from typing import Dict
 import pandas as pd
 from common import utils
 from spindecoupler import AgentSide # type: ignore
@@ -12,6 +13,72 @@ from socketcomms.comms import BaseCommPoint # type: ignore
 
 
 class CoppeliaAgent:
+
+    def _check_variable_timestep(self, params_env: Dict) -> None:
+        """
+        Check if the action names include 'timestep' to determine if variable timestep is used.
+        Sets the _rltimestep and _variable_timestep attributes accordingly.
+        Args:
+            params_env (dict): Environment parameters loaded from a JSON file.
+        """
+        # Get list of action names from params
+        action_names = params_env.get("action_names", [])
+
+        # Set timestep duration for RL actions
+        if "timestep" in action_names:
+            # The timestep will be variable, provided in the action dict
+            self._rltimestep = None  # placeholder, will be updated per action
+            self.variable_timestep = True
+            logging.info("Variable timestep detected: will use action value instead of fixed_actime.")
+        else:
+            # Default to fixed timestep
+            self._rltimestep = params_env["fixed_actime"]
+            self.variable_timestep = False
+            self._validate_rltimestep()
+            logging.info(f"Fixed timestep set to {self._rltimestep:.3f} s.")
+
+    
+    def _validate_rltimestep (self) -> None:
+        """Validate that the RL timestep is strictly greater than control timestep.
+
+        In variable-timestep mode, _rltimestep may be None before the first action;
+        in that case the check is skipped.
+
+        Raises:
+            ValueError: If _rltimestep is set and not greater than _control_timestep.
+        """
+        # Skip if not yet set (variable-timestep before first action)
+        if getattr(self, "_rltimestep", None) is None:
+            return
+        if self._rltimestep <= self._control_timestep:
+            raise(ValueError("RL timestep must be > control timestep"))
+
+
+    def _update_rltimestep(self, action: Dict[str, float]) -> None:
+        """Update _rltimestep from the incoming action if in variable-timestep mode.
+
+        Args:
+            action (dict): Action dictionary received from RL.
+
+        Raises:
+            KeyError: If variable mode is enabled but the timestep key is missing.
+            ValueError: If the extracted timestep is invalid (<= control timestep).
+            TypeError: If the timestep value is not convertible to float.
+        """
+        if "timestep" not in action:
+            raise KeyError("Missing 'timestep' key in action while variable-timestep mode is enabled.")
+        
+        # Convert and validate type
+        val = action["timestep"]
+        try:
+            self._rltimestep = float(val)
+        except (TypeError, ValueError):
+            raise TypeError(f"Invalid 'timestep' value: {val!r} (must be numeric)")
+
+        # Check if it is okey in relation with the control timestep of the simulator
+        self._validate_rltimestep()
+
+
     def __init__(self, sim, params_env, paths, file_id, verbose, comms_port = 49054) -> None:
         """
         Custom agent for CoppeliaSim simulations of different robots.
@@ -92,9 +159,10 @@ class CoppeliaAgent:
 
         sim.setFloatParam(sim.floatparam_simulation_time_step,0.05)
         self._control_timestep = sim.getSimulationTimeStep()
-        self._rltimestep = params_env["fixed_actime"]
-        if self._rltimestep <= self._control_timestep:
-            raise(ValueError("RL timestep must be > control timestep"))
+
+        # Set timestep duration for RL actions
+        self._check_variable_timestep(params_env)
+        
         self._waitingforrlcommands = True
         self._lastaction = None
         self._lastactiont0_sim = 0.0
@@ -240,29 +308,90 @@ class CoppeliaAgent:
         return distance, angle, lasers_obs
 
 
+    # def get_observation_space(self):
+    #     """
+    #     Returns the observation space of the agent.
+    #     The observation space includes distance and angle to the target, laser observations (if available), and optionally the action time.
+    #     """
+    #     observation_space = {}
+
+    #     # Get an observation from the agent
+    #     distance, angle, laser_obs = self.get_observation()
+    #     # Add all the laser observations "laser_obs{i}"
+    #     if laser_obs is not None:
+    #         for i, val in enumerate(laser_obs):
+    #             observation_space[f"laser_obs{i}"] = val
+
+    #     observation_space = {
+    #         "distance": distance,
+    #         "angle": angle
+    #     }
+
+        
+
+    #     # Add action time to the observation if required    # TODO This belongs to the old version, we need to automatize observation_space creation
+    #     # if self.params_env["obs_time"]:
+    #     #     observation_space["action_time"] = self._rltimestep
+
+    #     return observation_space
+
+
     def get_observation_space(self):
+        """Build the observation dict using names from params_env["observation_names"].
+
+        This method calls `get_observation()` (which returns distance, angle, and optionally
+        laser observations) and then assembles a dictionary of observations in the exact
+        order and naming specified by `self.params_env["observation_names"]`.
+
+        Behavior:
+            - Known base signals: "distance", "angle".
+            - Laser signals are exposed as "laser_obs{i}" (e.g., laser_obs0, laser_obs1, ...).
+            - If lasers are not available but the config includes laser entries, those keys
+            will be filled with a default numeric value (0.0) to keep the shape stable.
+
+        Returns:
+            dict: Observation dictionary keyed by names in params_env["observation_names"].
         """
-        Returns the observation space of the agent.
-        The observation space includes distance and angle to the target, laser observations (if available), and optionally the action time.
-        """
-        # Get an observation from the agent
+        # Get raw measurements from the simulator
         distance, angle, laser_obs = self.get_observation()
-        observation_space = {
-            "distance": distance,
-            "angles": angle
+
+        # Build a value pool from available signals
+        # (distance, angle are always present; lasers may be None)
+        value_pool = {
+            "distance": float(distance),
+            "angle": float(angle),
         }
 
-        # Add all the laser observations "laser_obs{i}"
         if laser_obs is not None:
+            # Expose laser beams as laser_obs0..N-1
             for i, val in enumerate(laser_obs):
-                observation_space[f"laser_obs{i}"] = val
+                value_pool[f"laser_obs{i}"] = float(val)
+        else:
+            # If config expects lasers but we don't have them now, fill with defaults.
+            # This keeps the observation shape consistent with the Box space.
+            logging.warning("No laser observations obtained from get_observation(). They will be set to 0.")
+            expected_lasers = int(self.params_env.get("laser_observations", 0))
+            for i in range(expected_lasers):
+                value_pool[f"laser_obs{i}"] = 0.0
 
-        # Add action time to the observation if required    # TODO This belongs to the old version, we need to automatize observation_space creation
-        # if self.params_env["obs_time"]:
-        #     observation_space["action_time"] = self._rltimestep
+        # Desired names and order come from the params file
+        names = self.params_env.get("observation_names")
 
-        return observation_space
+        if names:
+            obs = {}
+            for name in names:
+                if name in value_pool:
+                    obs[name] = value_pool[name]
+                else:
+                    # Unknown name in config: keep numeric output stable and warn once
+                    logging.warning(f"[obs] Unknown observation name in config: '{name}'. Filling 0.0")
+                    obs[name] = 0.0
+            logging.info(f"Observation stored as: {obs}")
+            return obs
 
+        else:
+            logging.error("No observation names in params json file. Please check it.")
+            raise 
 
     def generate_obs_from_csv(self, row):
         '''
@@ -671,8 +800,10 @@ class CoppeliaAgent:
                     logging.info(f"Action rec: { {key: round(value, 3) for key, value in action.items()} }")
                 
                     # Update action time if it's variable
-                    # if self.params_env["var_action_time_flag"]:
-                    #     self._rltimestep = action["action_time"]
+                    # Outdated: if self.params_env["var_action_time_flag"]:
+                    # Outdated:    self._rltimestep = action["action_time"]
+                    if self.variable_timestep:
+                        self._update_rltimestep(action)
 
                     if self.first_reset_done and not self.lat_reset:
                         self._lastactiont0_sim = 0.0

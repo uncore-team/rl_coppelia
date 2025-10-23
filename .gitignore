@@ -17,3 +17,4 @@ requirements copy 2.txt
 scenes/*
 !scenes/burgerBot_scene.ttt
 !scenes/turtleBot_scene.ttt
+src/test_program.py

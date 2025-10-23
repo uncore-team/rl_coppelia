@@ -61,11 +61,11 @@ def _build_obs_spec() -> Tuple[Dict[str, Any], int]:
     """Interactively build a generic observation space spec.
 
     This function does NOT assume any fixed variables. It asks:
-      1) Number of laser observations (N_lasers).
-      2) Whether to name each laser variable.
-      3) A common lower/upper bound for all laser observations.
-      4) Number of extra (non-laser) observations.
-      5) For each extra observation: name, lower bound, upper bound.
+      1) Number of non-laser observations. 
+      2) For each observation: name, lower bound, upper bound.
+      3) Number of laser observations (N_lasers).
+      4) Whether to name each laser variable.
+      5) A common lower/upper bound for all laser observations.      
 
     Returns:
         Tuple[dict, int]: (obs_spec, n_lasers)
@@ -78,30 +78,7 @@ def _build_obs_spec() -> Tuple[Dict[str, Any], int]:
     """
     print("\n***** Observation space *****")
 
-    # 1) Number of lasers
-    n_lasers = utils.prompt_int("Number of laser observations", min_val=0)
-
-    # 2) Laser naming
-    laser_names: List[str] = []
-    if n_lasers > 0:
-        if utils.prompt_confirm("Do you want to name each laser variable?", default=False):
-            for i in range(n_lasers):
-                nm = utils.prompt_str(f"- Name for laser {i}", default=f"laser_obs_{i}", allow_empty=False)
-                laser_names.append(nm)
-        else:
-            laser_names = [f"laser_obs{i}" for i in range(n_lasers)]
-
-    # 3) Common limits for all lasers (with local back support)
-    laser_low, laser_high = None, None
-    if n_lasers > 0:
-
-        laser_low = utils.prompt_float("-- Lower limit for all laser observations", min_val=0.0)
-        laser_high = utils.prompt_float(
-            "-- Upper limit for all laser observations",
-            min_val=laser_low if laser_low is not None else None
-        )
-
-    # 4) Non-laser observations
+    # 1) Non-laser observations
     n_extra = utils.prompt_int("Number of non-laser observations")
 
     extra_names: List[str] = []
@@ -123,20 +100,43 @@ def _build_obs_spec() -> Tuple[Dict[str, Any], int]:
         extra_lows.append(float(low))
         extra_highs.append(float(high))
 
+    # 2) Number of lasers
+    n_lasers = utils.prompt_int("Number of laser observations", min_val=0)
+
+    # 3) Laser naming
+    laser_names: List[str] = []
+    if n_lasers > 0:
+        if utils.prompt_confirm("Do you want to name each laser variable?", default=False):
+            for i in range(n_lasers):
+                nm = utils.prompt_str(f"- Name for laser {i}", default=f"laser_obs_{i}", allow_empty=False)
+                laser_names.append(nm)
+        else:
+            laser_names = [f"laser_obs{i}" for i in range(n_lasers)]
+
+    # 4) Common limits for all lasers (with local back support)
+    laser_low, laser_high = None, None
+    if n_lasers > 0:
+
+        laser_low = utils.prompt_float("-- Lower limit for all laser observations", min_val=0.0)
+        laser_high = utils.prompt_float(
+            "-- Upper limit for all laser observations",
+            min_val=laser_low if laser_low is not None else None
+        )
+
     # Assemble final spec
     names: List[str] = []
     lows: List[float] = []
     highs: List[float] = []
 
-    if n_lasers > 0:
-        names.extend(laser_names)
-        lows.extend([laser_low] * n_lasers)    # type: ignore[arg-type]
-        highs.extend([laser_high] * n_lasers)  # type: ignore[arg-type]
-
     if n_extra > 0:
         names.extend(extra_names)
         lows.extend(extra_lows)
         highs.extend(extra_highs)
+
+    if n_lasers > 0:
+        names.extend(laser_names)
+        lows.extend([laser_low] * n_lasers)    # type: ignore[arg-type]
+        highs.extend([laser_high] * n_lasers)  # type: ignore[arg-type]
 
     obs_spec = {"names": names, "low": lows, "high": highs}
     return obs_spec, n_lasers
@@ -148,8 +148,8 @@ def _build_robot_data() -> Dict[str, Any]:
     """Interactively build robot-specific data (generic fields)."""
     print("\n***** Robot data *****")
     # Keep it minimal/generic; extend as needed for your project
-    wheel_radius = utils.prompt_float("- Wheel radius (m)", default=0.033, min_val=0.0)
-    distance_between_wheels   = utils.prompt_float("- Distance between wheels (m)",   default=0.16,  min_val=0.0)
+    wheel_radius = utils.prompt_float("- Wheel radius (m)", default=0.035, min_val=0.0)
+    distance_between_wheels   = utils.prompt_float("- Distance between wheels (m)",   default=0.23,  min_val=0.0)
 
     return {
         "wheel_radius": wheel_radius,
@@ -215,7 +215,7 @@ def interactive_create_specs(base_path: str) -> Tuple[str, Dict[str, Any], Dict[
         (robot_name, env_spec, agent_spec, params_updates)
     """
     print("------ Create Robot (Env + Agent) ------")
-    print("ℹ️  Ctrl+B: go back one step · Ctrl+C: cancel\n")
+    print("ℹ️  Ctrl+B: go back · Ctrl+C: cancel\n")
 
     # Shared state
     robot_name: str = ""

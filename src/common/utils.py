@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 from matplotlib import pyplot as plt
 from matplotlib.patches import Ellipse
@@ -29,6 +29,8 @@ import select
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.results_plotter import load_results, ts2xy
 from stable_baselines3.common.evaluation import evaluate_policy
+from sklearn.preprocessing import StandardScaler
+from scipy.stats import spearmanr
 
 AGENT_SCRIPT_COPPELIA = "/Agent_Script"             # Name of the agent script in CoppeliaSim scene
 ROBOT_SCRIPT_COPPELIA = "/Robot_Script"             # Name of the robot script in CoppeliaSim scene
@@ -752,12 +754,12 @@ def load_params(file_path):
                 logging.info(f"Configuration loaded successfully from {file_path}.")
                 return params_robot, params_env, params_train, params_test
             else:
-                logging.error("Failed to load configuration. Default values will be used")
-                return _get_default_params()
+                logging.error("Failed to load configuration.")
+                raise
             
     except Exception as e:
         logging.error(f"Error loading configuration file: {e}")
-        return _get_default_params()
+        raise
     
     
 def get_output_csv(model_name, metrics_path, train_flag=True):
@@ -878,36 +880,6 @@ def copy_json_with_id(source_path, destination_dir, file_id):
     logging.info(f"A copy of the parameters file has been copied to {destination_path}")
 
     return destination_path
-
-
-def get_algorithm_for_model(model_name, csv_path):
-    """
-    Searches for a row in the CSV file where the first column matches the given model name,
-    and returns the value in the "Algorithm" column for that row. Doing this we can be sure
-    that we are testing the model using the same algorithm that was used for training it.
-
-    Args:
-        model_name (str): The model name to search for.
-        csv_path (str): The path to the CSV file.
-
-    Returns:
-        alg_name (str): The value from the "Algorithm" column corresponding to the row where 
-                     the model name is found
-    """
-    # Just keep the name until the '_best' part
-    if "_best" in model_name:
-        model_name = model_name.split("_best")[0]
-
-    with open(csv_path, 'r', newline='') as csvfile:
-        reader = csv.DictReader(csvfile)
-        # Get the key of the first column (assumed to contain the model names)
-        first_col = reader.fieldnames[0]
-        for row in reader:
-            if row[first_col] == model_name:
-                return row.get("Algorithm")
-            
-    logging.error("There was an error while checking the algorithm used for training the model")
-    raise ValueError(f"Model '{model_name}' not found in CSV file '{csv_path}'")
 
 
 def get_data_from_training_csv(model_name, csv_path, column_header):
@@ -1455,10 +1427,6 @@ def update_and_copy_script(rl_copp_obj):
 
     logging.info("Scripts updated successfully in CoppeliaSim.")
     return True
-
-    # except Exception as e:
-    #     logging.error(f"Something happened while trying to update the content of the script inside Coppelia's scene: {e}")
-    #     # sys.exit()
 
 
 def create_discs_under_target(rl_copp_obj):
@@ -2878,6 +2846,562 @@ def plot_metrics_comparison_smooth_with_original_deprecated(rl_copp_obj, metric,
         plt.show()
 
 
+
+
+def find_otherdata_files(rl_copp_obj, model_index: int) -> List[str]:
+    """Find 'otherdata' CSV files for a given model index.
+
+    Args:
+        rl_copp_obj: RLCoppeliaManager-like object containing paths and args.
+        model_index (int): Index in rl_copp_obj.args.model_ids.
+
+    Returns:
+        list[str]: List of CSV paths.
+        model_name (str): Name of the model.
+    """
+    model_id = rl_copp_obj.args.model_ids[model_index]
+    model_name = f"{rl_copp_obj.args.robot_name}_model_{model_id}"
+    robot_name = rl_copp_obj.args.robot_name
+
+    if rl_copp_obj.args.csv_file_path is None:
+        file_pattern = f"{model_name}_*_otherdata_*.csv"
+        subfolder_pattern = f"{model_name}_*_testing"
+        files = glob.glob(os.path.join(
+            rl_copp_obj.base_path, "robots", robot_name, "testing_metrics",
+            subfolder_pattern, file_pattern
+        ))
+    else:
+        f = rl_copp_obj.args.csv_file_path
+        # lp puede ser str, list[str] o list[list[str]]; aplanamos.
+        if isinstance(f, str):
+            files = [f]
+        else:
+            files = []
+            for item in f:
+                if isinstance(item, (list, tuple, set)):
+                    files.extend(list(item))
+                else:
+                    files.append(item)
+    logging.info(f"Files found: {files}")
+
+    return files, model_name
+
+
+def _flatten_files_arg(files: Union[str, Iterable]) -> List[str]:
+    """Return a flat list of paths from str | list[str] | list[list[str]]."""
+    if isinstance(files, str):
+        return [files]
+    flat: List[str] = []
+    for item in files:
+        if isinstance(item, (list, tuple, set)):
+            flat.extend(list(item))
+        else:
+            flat.append(item)
+    return flat
+
+
+
+def load_and_concat_otherdata(files: Union[str, Iterable]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Load multiple 'otherdata' CSV files, stack them vertically and renumber episodes globally.
+
+    It preserves the original episode number per file in `episode_original`, the file name in
+    `source_file`, and assigns a running `episode_global` across files: the second file starts
+    at (last_episode_of_first + 1), and so on.
+
+    Args:
+        files: A path string, list of paths, or nested lists of paths.
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]:
+            - df_all: concatenated dataframe with added columns:
+                ['source_file', 'episode_original', 'episode_global']
+            - episode_map: unique mapping rows with columns:
+                ['source_file', 'episode_original', 'episode_global']
+    """
+    paths = _flatten_files_arg(files)
+    if not paths:
+        raise FileNotFoundError("No otherdata CSV files provided.")
+
+    all_dfs: List[pd.DataFrame] = []
+    episode_offset = 0
+    map_rows = []
+
+    for p in paths:
+        logging.info(f"Reading file: {p}")
+        df = pd.read_csv(p)
+
+        if "Episode number" not in df.columns:
+            raise KeyError(f"'Episode number' column not found in: {p}")
+
+        # Keep original episode column
+        df["source_file"] = os.path.basename(p)
+        df["episode_original"] = df["Episode number"].astype(int)
+
+        # Compute global episode number as original + offset
+        df["episode_global"] = df["episode_original"] + episode_offset
+
+        # For the mapping table, one row per (file, original) is enough
+        map_rows.append(
+            df[["source_file", "episode_original", "episode_global"]]
+            .drop_duplicates()
+            .copy()
+        )
+
+        # Update offset for the next file (use max original episode of this file)
+        max_ep_this = int(df["episode_original"].max()) if len(df) else 0
+        episode_offset += max_ep_this
+
+        all_dfs.append(df)
+
+    df_all = pd.concat(all_dfs, ignore_index=True)
+    episode_map = pd.concat(map_rows, ignore_index=True).sort_values(
+        ["episode_global", "source_file", "episode_original"]
+    ).reset_index(drop=True)
+
+    return df_all, episode_map
+
+
+def drop_single_step_episodes(df_all: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Drop episodes that contain only one row (single timestep) and log what was removed.
+
+    The dataframe must contain 'episode_global', 'episode_original', and 'source_file' columns.
+
+    Args:
+        df_all: Concatenated dataframe produced by `load_and_concat_otherdata`.
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]:
+            - df_filtered: dataframe without single-step episodes.
+            - removed_info: dataframe listing removed episodes with columns:
+                ['source_file', 'episode_original', 'episode_global', 'rows_in_episode']
+    """
+    required = {"episode_global", "episode_original", "source_file"}
+    missing = required.difference(df_all.columns)
+    if missing:
+        raise KeyError(f"Missing required columns in df_all: {sorted(missing)}")
+
+    # Count rows per episode (global)
+    counts = df_all.groupby("episode_global").size().rename("rows_in_episode")
+    single_ep_ids = counts[counts == 1].index.tolist()
+
+    if not single_ep_ids:
+        logging.info("No single-step episodes found. Nothing to drop.")
+        return df_all, pd.DataFrame(columns=["source_file", "episode_original", "episode_global", "rows_in_episode"])
+
+    # Build removal info with file + original id for logging/reporting
+    removed_rows = (
+        df_all[df_all["episode_global"].isin(single_ep_ids)]
+        .loc[:, ["source_file", "episode_original", "episode_global"]]
+        .copy()
+    )
+    removed_rows = removed_rows.merge(
+        counts.reset_index(), on="episode_global", how="left"
+    )
+
+    # Log per file the removed episodes
+    for src, sub in removed_rows.groupby("source_file"):
+        eps = sub.sort_values("episode_original")["episode_original"].tolist()
+        logging.info(f"Removed {len(eps)} single-step episodes from '{src}': {eps}")
+
+    # Drop single-step episodes
+    df_filtered = df_all[~df_all["episode_global"].isin(single_ep_ids)].reset_index(drop=True)
+
+    return df_filtered, removed_rows
+
+
+def preprocess_otherdata_files(rl_copp_obj, model_index):
+    files, model_name = find_otherdata_files(rl_copp_obj, model_index)
+    df_all, _episode_map = load_and_concat_otherdata(files)
+    df_filtered, _removed_info = drop_single_step_episodes(df_all)
+
+    return df_filtered, model_name
+
+
+def detect_columns(df: pd.DataFrame, params_env: Optional[Dict] = None) -> Dict[str, object]:
+    """Detect important columns (timestep, obs names, laser list, distance).
+
+    Tries to use `params_env` when provided; otherwise falls back to pattern-based
+    detection (distance, angle, and any columns prefixed with 'laser_obs').
+
+    Args:
+        df: DataFrame to inspect.
+        params_env: Optional dict with hints:
+            - 'action_names' (list[str])
+            - 'observation_names' (list[str])
+
+    Returns:
+        dict with keys:
+          - "timestep_col": str
+          - "observation_cols": list[str] (ordered: lasers..., distance, angle)
+          - "laser_cols": list[str]
+          - "distance_col": Optional[str]
+    """
+    cols = list(df.columns)
+
+    # --- Timestep column detection ---
+    action_names = (params_env or {}).get("action_names", [])
+    timestep_candidates = ["timestep", "action_time", "dt", "time_step"]
+
+    timestep_col = None
+    if action_names:
+        # Prefer an action name that clearly denotes timestep and exists in df
+        for nm in action_names:
+            if nm in df.columns and nm.lower() in ("timestep", "action_time", "dt", "time_step"):
+                timestep_col = nm
+                break
+    if timestep_col is None:
+        timestep_col = next((c for c in timestep_candidates if c in cols), None)
+
+    if timestep_col is None:
+        raise ValueError("Could not detect timestep column. Ensure your CSV has a 'timestep' column "
+                         "or pass action_names in params_env.")
+
+    # --- Observation detection ---
+    # Prefer params_env["observation_names"] if available
+    obs_names_param = (params_env or {}).get("observation_names", [])
+    if obs_names_param:
+        observation_cols = [c for c in obs_names_param if c in cols]
+    else:
+        # Heuristic: any 'laser_obs*' + 'distance' + 'angle' if present
+        observation_cols = []
+        for c in cols:
+            if c.startswith("laser_obs"):
+                observation_cols.append(c)
+        if "distance" in cols:
+            observation_cols.append("distance")
+        if "angle" in cols:
+            observation_cols.append("angle")
+
+    # Order: lasers sorted by index, then distance, then angle
+    laser_cols = sorted([c for c in observation_cols if c.startswith("laser_obs")], key=laser_index_key)
+    distance_col = "distance" if "distance" in observation_cols else None
+    angle_col = "angle" if "angle" in observation_cols else None
+    ordered_obs = laser_cols + ([distance_col] if distance_col else []) + ([angle_col] if angle_col else [])
+
+    return {
+        "timestep_col": timestep_col,
+        "observation_cols": ordered_obs,
+        "laser_cols": laser_cols,
+        "distance_col": distance_col,
+    }
+
+
+def laser_index_key(name: str) -> int:
+    """Numerical sorting key for 'laser_obs<N>'."""
+    try:
+        return int(name.replace("laser_obs", ""))
+    except Exception:
+        return 10**9  # unknowns go last
+
+
+def edges_to_bin_labels(edges: List[float]) -> List[str]:
+    """Build human-friendly bin labels like '0.2-0.5 s' for a list of edges.
+
+    Args:
+        edges: Monotonically increasing edges of length >= 2.
+
+    Returns:
+        List of length (len(edges)-1) with pretty labels.
+    """
+    labels = []
+    for i in range(len(edges) - 1):
+        a = float(edges[i])
+        b = float(edges[i + 1])
+        labels.append(f"{a:g}–{b:g} s")
+    return labels
+
+
+def clean_and_bin_timesteps(
+    df: pd.DataFrame,
+    timestep_col: str,
+    bins: Tuple[float, ...] | List[float],
+) -> pd.DataFrame:
+    """Sanitize timestep column and build categorical bins for ANY number of ranges.
+
+    - Converts the timestep column to float.
+    - Drops rows with NaN timesteps.
+    - Filters to [bins[0], bins[-1]].
+    - Adds:
+        * 'timestep_bin' (categorical label string)
+        * 'timestep_bin_id' (0..N-1 for N bins)
+
+    Args:
+        df: DataFrame with a timestep column.
+        timestep_col: Name of the timestep column (e.g., 'timestep').
+        bins: Sequence of edges, length >= 2. N bins are formed by N+1 edges.
+
+    Returns:
+        Copy of df with bin columns added.
+    """
+    if not isinstance(bins, (list, tuple)) or len(bins) < 2:
+        raise ValueError("`bins` must be a list/tuple of at least 2 edges (monotonically increasing).")
+
+    # Ensure monotonic increasing and unique edges
+    edges = [float(x) for x in bins]
+    for i in range(1, len(edges)):
+        if edges[i] <= edges[i - 1]:
+            raise ValueError("`bins` edges must be strictly increasing.")
+
+    out = df.copy()
+    out[timestep_col] = pd.to_numeric(out[timestep_col], errors="coerce")
+    out = out.dropna(subset=[timestep_col])
+
+    lo, hi = edges[0], edges[-1]
+    mask = (out[timestep_col] >= lo) & (out[timestep_col] <= hi)
+    dropped = (~mask).sum()
+    if dropped:
+        logging.info(f"Dropping {dropped} rows with timesteps out of range [{lo}, {hi}].")
+    out = out.loc[mask].copy()
+
+    labels = edges_to_bin_labels(edges)
+    out["timestep_bin"] = pd.cut(
+        out[timestep_col],
+        bins=edges,
+        labels=labels,
+        include_lowest=True,
+        right=True,
+    )
+    out["timestep_bin_id"] = out["timestep_bin"].cat.codes  # 0..N-1
+
+    return out
+
+
+def summarize_timestep_bins(df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
+    """Count absolute and relative frequencies of timestep bins."""
+    counts = df["timestep_bin"].value_counts().sort_index()
+    percent = counts / counts.sum()
+    logging.info("Timestep bin usage:\n" + counts.to_string())
+    return counts, percent
+
+
+def summarize_state_means_by_bin(
+    df: pd.DataFrame,
+    observation_cols: List[str],
+    distance_col: Optional[str],
+    laser_cols: List[str],
+) -> pd.DataFrame:
+    """Compute per-bin means of selected state features (distance/min_laser/angle)."""
+    feats = []
+    if distance_col:
+        feats.append("_distance")
+    if "min_laser" in df.columns and len(laser_cols) > 0:
+        feats.append("min_laser")
+    if "angle" in observation_cols and "angle" in df.columns:
+        feats.append("angle")
+
+    if not feats:
+        return pd.DataFrame()
+
+    means = df.groupby("timestep_bin")[feats].mean()
+    logging.info("Per-bin state means:\n" + means.to_string())
+    return means
+
+
+def spearman_correlations(
+    df: pd.DataFrame,
+    timestep_col: str,
+    observation_cols: List[str],
+) -> pd.DataFrame:
+    """Compute Spearman correlation between timestep and each observation column."""
+    res = []
+    for col in observation_cols:
+        if col not in df.columns:
+            continue
+        x = pd.to_numeric(df[timestep_col], errors="coerce")
+        y = pd.to_numeric(df[col], errors="coerce")
+        m = x.notna() & y.notna()
+        if m.sum() < 3:
+            continue
+        r, p = spearmanr(x[m], y[m])
+        res.append({"variable": col, "spearman_r": float(r), "p_value": float(p)})
+    out = pd.DataFrame(res).set_index("variable").sort_values("spearman_r", ascending=False)
+    logging.info("Spearman correlations (timestep vs obs):\n" + out.to_string())
+    return out
+
+
+def timestep_on_episode_last_step(df: pd.DataFrame, timestep_col: str) -> pd.Series:
+    """Distribution of timestep bins on the last row of each episode."""
+    if "Episode number" not in df.columns:
+        logging.info("No 'Episode number' column; skipping last-step analysis.")
+        return pd.Series(dtype=int)
+    last_idx = df.groupby("Episode number").tail(1).index
+    last_bins = df.loc[last_idx, "timestep_bin"]
+    counts = last_bins.value_counts().sort_index()
+    logging.info("Last-step timestep bins:\n" + counts.to_string())
+    return counts
+
+
+def near_collision_analysis(
+    df: pd.DataFrame,
+    min_laser_col: str,
+    timestep_bin_col: str,
+    params_env: Optional[Dict],
+    laser_tolerance: float,
+) -> Dict[str, object]:
+    """Near-collision analysis using min_laser < (max_crash_dist + tolerance)."""
+    max_crash = (params_env or {}).get("max_crash_dist", 0.18)
+    thr = max_crash + float(laser_tolerance)
+
+    if min_laser_col not in df.columns:
+        logging.info("No min_laser column; skipping near-collision analysis.")
+        return {"threshold": thr, "global_risk_share": np.nan, "bin_risk_share": pd.Series(dtype=float), "counts": pd.DataFrame()}
+
+    risk_mask = pd.to_numeric(df[min_laser_col], errors="coerce") < thr
+    global_share = float(risk_mask.mean())
+
+    grp = df.groupby(timestep_bin_col)
+    per_bin_risk = grp.apply(lambda g: (pd.to_numeric(g[min_laser_col], errors="coerce") < thr).mean())
+
+    counts_df = pd.DataFrame({
+        "total": grp.size(),
+        "risk_share": per_bin_risk
+    }).sort_index()
+
+    logging.info(f"Near-collision threshold: {thr:.3f} m / Global % of steps in which the robot is under risk: {global_share:.3%}")
+    logging.info("Near-collision risk by timestep bin:\n" + per_bin_risk.to_string())
+
+    return {
+        "threshold": thr,
+        "global_risk_share": global_share,
+        "bin_risk_share": per_bin_risk.sort_index(),
+        "counts": counts_df,
+    }
+
+
+def plot_timestep_usage_hist(counts: pd.Series, title: str = "") -> None:
+    """Simple bar chart of timestep bin counts."""
+    if counts.empty:
+        return
+    plt.figure(figsize=(7, 4.2))
+    plt.bar(counts.index.astype(str), counts.values)
+    plt.title(title)
+    plt.ylabel("count")
+    plt.xlabel("timestep bin")
+    plt.tight_layout()
+
+
+def plot_last_step_hist(counts: pd.Series, title: str = "") -> None:
+    """Bar chart for last-step timestep bins."""
+    if counts.empty:
+        return
+    plt.figure(figsize=(7, 4.2))
+    plt.bar(counts.index.astype(str), counts.values)
+    plt.title(title)
+    plt.ylabel("count (episodes)")
+    plt.xlabel("timestep bin (last step)")
+    plt.tight_layout()
+
+
+def plot_near_collision_hist(share: pd.Series, title: str = "") -> None:
+    """Bar chart of near-collision share per timestep bin."""
+    if share.empty:
+        return
+    plt.figure(figsize=(7, 4.2))
+    plt.bar(share.index.astype(str), share.values)
+    plt.title(title)
+    plt.ylabel("near-collision share")
+    plt.xlabel("timestep bin")
+    plt.ylim(0, 1)
+    plt.tight_layout()
+
+
+def plot_hexbin_mean_timestep(
+    df: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    c_col: str,
+    gridsize: int = 60,
+    title: str = "",
+    xlabel: str = "",
+    ylabel: str = "",
+    clabel: str = "Mean timestep",
+) -> None:
+    """2D interpretative map: mean timestep over (x,y) via hexbin.
+
+    This offers a legible "policy map" of how timestep changes across state-space.
+    """
+    X = pd.to_numeric(df[x_col], errors="coerce")
+    Y = pd.to_numeric(df[y_col], errors="coerce")
+    C = pd.to_numeric(df[c_col], errors="coerce")
+    m = X.notna() & Y.notna() & C.notna()
+
+    if m.sum() < 10:
+        logging.info("Not enough valid points for hexbin map; skipping.")
+        return
+
+    plt.figure(figsize=(7.8, 6.2))
+    hb = plt.hexbin(
+        X[m].values, Y[m].values, C=C[m].values,
+        reduce_C_function=np.mean, gridsize=gridsize, linewidths=0.0
+    )
+    cb = plt.colorbar(hb)
+    cb.set_label(clabel)
+    plt.xlabel(xlabel or x_col)
+    plt.ylabel(ylabel or y_col)
+    plt.title(title)
+    plt.tight_layout()
+
+
+def plot_violin_timestep_by_quantiles(
+    df: pd.DataFrame,
+    value_col: str,
+    bin_on_col: str,
+    q_edges: Tuple[float, float, float, float, float] = (0.0, 0.25, 0.5, 0.75, 1.0),
+    title: str = "",
+    xlabel: str = "",
+    ylabel: str = "",
+) -> None:
+    """Violin plot of `value_col` (timestep) vs quantile bins of `bin_on_col`.
+
+    Example uses:
+      - value_col='timestep', bin_on_col='distance'
+      - value_col='timestep', bin_on_col='min_laser'
+
+    Args:
+        df: DataFrame with both columns.
+        value_col: Name of the numeric column to plot (timestep).
+        bin_on_col: Column to bin by quantiles (distance or min_laser).
+        q_edges: Quantile edges, e.g., (0, .25, .5, .75, 1).
+        title/xlabel/ylabel: Plot labels.
+    """
+    if bin_on_col not in df.columns or value_col not in df.columns:
+        logging.info(f"Skipping violin plot: missing columns ({bin_on_col}, {value_col}).")
+        return
+
+    X = pd.to_numeric(df[bin_on_col], errors="coerce")
+    Y = pd.to_numeric(df[value_col], errors="coerce")
+    m = X.notna() & Y.notna()
+
+    if m.sum() < 10:
+        logging.info("Not enough valid rows for violin plot; skipping.")
+        return
+
+    # Compute quantile breakpoints over valid data
+    qs = X[m].quantile(list(q_edges)).values
+    # Ensure strictly increasing cut edges; if duplicates exist, perturb slightly
+    edges = np.array(qs, dtype=float)
+    for i in range(1, len(edges)):
+        if edges[i] <= edges[i - 1]:
+            edges[i] = edges[i - 1] + 1e-9
+
+    labels = [f"Q{i+1}\n[{edges[i]:.2g},{edges[i+1]:.2g}]" for i in range(len(edges) - 1)]
+    bins = pd.cut(X[m], bins=edges, labels=labels, include_lowest=True, right=True)
+    # Collect lists of values per bin (for violinplot)
+    data = [Y[m][bins == lab].values for lab in labels if (bins == lab).any()]
+
+    if not data:
+        logging.info("No data per quantile bin for violin plot; skipping.")
+        return
+
+    plt.figure(figsize=(7.8, 4.8))
+    plt.violinplot(data, showmeans=True, showmedians=False, showextrema=True)
+    plt.xticks(ticks=np.arange(1, len(data) + 1), labels=labels, rotation=0)
+    plt.title(title or f"{value_col} by {bin_on_col} quantiles")
+    plt.xlabel(xlabel or f"{bin_on_col} quantile bins")
+    plt.ylabel(ylabel or value_col)
+    plt.tight_layout()
+
+
 # ------------------------------------
 # ------------------------------------
 # ------- Deprecated functions -------
@@ -3569,61 +4093,6 @@ def unwrap_env(vec_env, idx=0):
 # ------------------------------------
 
 
-# def prompt_str(msg: str, *, default: Optional[str] = None, allow_empty: bool = False) -> str:
-#     """Prompt for a string with optional default."""
-#     while True:
-#         prompt = f"{msg}"
-#         if default is not None:
-#             prompt += f" [{default}]"
-#         prompt += ": "
-#         val = input(prompt).strip()
-#         if not val:
-#             if default is not None:
-#                 return default
-#             if allow_empty:
-#                 return ""
-#             print("Please enter a value.")
-#             continue
-#         return val
-
-
-# def prompt_yes_no(msg: str, *, default: Optional[bool] = None) -> bool:
-#     """Prompt for a yes/no question."""
-#     opt = ""
-#     if default is True:
-#         opt = " [Y/n]"
-#     elif default is False:
-#         opt = " [y/N]"
-#     ans = input(f"{msg}{opt}: ").strip().lower()
-#     if not ans and default is not None:
-#         return default
-#     return ans in ("y", "yes", "s", "si", "sí", "true", "1")
-
-
-# def prompt_int(msg: str, *, default: Optional[int] = None, min_val: Optional[int] = None) -> int:
-#     """Prompt for an integer with basic validation."""
-#     while True:
-#         s = prompt_str(msg, default=None if default is None else str(default))
-#         try:
-#             v = int(s)
-#             if min_val is not None and v < min_val:
-#                 print(f"Must be >= {min_val}.")
-#                 continue
-#             return v
-#         except ValueError:
-#             print("Please enter an integer number.")
-
-
-# def prompt_float(msg: str, *, default: Optional[float] = None) -> float:
-#     """Prompt for a float with basic validation."""
-#     while True:
-#         s = prompt_str(msg, default=None if default is None else str(default))
-#         try:
-#             return float(s)
-#         except ValueError:
-#             print("Please enter a numeric (float) value.")
-
-
 def ensure_ttt(name: str) -> str:
     """Ensure the scene filename ends with .ttt (case-insensitive)."""
     name = name.strip()
@@ -3681,7 +4150,7 @@ def prompt_str(label: str, default: Optional[str] = None, allow_empty: bool = Tr
         if s == "" and default is not None:
             return default
         if not allow_empty and s.strip() == "":
-            print("This field cannot be empty. (Ctrl+B to go back)")
+            print("This field cannot be empty.")
             continue
         return s
 
@@ -3697,13 +4166,13 @@ def prompt_int(label: str, default: Optional[int] = None,
             try:
                 v = int(s)
             except ValueError:
-                print("Invalid integer. (Ctrl+B to go back)")
+                print("Invalid integer.")
                 continue
         if min_val is not None and v < min_val:
-            print(f"Value must be >= {min_val}. (Ctrl+B to go back)")
+            print(f"Value must be >= {min_val}.")
             continue
         if max_val is not None and v > max_val:
-            print(f"Value must be <= {max_val}. (Ctrl+B to go back)")
+            print(f"Value must be <= {max_val}.")
             continue
         return v
 
@@ -3718,14 +4187,17 @@ def prompt_float(label: str, default: Optional[float] = None,
         else:
             try:
                 v = float(s)
-            except ValueError:
-                print("Invalid number. (Ctrl+B to go back)")
-                continue
+            except ValueError:  # User could haver entered "pi" or "-pi"
+                if s.lower() == "pi" or s.lower()=="-pi":
+                    v = np.pi if s=="pi" else -np.pi
+                else:
+                    print("Invalid number.")
+                    continue
         if min_val is not None and v < min_val:
-            print(f"Value must be >= {min_val}. (Ctrl+B to go back)")
+            print(f"Value must be >= {min_val}.")
             continue
         if max_val is not None and v > max_val:
-            print(f"Value must be <= {max_val}. (Ctrl+B to go back)")
+            print(f"Value must be <= {max_val}.")
             continue
         return v
 

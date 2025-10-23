@@ -14,7 +14,7 @@ Usage:
     rl_coppelia plot --robot_name <robot_name> --plot_types <plot_type_1> [<plot_type_2> ...]
                      [--model_ids <id_1> <id_2> ...] [--scene_to_load_folder <folder>] 
                      [--save_plots] [--lat_fixed_timestep <float>] [--timestep_unit <str>] 
-                     [--lat_file_path <path>] [--verbose <level>]
+                     [--csv_file_path <path>] [--verbose <level>]
 
 Supported Plot Types:
         - spider: Generates a spider chart comparing multiple models across various metrics.
@@ -47,13 +47,17 @@ Features:
     - Automatically handles input data discovery based on naming patterns.
 """
 from datetime import datetime
+import math
+from typing import Dict, List, Optional, Sequence, Tuple
 import matplotlib
 from collections import defaultdict
 import glob
 import logging
 import sys
+from matplotlib.patches import Ellipse
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
 plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['ps.fonttype'] = 42
@@ -65,6 +69,8 @@ from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
 from scipy.interpolate import interp1d
 from scipy.interpolate import make_interp_spline
+from sklearn.preprocessing import StandardScaler
+from scipy.stats import spearmanr
 
 
 def plot_spider(rl_copp_obj, title='Models Comparison'):
@@ -1302,18 +1308,7 @@ def plot_lat_curves(rl_copp_obj, model_index):
     train_records_csv_name = os.path.join(training_metrics_path,"train_records.csv")    # Name of the train records csv to search the algorithm used
 
     # Get action time 
-    model_id = rl_copp_obj.args.model_ids[model_index]
-    model_name = f"{rl_copp_obj.args.robot_name}_model_{model_id}"
-    robot_name = rl_copp_obj.args.robot_name
-
-    # Locate LAT CSV files
-    if rl_copp_obj.args.lat_file_path is None:
-        file_pattern = f"{model_name}_*_otherdata_*.csv"
-        subfolder_pattern = f"{model_name}_*_testing"
-        files = glob.glob(os.path.join(rl_copp_obj.base_path, "robots", robot_name, "testing_metrics", subfolder_pattern, file_pattern))
-    else:
-        files = rl_copp_obj.args.lat_file_path
-
+    files, model_name = utils.find_otherdata_files(rl_copp_obj, model_index)
     for lat_file in files:
         # Read CSV
         logging.info(f"Reading file: {lat_file}")
@@ -1866,6 +1861,197 @@ def plot_lat(rl_copp_obj, model_index, mode="speed"):
     else:
         plt.show()
 
+    
+
+
+
+
+
+def analyze_and_plot_timestep_behavior(
+    df: pd.DataFrame,
+    params_env: Optional[Dict] = None,
+    timestep_bins: Tuple[float, ...] | List[float] = (0.2, 0.5, 1.25, 3.0),
+    laser_tolerance: float = 0.10,
+    title_prefix: str = "Robot",
+    show_plots: bool = True,
+) -> Dict[str, object]:
+    """Run a full analysis pipeline and generate figures.
+
+    This function performs:
+      - Timestep binning and data cleaning.
+      - Global histogram of timestep bins.
+      - Per-bin state means (distance, min_laser, angle if present).
+      - Spearman correlations (timestep vs each observation).
+      - Histogram of timestep at the last step of each episode.
+      - Near-collision analysis (min_laser < max_crash_dist + tol).
+      - 2D interpretative hexbin map: mean timestep over (min_laser, distance).
+
+    Args:
+        df: Concatenated "otherdata" DataFrame.
+        params_env: Optional params dict; if present may provide names and thresholds:
+            - action_names / observation_names / max_crash_dist
+        timestep_bins: (lo, m1, m2, hi) edges -> 3 bins.
+        laser_tolerance: Margin added to max_crash_dist for near-collision threshold.
+        title_prefix: Used in plot titles.
+        show_plots: If True, call plt.show() at end.
+
+    Returns:
+        Dict of main computed artifacts.
+    """
+    df = df.copy()
+
+    # --- Detect important columns (timestep, obs list, lasers, distance) ---
+    cols = utils.detect_columns(df, params_env=params_env)
+    timestep_col = cols["timestep_col"]
+    obs_cols = cols["observation_cols"]
+    laser_cols = cols["laser_cols"]
+    distance_col = cols.get("distance_col", None)
+
+    # --- Sanitize and bin timesteps ---
+    df = utils.clean_and_bin_timesteps(df, timestep_col, timestep_bins)
+
+    # --- Helper features: min_laser and distance copy for consistent plotting ---
+    df["min_laser"] = df[laser_cols].min(axis=1) if laser_cols else np.nan
+    if distance_col:
+        df["_distance"] = df[distance_col]
+    else:
+        df["_distance"] = np.nan  # keep column for uniform downstream code
+
+    # --- Global counts & percentages by bin ---
+    bin_counts, bin_percent = utils.summarize_timestep_bins(df)
+
+    # --- Per-bin state means (distance / min_laser / angle) ---
+    per_bin_means = utils.summarize_state_means_by_bin(df, obs_cols, distance_col, laser_cols)
+
+    # --- Spearman correlations (timestep vs observations) ---
+    spearman_df = utils.spearman_correlations(df, timestep_col, obs_cols)
+
+    # --- Last step per episode ---
+    last_counts = utils.timestep_on_episode_last_step(df, timestep_col)
+
+    # --- Near-collision analysis using min_laser ---
+    near_summary = utils.near_collision_analysis(
+        df=df,
+        min_laser_col="min_laser",
+        timestep_bin_col="timestep_bin",
+        params_env=params_env,
+        laser_tolerance=laser_tolerance,
+    )
+
+    # --- Plots (histograms + hexbin map) ---
+    utils.plot_timestep_usage_hist(bin_counts, title=f"{title_prefix} - Timestep usage (bins)")
+    utils.plot_last_step_hist(last_counts, title=f"{title_prefix} - Last-step timesteps")
+    utils.plot_near_collision_hist(near_summary["bin_risk_share"], title=f"{title_prefix} - Timesteps under near-collision")
+
+    # 2D interpretative map (hexbin) if state axes are available
+    if laser_cols and distance_col:
+        utils.plot_hexbin_mean_timestep(
+            df,
+            x_col="min_laser",
+            y_col="_distance",
+            c_col=timestep_col,
+            gridsize=55,
+            title=f"{title_prefix} – State map (min_laser vs distance, mean timestep)",
+            xlabel="min_laser (m)",
+            ylabel="distance (m)",
+            clabel="Mean timestep (s)",
+        )
+    else:
+        logging.info("Skipping hexbin map (distance or laser columns not found).")
+
+    if show_plots:
+        plt.show()
+
+    return {
+        "df": df,
+        "bin_counts": bin_counts,
+        "bin_percent": bin_percent,
+        "per_bin_means": per_bin_means,
+        "spearman": spearman_df,
+        "last_step_counts": last_counts,
+        "near_collision_summary": near_summary,
+    }
+
+
+def plot_timestep_analysis(rl_copp_obj, model_index: int = 0) -> Dict[str, object]:
+    """High-level wrapper that finds 'otherdata' CSVs for a model, cleans them,
+    and runs a full analysis + plotting suite.
+
+    This mirrors the style of your existing plotters (e.g., plot_lat_curves):
+    it inspects rl_copp_obj to locate files under robots/<robot>/testing_metrics.
+
+    Args:
+        rl_copp_obj: RLCoppeliaManager instance (already created in plot.main(args))
+        model_index: index into rl_copp_obj.args.model_ids
+
+    Returns:
+        Dict[str, object]: computed artifacts from analysis for further reuse (also logs).
+    """
+    # --- Read and preprocess otherdata files ---
+    df, model_name = utils.preprocess_otherdata_files(rl_copp_obj, model_index)
+
+    # --- Get params_env from the params file used for training that model ---
+    training_metrics_path = rl_copp_obj.paths["training_metrics"]
+    train_records_csv_path = os.path.join(training_metrics_path,"train_records.csv")
+    params_file_name = utils.get_data_from_training_csv(model_name, train_records_csv_path, "Params file")
+    params_file_path = os.path.join(rl_copp_obj.base_path, "robots", rl_copp_obj.args.robot_name, "parameters_used", params_file_name)
+    if not os.path.isfile(params_file_path):
+        raise FileNotFoundError(f"Params file not found: {params_file_path}")
+    _, params_env, _, _ = utils.load_params(params_file_path)
+    # params_env = None
+
+    # --- Run the detailed analysis & plotting ---
+    results = analyze_and_plot_timestep_behavior(
+        df=df,
+        params_env=params_env,                    # may be None; code handles defaults
+        timestep_bins=(0.2, 0.4, 0.8, 1.25, 1.75, 3.0),      
+        laser_tolerance=0.15,                     # tolerance added to max_crash_dist
+        title_prefix=model_name,                  # nicer plot titles
+        show_plots=False,                         # we'll add violin plots below, then show once
+    )
+
+    # --- Add two violin plots (distance-quantiles and min_laser-quantiles) ---
+    cols = utils.detect_columns(results["df"], params_env=params_env)
+    timestep_col = cols["timestep_col"]
+    distance_col = cols.get("distance_col", None)
+    has_lasers = bool(cols["laser_cols"])
+    # violin vs distance
+    if distance_col:
+        utils.plot_violin_timestep_by_quantiles(
+            results["df"],
+            value_col=timestep_col,
+            bin_on_col=distance_col,
+            q_edges=(0.0, 0.25, 0.5, 0.75, 1.0),
+            title=f"{model_name} – Timestep by distance quantiles",
+            xlabel="Distance quantile bin",
+            ylabel="Timestep (s)"
+        )
+    # violin vs min_laser
+    if has_lasers and ("min_laser" in results["df"].columns):
+        utils.plot_violin_timestep_by_quantiles(
+            results["df"],
+            value_col=timestep_col,
+            bin_on_col="min_laser",
+            q_edges=(0.0, 0.25, 0.5, 0.75, 1.0),
+            title=f"{model_name} – Timestep by min_laser quantiles",
+            xlabel="Min_laser quantile bin",
+            ylabel="Timestep (s)"
+        )
+
+    # Finally show everything in one go
+    plt.show()
+
+    return results
+
+
+
+
+
+# ------------- Column detection & cleaning -------------
+
+
+
+
 
 def main(args):
     """
@@ -2043,6 +2229,12 @@ def main(args):
             plot_reward_comparison_from_csv(rl_copp, "Episodes")
             plot_boxplots_from_csv(rl_copp)
             plot_boxplots_from_csv_dual_axis(rl_copp)
+
+    elif "timestep_analysis" in args.plot_types:
+        plot_type_correct = True
+        for model in range(len(args.model_ids)):
+            logging.info(f"Plotting timestep analysis for model {args.model_ids[model]}")
+            plot_timestep_analysis(rl_copp, model)
     
     if not plot_type_correct:
         logging.error(f"Please check plot types: {args.plot_types}")

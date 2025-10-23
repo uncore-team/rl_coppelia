@@ -105,7 +105,7 @@ def main(argv=None):
     plot_parser.add_argument("--save_plots", action="store_true", help="Saves the plots inside current folder instead of showing them.", required=False, default=False)
     plot_parser.add_argument("--lat_fixed_timestep", type=float, help="Fixed timestep for LAT plots (optional).", default=0, required=False)
     plot_parser.add_argument("--timestep_unit", type=str, help="Unit for timestep for LAT plots (optional).", default="s", required=False)
-    plot_parser.add_argument("--lat_file_path", type=str, help="Path to the LAT file (optional).", required=False)
+    plot_parser.add_argument("--csv_file_path", type=str, help="Path to a specific CSV file, e.g. LAT file (optional).", required=False)
     plot_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=-1, required=False)
 

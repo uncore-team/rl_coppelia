@@ -23,125 +23,6 @@ def _snake_to_camel(name: str) -> str:
     return "".join(s.capitalize() for s in parts)
 
 
-# def _resolve_space_from_spec(spec: dict) -> tuple[int, list[float], list[float], list[str]]:
-#     """Resolve a Box-like space from multiple spec formats.
-
-#     Supported formats:
-#       1) Dict with 'vars' list:
-#          {
-#            "vars": [
-#              {"name": "vlin", "low": 0.0, "high": 2.0},
-#              {"name": "vang", "low": -0.4, "high": 0.4},
-#            ]
-#          }
-
-#       2) Dict with parallel arrays:
-#          {
-#            "names": ["vlin", "vang"],
-#            "low":   [0.0, -0.4],
-#            "high":  [2.0,  0.4]
-#          }
-
-#       3) Dict with 'size' (optionally 'names' and/or scalar 'low'/'high'):
-#          {
-#            "size": 2,
-#            "names": ["vlin", "vang"],              # optional
-#            "low":  0.0,                            # optional (scalar -> expanded)
-#            "high": 1.0                             # optional (scalar -> expanded)
-#          }
-#          If 'low'/'high' are not provided, defaults to 0.0 / 1.0 are used.
-
-#     Returns:
-#         tuple:
-#             dim (int): number of variables
-#             lows (List[float]): per-dimension lower bounds
-#             highs (List[float]): per-dimension upper bounds
-#             names (List[str]): per-dimension variable names
-
-#     Raises:
-#         ValueError: on malformed specs or inconsistent sizes/ranges.
-#     """
-#     def _check_ranges(lows: list[float], highs: list[float], names: list[str]) -> None:
-#         if not (len(lows) == len(highs) == len(names)):
-#             raise ValueError("Lengths of 'names', 'low', and 'high' must match.")
-#         for i, (lo, hi) in enumerate(zip(lows, highs)):
-#             if lo >= hi:
-#                 raise ValueError(f"Invalid range for '{names[i]}' (index {i}): low >= high ({lo} >= {hi}).")
-
-#     # --- Case 1: "vars" list -------------------------------------------------
-#     if "vars" in spec:
-#         vars_list = spec["vars"]
-#         if not isinstance(vars_list, list) or len(vars_list) == 0:
-#             raise ValueError("'vars' must be a non-empty list.")
-#         names: list[str] = []
-#         lows: list[float] = []
-#         highs: list[float] = []
-#         for i, v in enumerate(vars_list):
-#             if not isinstance(v, dict):
-#                 raise ValueError(f"Each item in 'vars' must be a dict (got {type(v)} at index {i}).")
-#             name = v.get("name", f"x{i}")
-#             if "low" not in v or "high" not in v:
-#                 raise ValueError(f"Missing 'low'/'high' in vars[{i}] ('{name}').")
-#             lo = float(v["low"])
-#             hi = float(v["high"])
-#             names.append(str(name))
-#             lows.append(lo)
-#             highs.append(hi)
-#         _check_ranges(lows, highs, names)
-#         return len(names), lows, highs, names
-
-#     # --- Case 2: parallel arrays "names"/"low"/"high" ------------------------
-#     has_parallel = all(k in spec for k in ("names", "low", "high"))
-#     if has_parallel:
-#         names_raw = spec["names"]
-#         lows_raw = spec["low"]
-#         highs_raw = spec["high"]
-#         if not (isinstance(names_raw, list) and isinstance(lows_raw, list) and isinstance(highs_raw, list)):
-#             raise ValueError("'names', 'low', and 'high' must be lists in this format.")
-#         if not (len(names_raw) > 0 and len(names_raw) == len(lows_raw) == len(highs_raw)):
-#             raise ValueError("Mismatched or empty 'names'/'low'/'high' lists.")
-#         names = [str(n) for n in names_raw]
-#         lows = [float(x) for x in lows_raw]
-#         highs = [float(x) for x in highs_raw]
-#         _check_ranges(lows, highs, names)
-#         return len(names), lows, highs, names
-
-#     # --- Case 3: "size" (+ optional names & scalar bounds) -------------------
-#     if "size" in spec:
-#         size = int(spec["size"])
-#         if size <= 0:
-#             raise ValueError("'size' must be a positive integer.")
-#         # Optional names
-#         names_raw = spec.get("names")
-#         if names_raw is not None:
-#             if not (isinstance(names_raw, list) and len(names_raw) == size):
-#                 raise ValueError(f"'names' must be a list of length {size} when provided.")
-#             names = [str(n) for n in names_raw]
-#         else:
-#             names = [f"x{i}" for i in range(size)]
-#         # Optional scalar bounds
-#         low_val = spec.get("low", 0.0)
-#         high_val = spec.get("high", 1.0)
-#         # If provided as lists, accept and validate lengths; else expand scalars
-#         if isinstance(low_val, list) or isinstance(high_val, list):
-#             if not (isinstance(low_val, list) and isinstance(high_val, list)):
-#                 raise ValueError("If 'low' or 'high' are lists, both must be lists of same length == size.")
-#             if not (len(low_val) == len(high_val) == size):
-#                 raise ValueError(f"'low'/'high' lists must have length == size ({size}).")
-#             lows = [float(x) for x in low_val]
-#             highs = [float(x) for x in high_val]
-#         else:
-#             lo = float(low_val)
-#             hi = float(high_val)
-#             lows = [lo] * size
-#             highs = [hi] * size
-#         _check_ranges(lows, highs, names)
-#         return size, lows, highs, names
-
-#     # --- Fallback: unsupported format ---------------------------------------
-#     raise ValueError("Spec must define 'vars', or 'names'/'low'/'high', or a positive 'size'.")
-
-
 def _resolve_space_from_spec(spec: dict) -> tuple[int, list[float], list[float], list[str]]:
     """Resolve a Box-like space from the wizard spec format.
 
@@ -223,14 +104,16 @@ def _derive_generic_env_fields_from_spec(env_spec: Dict[str, Any]) -> Dict[str, 
     obs_def = env_spec.get("obs", {})
     act_def = env_spec.get("act", {})
 
-    dim_obs, obs_lows, obs_highs, _obs_names = _resolve_space_from_spec(obs_def)
-    dim_act, act_lows, act_highs, _act_names = _resolve_space_from_spec(act_def)
+    dim_obs, obs_lows, obs_highs, obs_names = _resolve_space_from_spec(obs_def)
+    dim_act, act_lows, act_highs, act_names = _resolve_space_from_spec(act_def)
 
     return {
         "dim_action_space": dim_act,
+        "action_names": act_names,
         "action_bottom_limits": act_lows,
         "action_upper_limits": act_highs,
         "dim_observation_space": dim_obs,
+        "observation_names": obs_names,
         "observation_bottom_limits": obs_lows,
         "observation_upper_limits": obs_highs,
     }
@@ -245,9 +128,12 @@ def _extract_agent_fields_from_agent_spec(agent_spec: Dict[str, Any]) -> Dict[st
 
     result: Dict[str, str] = {}
 
+    # Get nested handles dict if present 
+    handles = agent_spec.get("handles", agent_spec)
+
     # Handles (robot, base, laser)
     for key in ("robot_handle", "robot_base_handle", "laser_handle"):
-        val = agent_spec.get(key)
+        val = handles.get(key)
         if val:
             result[key] = _ensure_leading_slash(val)
 
@@ -594,26 +480,25 @@ def generate_agent_code(robot_name: str, spec: dict) -> str:
         from common.coppelia_agents import CoppeliaAgent
 
         class {class_name}(CoppeliaAgent):
-            def __init__(self, sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
+            def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
                 """Custom agent for {robot_name} (auto-generated).
 
                 Args:
                     sim: Coppelia object for handling the scene's objects.
-                    params_robot (dict): Robot-specific parameters.
                     params_env (dict): Environment parameters.
                     paths (dict): Project paths.
                     file_id (str): Experiment/session ID.
                     verbose (int): Verbosity.
                     comms_port (int): Port for RL-side communications. Defaults to 49054.
                 """
-                super({class_name}, self).__init__(sim, params_robot, params_env, paths, file_id, verbose, comms_port)
+                super({class_name}, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
 
                 # --- Scene handles which are specific for this robot ---
                 {robot_line}
                 {robot_bl_line}
                 {laser_line}
-                self.handle_laser_get_observation_script=sim.getScript(1,{laser},'laser_get_observations')
-                self.handle_robot_scripts = sim.getScript(1, {robot})
+                self.handle_laser_get_observation_script=sim.getScript(1,self.laser,'laser_get_observations')
+                self.handle_robot_scripts = sim.getScript(1, self.robot)
                 
                 logging.info(f"{class_name} created successfully using port {{comms_port}}.")
     ''')
@@ -630,12 +515,11 @@ def generate_agent_plugin_code(robot_name: str) -> str:
         from plugins.agents import register_agent
         from robots.{robot_name}.agent import {class_name}
 
-        def make_agent(sim, params_robot, params_env, paths, file_id, verbose, comms_port=49054):
+        def make_agent(sim, params_env, paths, file_id, verbose, comms_port=49054):
             """Return an instance of the robot-specific Agent.
 
             Args:
                 sim: Coppelia API object.
-                params_robot (dict): Robot-specific parameters (e.g., robot_radius).
                 params_env (dict): Environment parameters.
                 paths (dict): Project paths.
                 file_id (str): Experiment/session identifier.
@@ -645,7 +529,7 @@ def generate_agent_plugin_code(robot_name: str) -> str:
             Returns:
                 {class_name}: Configured agent instance.
             """
-            return {class_name}(sim, params_robot, params_env, paths, file_id, verbose, comms_port)
+            return {class_name}(sim, params_env, paths, file_id, verbose, comms_port)
         
         register_agent("{robot_name}", make_agent)
     ''')

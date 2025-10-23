@@ -23,6 +23,10 @@
         "laser_observations": 8,
         "fixed_obs": false,
         "dim_action_space": 2,
+        "action_names": [
+            "linear",
+            "angular"
+        ],
         "action_bottom_limits": [ 
             -0.22,
             -2.84
@@ -32,6 +36,18 @@
             2.84
         ],
         "dim_observation_space": 10,
+        "observation_names": [
+            "laser_obs0",
+            "laser_obs1",
+            "laser_obs2",
+            "laser_obs3",
+            "laser_obs4",
+            "laser_obs5",
+            "laser_obs6",
+            "laser_obs7",
+            "distance",
+            "angle"
+        ],
         "observation_bottom_limits": [
             0.0,
             -3.141592653589793,

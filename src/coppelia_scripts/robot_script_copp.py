@@ -206,6 +206,7 @@ def sysCall_init():
     global subscriber_twist, publisher_odometry, publisher_ground_truth
     global latX, latY, distanceX, distanceY
     global leftMotorCurveX, leftMotorCurveY, rightMotorCurveX, rightMotorCurveY
+    global robot_alias, robot_base_alias, laser_alias
 
     sim = require('sim')    # type: ignore
 
@@ -213,7 +214,7 @@ def sysCall_init():
     robotHandle = sim.getObject('..')                   # the robot
     robotAlias = sim.getObjectAlias(robotHandle,3)      # robot name
     if f"/{robotAlias}" != robot_alias:
-        logging.warning(f"[Turtle] Warning: robot alias from params file '{robot_alias}' does not match the robot alias in the scene '/{robotAlias}'")
+        logging.warning(f"Warning: robot alias from params file '{robot_alias}' does not match the robot alias in the scene '/{robotAlias}'")
     robotHandle = sim.getObject(robot_base_alias) 
     footprintHandle= sim.getObject(robot_base_alias)
     laserHandle = sim.getObject(laser_alias)
