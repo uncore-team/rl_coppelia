@@ -2004,7 +2004,7 @@ def plot_timestep_analysis(rl_copp_obj, model_index: int = 0) -> Dict[str, objec
     results = analyze_and_plot_timestep_behavior(
         df=df,
         params_env=params_env,                    # may be None; code handles defaults
-        timestep_bins=(0.2, 0.4, 0.8, 1.25, 1.75, 3.0),      
+        timestep_bins=(0.2, 0.4, 0.7, 1.25, 1.75, 3.0),      
         laser_tolerance=0.15,                     # tolerance added to max_crash_dist
         title_prefix=model_name,                  # nicer plot titles
         show_plots=False,                         # we'll add violin plots below, then show once
@@ -2042,14 +2042,6 @@ def plot_timestep_analysis(rl_copp_obj, model_index: int = 0) -> Dict[str, objec
     plt.show()
 
     return results
-
-
-
-
-
-# ------------- Column detection & cleaning -------------
-
-
 
 
 
@@ -2235,6 +2227,7 @@ def main(args):
         for model in range(len(args.model_ids)):
             logging.info(f"Plotting timestep analysis for model {args.model_ids[model]}")
             plot_timestep_analysis(rl_copp, model)
+
     
     if not plot_type_correct:
         logging.error(f"Please check plot types: {args.plot_types}")

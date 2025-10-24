@@ -2863,27 +2863,31 @@ def find_otherdata_files(rl_copp_obj, model_index: int) -> List[str]:
     model_name = f"{rl_copp_obj.args.robot_name}_model_{model_id}"
     robot_name = rl_copp_obj.args.robot_name
 
-    if rl_copp_obj.args.csv_file_path is None:
-        file_pattern = f"{model_name}_*_otherdata_*.csv"
-        subfolder_pattern = f"{model_name}_*_testing"
-        files = glob.glob(os.path.join(
-            rl_copp_obj.base_path, "robots", robot_name, "testing_metrics",
-            subfolder_pattern, file_pattern
-        ))
-    else:
+    
+    file_pattern = f"{model_name}_*_otherdata_*.csv"
+    subfolder_pattern = f"{model_name}_*_testing"
+    files = glob.glob(os.path.join(
+        rl_copp_obj.base_path, "robots", robot_name, "testing_metrics",
+        subfolder_pattern, file_pattern
+    ))
+    logging.info(f"Files found: {files}")
+    if rl_copp_obj.args.csv_file_path is not None:
         f = rl_copp_obj.args.csv_file_path
-        # lp puede ser str, list[str] o list[list[str]]; aplanamos.
-        if isinstance(f, str):
-            files = [f]
+        
+        full_path = next((path for path in files if os.path.basename(path) == f), None)
+        logging.info(f"File {full_path} specified as argument is part of the files.")
+
+        # file could be str, list[str] o list[list[str]]; so let's flatten it.
+        if isinstance(full_path, str):
+            files = [full_path]
         else:
             files = []
-            for item in f:
+            for item in full_path:
                 if isinstance(item, (list, tuple, set)):
                     files.extend(list(item))
                 else:
                     files.append(item)
-    logging.info(f"Files found: {files}")
-
+                    
     return files, model_name
 
 
