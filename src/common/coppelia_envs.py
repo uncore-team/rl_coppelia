@@ -144,7 +144,6 @@ class CoppeliaEnv(gym.Env, ABC):
         # Make sure that action is a numpy array of 1D, because when testing it can be 2D
         action = action.flatten()   
 
-        # TODO This needs to be generic
         self.action_dic = self._map_action_vector(action)
 
         # Send action to agent and receive an observation.

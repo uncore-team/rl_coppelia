@@ -55,6 +55,7 @@ agent = None
 verbose = 1
 sim_initialized = False
 agent_created = False
+FIXED_SPEED = 0.3
 
 
 def _autoload_agent_plugins(base_path):
@@ -203,10 +204,16 @@ def sysCall_sensing():
             if agent.execute_cmd_vel:
                 if len(action)>0:
                     logging.info("Execute action")
-                    agent.sim.callScriptFunction('cmd_vel', agent.handle_robot_scripts, action["linear"], action["angular"])
+                    if "linear" in action:
+                        agent.sim.callScriptFunction('cmd_vel', agent.handle_robot_scripts, action["linear"], action["angular"])
+                    else:
+                        agent.sim.callScriptFunction('cmd_vel', agent.handle_robot_scripts, FIXED_SPEED, action["angular"])
             if verbose == 3:
                 if len(action)>0:
-                    agent.sim.callScriptFunction('draw_path', agent.handle_robot_scripts, action["linear"], action["angular"], agent.colorID)
+                    if "linear" in action:
+                        agent.sim.callScriptFunction('draw_path', agent.handle_robot_scripts, action["linear"], action["angular"], agent.colorID)
+                    else:
+                        agent.sim.callScriptFunction('draw_path', agent.handle_robot_scripts, FIXED_SPEED, action["angular"], agent.colorID)
                     if agent._waitingforrlcommands:
                         agent.colorID +=1
             agent.execute_cmd_vel = False

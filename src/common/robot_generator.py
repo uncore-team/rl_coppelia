@@ -52,9 +52,9 @@ def _resolve_space_from_spec(spec: dict) -> tuple[int, list[float], list[float],
 
     # Optional sanity check
     for i, (lo, hi) in enumerate(zip(lows, highs)):
-        if lo >= hi:
+        if lo > hi:
             raise ValueError(
-                f"Invalid range for '{names[i]}' (index {i}): low >= high ({lo} >= {hi})."
+                f"Invalid range for '{names[i]}' (index {i}): low > high ({lo} > {hi})."
             )
 
     return len(names), [float(x) for x in lows], [float(x) for x in highs], [str(n) for n in names]
