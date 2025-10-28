@@ -23,3 +23,4 @@ src/plugins/*
 !src/plugins/envs/__init__.py
 
 src/test_program.py
+src/common/clean_test_records.py
