@@ -85,7 +85,7 @@ optree==0.16.0
 osrf-pycommon==0.1.11
 packaging==25.0
 pandas==2.2.3
-pillow==11.2.1
+pillow==11.3.0
 protobuf==4.25.8
 psutil==7.0.0
 Pygments==2.19.1
@@ -147,7 +147,7 @@ tensorflow-io-gcs-filesystem==0.37.1
 termcolor==3.1.0
 threadpoolctl==3.6.0
 topic-monitor==0.9.4
-torch==2.7.0
+torch==2.8.0
 tqdm==4.67.1
 triton==3.3.0
 typing_extensions==4.13.2
