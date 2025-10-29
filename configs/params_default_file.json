@@ -1,16 +1,26 @@
 {
-    "params_robot": {
+    "params_scene": {
         "wheel_radius": 0.035,
-        "distance_between_wheels": 0.23
+        "distance_between_wheels": 0.23,
+        "n_obstacles": 10,
+        "diam_obstacles": 0.25,
+        "height_obstacles": 0.4,
+        "flag_grid": false,
+        "grid_visible": false,
+        "quads_x": 2,
+        "quads_y": 2,
+        "grid_rows_per_quad": 5,
+        "grid_cols_per_quad": 5,
+        "fixed_obs": false,
+        "outer_disk_diam": 0.25,
+        "middle_disk_diam": 0.125,
+        "inner_disk_diam": 0.015
     },
     "params_env": {
         "fixed_actime": 0.75,
         "dist_thresh_finish_flag": 0.5,
-        "reward_dist_1": 0.25,
         "reward_1": 0.25,
-        "reward_dist_2": 0.125,
         "reward_2": 0.5,
-        "reward_dist_3": 0.015,
         "reward_3": 1,
         "max_count": 400,
         "max_time": 80,
@@ -20,8 +30,7 @@
         "crash_penalty": -1,
         "max_crash_dist": 0.08,
         "max_crash_dist_critical": 0.13,
-        "laser_observations": 8,
-        "fixed_obs": false,
+        "laser_observations": 4,
         "dim_action_space": 2,
         "action_names": [
             "linear",
@@ -69,8 +78,8 @@
         "n_training_steps": 2048,
         "scene_name": "turtleBot_scene.ttt",
         "robot_handle": "/Turtlebot2",
-        "robot_base_handle": "/Turtlebot/base_link_respondable",
-        "laser_handle": "/Turtlebot/fastHokuyo_ROS2"
+        "robot_base_handle": "/Turtlebot2/base_link_respondable",
+        "laser_handle": "/Turtlebot2/fastHokuyo_ROS2"
     },
     "params_test": {
         "sb3_algorithm": "",
