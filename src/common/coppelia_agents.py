@@ -79,7 +79,7 @@ class CoppeliaAgent:
         self._validate_rltimestep()
 
 
-    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port = 49054) -> None:
+    def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, comms_port = 49054) -> None:
         """
         Custom agent for CoppeliaSim simulations of different robots.
         
@@ -188,10 +188,11 @@ class CoppeliaAgent:
         self.generator=sim.getObject('/ObstaclesGenerator')
         self.handle_laser_get_observation_script=None
         self.handle_robot_scripts = None
-        self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obstacles')        
+        self.handle_obstaclegenerators_script=sim.getScript(1,self.generator,'generate_obs')        
 
         self.sim = sim
         self.params_env = params_env
+        self.params_scene = params_scene
 
         self.initial_simTime = 0
         self.initial_realTime = 0
@@ -244,6 +245,9 @@ class CoppeliaAgent:
 
         # For indicating that the lat reset have been done with the first reset of the scene
         self.lat_reset = False
+
+        # For loading obstacles when training with fixed osbtacles:
+        self.obstacles_csv_folder = ""
 
     
     def start_communication(self):
@@ -403,7 +407,8 @@ class CoppeliaAgent:
         '''
         logging.debug(f"Generating obstacles from csv file")
         height_obstacles = 0.4
-        size_obstacles = 0.25
+        # size_obstacles = 0.25   # TODO This is not generic at all, fix it
+        size_obstacles = 0.12
 
         x, y = row["x"], row["y"]
         logging.debug(f"Placing obstacle at x: {x} and y: {y}")
@@ -444,7 +449,7 @@ class CoppeliaAgent:
             cfg_target = self.sim.unpackTable(raw_target) if raw_target else {}
             objectRadius  = cfg_target.get('outerRadius', None)
         elif object_type == "robot":
-            objectRadius = self.params_robot["distance_between_wheels"]/2 + self.params_env["max_crash_dist_critical"] + 0.05 # wheels width aprox
+            objectRadius = self.params_scene["distance_between_wheels"]/2 + self.params_env["max_crash_dist_critical"] + 0.05 # wheels width aprox
 
         objectPosX = random.uniform(-containerSideX/2 + objectRadius, containerSideX/2 - objectRadius)
         objectPosY = random.uniform(-containerSideY/2 + objectRadius, containerSideY/2 - objectRadius)
@@ -473,9 +478,15 @@ class CoppeliaAgent:
 
             # Get the threshold for each case
             if object_type == "robot":
-                threshold = self.params_robot["distance_between_wheels"]/2 + self.params_env["max_crash_dist_critical"] + 0.05
+                print("robot case")
+                threshold = self.params_scene["distance_between_wheels"]/2 + self.params_env["max_crash_dist_critical"] + 0.01  # Half width of the wheel
             elif object_type == "target":
-                threshold = self.params_env["reward_dist_1"]
+                print("target case")
+                threshold = self.params_scene["outer_disk_diam"] 
+            
+            # Always add the obstacle radius and some tolerance (2cm)
+            threshold = threshold + self.params_scene["diam_obstacles"]/2 + 0.02
+            print(f"threshold: {threshold}")
 
             # Check if the distance does not respect the minimum threshold
             if dist < threshold:
@@ -525,7 +536,7 @@ class CoppeliaAgent:
 
         
         # If 'fixed_obs' flag is not set, remove old obstacles before creating new ones
-        if not self.params_env["fixed_obs"]:
+        if not self.params_scene["fixed_obs"]:
             logging.info("Resetting simulator changing obstacles positions")
 
             # Always remove old obstacles before creating new ones
@@ -544,13 +555,32 @@ class CoppeliaAgent:
             
             # Robot will be always placed at the center of the scene if the obstacles positions 
             # are changing between episodes
-            if not self.params_env["fixed_obs"]:
+            if not self.params_scene["fixed_obs"]:
                 if current_position != [0, 0, 0.06969]:
                     self.sim.setObjectPosition(self.robot_baselink,-1, [0, 0, 0.06969])
             # Random position for the robot if the obstacles are placed in fixed locations
             else:
                 if not self.first_reset_done:
-                    self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
+                    #  self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
+                    # Read obstacles csv
+                    csv_folder = os.path.join(self.paths["scene_configs"], self.obstacles_csv_folder)  
+                    scene_path = utils.find_scene_csv_in_dir(csv_folder)
+                    if not os.path.exists(scene_path):
+                        logging.error(f"[ERROR] CSV scene file not found: {scene_path}")
+                        sys.exit()
+
+                    logging.info(f"Reading obstacles from: {scene_path}")
+                    self.df = pd.read_csv(scene_path)
+                    coords = []
+                    for _, row in self.df.iterrows():
+                        if row['type'] == 'obstacle':
+                            self.id_obstacle += 1   # TODO Check if this is neccessary here
+                            coords.append((float(row['x']), float(row['y'])))
+                    
+                    # self.generate_obs_from_csv(row)
+                    logging.info(f"Obstacles coords: {coords}")
+                    self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script, coords)
+                    # TODO CALL OBSTACLES SCRIPT DIRECTLY
 
                 while True:
                     posX, posY = self.get_random_object_pos('robot')
@@ -566,7 +596,7 @@ class CoppeliaAgent:
             # Randomize target position
             current_target_position = self.sim.getObjectPosition(self.target, -1)
             if current_target_position != [0, 0, 0]:
-                if not self.params_env["fixed_obs"]:
+                if not self.params_scene["fixed_obs"]:
                     posX, posY = self.get_random_object_pos('target')
                     self.sim.setObjectPosition(self.target, -1, [posX, posY, 0])
                 # As the osbtacles are the same as in the previous episode, we need to check that the
@@ -580,11 +610,11 @@ class CoppeliaAgent:
                     self.sim.setObjectPosition(self.target, -1, [posX, posY, 0])
 
             # If osbtacles are not fixed, generate new ones
-            if not self.params_env["fixed_obs"]:
+            if not self.params_scene["fixed_obs"]:
                 if self.generator is not None:
                     # Generate new obstacles
                     logging.info(f"Regenerating new obstacles")
-                    self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script)
+                    self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script, [])
             logging.info("Environment RST done")
 
 
@@ -886,13 +916,13 @@ class CoppeliaAgent:
 # -----------------------------------------------
 
 class BurgerBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
+    def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, comms_port=49054):
         """
         Custom agent for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
         Args:
             sim: Coppelia object for handling the scene's objects.
-            params_robot (dict): Dictionary of parameters specific to the robot.
+            params_scene (dict): Dictionary of parameters specific to the scene.
             params_env (dict): Dictionary of parameters for configuring the agent.
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
             
@@ -901,7 +931,7 @@ class BurgerBotAgent(CoppeliaAgent):
             robot_baselink (CoppeliaObject): Object of the robot's basein CoppeliaSim scene.
             laser (CoppeliaObject): Lase object in CoppeliaSim scene.
         """
-        super(BurgerBotAgent, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
+        super(BurgerBotAgent, self).__init__(sim, params_scene, params_env, paths, file_id, verbose, comms_port)
 
         self.robot = sim.getObject("/Burger")
         self.robot_baselink = self.robot
@@ -913,13 +943,13 @@ class BurgerBotAgent(CoppeliaAgent):
 
 
 class TurtleBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
+    def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, comms_port=49054):
         """
         Custom agent for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
         Args:
             sim: Coppelia object for handling the scene's objects.
-            params_robot (dict): Dictionary of parameters specific to the robot.
+            params_scene (dict): Dictionary of parameters specific to the scene.
             params_env (dict): Dictionary of parameters for configuring the agent.
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
 
@@ -929,7 +959,7 @@ class TurtleBotAgent(CoppeliaAgent):
             laser (CoppeliaObject): Lase object in CoppeliaSim scene.
 
         """
-        super(TurtleBotAgent, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
+        super(TurtleBotAgent, self).__init__(sim, params_scene, params_env, paths, file_id, verbose, comms_port)
 
         self.robot=sim.getObject('/Turtlebot2')
         self.robot_baselink=sim.getObject('/Turtlebot2/base_link_respondable')

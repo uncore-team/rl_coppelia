@@ -20,6 +20,7 @@ The class includes functions for handling paths, logging, environment setup, and
 for loading parameters and saving the model and results. This class is the core component for managing reinforcement 
 learning tasks using CoppeliaSim as the simulation environment.
 """
+import datetime
 import os
 import shutil
 import sys
@@ -134,7 +135,7 @@ class RLCoppeliaManager():
         if not os.path.isfile(source):
             raise FileNotFoundError(f"Params file not found: {source}")
 
-        self.params_robot, self.params_env, self.params_train, self.params_test = utils.load_params(source)
+        self.params_scene, self.params_env, self.params_train, self.params_test = utils.load_params(source)
 
 
     def _select_comms_port(self, args, default_start: int) -> int:
@@ -148,6 +149,57 @@ class RLCoppeliaManager():
     def _snapshot_pids(self) -> dict:
         """Take a snapshot of current processes (pid -> name)."""
         return {proc.pid: proc.name() for proc in psutil.process_iter(["pid", "name"])}
+    
+
+    def _save_notes(self):
+        """
+        Prompt the user to write notes about the current training experiment and save them into a text file.
+
+        If the 'save_notes' argument is passed, the user is prompted via terminal to input custom text describing
+        the experiment. The notes are then stored in a file named 'experiment_notes.txt' inside the corresponding
+        robot folder (robots/<robot_name>). Each new entry is separated by an empty line and includes the experiment ID.
+
+        Example:
+            # User types: "Testing PPO with dynamic action times"
+            # File robots/burgerBot/experiment_notes.txt will contain:
+            #
+            # Experiment burgerBot_model_004
+            # Testing PPO with dynamic action times
+        """
+        # Check notes_flag before doing anything else
+        notes_flag = getattr(self.args, "save_notes", None)
+        if not notes_flag:
+            return  # Nothing to do if flag is missing
+        
+        # Get timestamp
+        if hasattr(self.args, "timestamp") and self.args.timestamp is not None:
+            timestamp = self.args.timestamp  # Obtained from GUI
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        # Get process name
+        process_name = self.calling_script.split('.')[0]
+
+        # Path to robot folder
+        robot_dir = os.path.join(self.base_path, "robots", self.robot_name)
+
+        # Path to notes file
+        notes_path = os.path.join(robot_dir, "experiment_notes.txt")
+
+        # Ask user for custom notes
+        print("\n📝 Please write your notes for this experiment (press Enter when done):")
+        user_notes = input(">> ").strip()
+
+        # Prepare text to append
+        entry = f"\n\nExperiment: {self.file_id} - Process: {process_name} - Timestamp: {timestamp}\n{user_notes}\n"
+
+        # Append notes to file
+        with open(notes_path, "a", encoding="utf-8") as f:
+            f.write(entry)
+
+        logging.info(f"✅ Notes saved successfully in {notes_path}")
+
+
 
 
     def __init__(self, args):
@@ -186,6 +238,7 @@ class RLCoppeliaManager():
         # --- Logging & initial warnings ---
         self._configure_logging(args)
         utils.initial_warnings(self)
+        self._save_notes()
 
 
         # --- Params (train/test flows) --- #TODO This will not work for auto_trainings or sat_trainings, as they need different params files
@@ -236,6 +289,7 @@ class RLCoppeliaManager():
                 n_envs=1,
                 monitor_dir=self.log_monitor,
                 env_kwargs={
+                    "params_scene": self.params_scene,
                     "params_env": self.params_env, 
                     "comms_port": self.free_comms_port                },
             )
@@ -245,6 +299,7 @@ class RLCoppeliaManager():
                 n_envs=1,
                 monitor_dir=self.log_monitor,
                 env_kwargs={
+                    "params_scene": self.params_scene,
                     "params_env": self.params_env, 
                     "comms_port": self.free_comms_port
                 },

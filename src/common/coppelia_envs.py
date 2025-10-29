@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 
 class CoppeliaEnv(gym.Env, ABC):
 
-    def __init__(self, params_env, comms_port=49054):
+    def __init__(self, params_scene, params_env, comms_port=49054):
         """
         Custom environment for simulation agents in CoppeliaSim, inherited from gym.Env.
         
@@ -46,6 +46,7 @@ class CoppeliaEnv(gym.Env, ABC):
 
         # Extract the parameters for the environment located inside the coresponding params file json.
         # Make params_env accessible for the methods of the class
+        self.params_scene = params_scene
         self.params_env = params_env
 
         # LAT variables
@@ -234,7 +235,8 @@ class CoppeliaEnv(gym.Env, ABC):
         """
         laser_obs = self._extract_laser_from_obs_dict(self.observation)
         distance = self.observation["distance"]
-        p = self.params_env
+        p_env = self.params_env
+        p_scene = self.params_scene
 
         # --- Crash detected during the movement by the environment ---
         if self.crash_flag:
@@ -242,7 +244,7 @@ class CoppeliaEnv(gym.Env, ABC):
             self.collision_flag = True
             self.terminated=True
             self.target_zone = 0
-            return p["crash_penalty"]
+            return p_env["crash_penalty"]
 
         # --- If agent can decide to finish episode ---
         # if p["finish_episode_flag"]:
@@ -257,15 +259,15 @@ class CoppeliaEnv(gym.Env, ABC):
 
         # --- Collision check ---
         crashed = False
-        if p["laser_observations"] == 4:
+        if p_env["laser_observations"] == 4:
             if (
-                laser_obs[0] < p["max_crash_dist_critical"]
-                or laser_obs[3] < p["max_crash_dist_critical"]
-                or any(laser_obs[i] < p["max_crash_dist"] for i in (1, 2))
+                laser_obs[0] < p_env["max_crash_dist_critical"]
+                or laser_obs[3] < p_env["max_crash_dist_critical"]
+                or any(laser_obs[i] < p_env["max_crash_dist"] for i in (1, 2))
             ):
                 crashed = True
         else:
-            if any(d < p["max_crash_dist_critical"] for d in laser_obs):
+            if any(d < p_env["max_crash_dist_critical"] for d in laser_obs):
                 crashed = True
 
         self.collision_flag = crashed
@@ -273,27 +275,27 @@ class CoppeliaEnv(gym.Env, ABC):
             logging.info("Crashed")
             self.terminated = True
             self.target_zone = 0
-            return p["crash_penalty"]
+            return p_env["crash_penalty"]
         
         # --- Distance-based rewards ---
-        if distance < p["reward_dist_3"]:
+        if distance < p_scene["inner_disk_diam"]:
             self.target_zone = 3
             self.terminated = True
-            return self.compute_adjusted_reward(p["reward_3"])
-        elif distance < p["reward_dist_2"]:
+            return self.compute_adjusted_reward(p_env["reward_3"])
+        elif distance < p_scene["middle_disk_diam"]:
             self.target_zone = 2
             self.terminated = True
-            return self.compute_adjusted_reward(p["reward_2"])
-        elif distance < p["reward_dist_1"]:
+            return self.compute_adjusted_reward(p_env["reward_2"])
+        elif distance < p_scene["outer_disk_diam"]:
             self.target_zone = 1
             self.terminated = True
-            return self.compute_adjusted_reward(p["reward_1"])
-        elif distance > p["max_dist"] or self.time_elapsed > p["max_time"]:
+            return self.compute_adjusted_reward(p_env["reward_1"])
+        elif distance > p_env["max_dist"] or self.time_elapsed > p_env["max_time"]:
             self.terminated = True
             logging.info("Max dist or max time achieved")
             self.max_achieved = True
             self.target_zone = 0
-            return p["overlimit_penalty"]
+            return p_env["overlimit_penalty"]
         else:
             self.terminated = False
             self.truncated = False
@@ -335,11 +337,12 @@ class CoppeliaEnv(gym.Env, ABC):
 # -----------------------------------------------
         
 class BurgerBotEnv(CoppeliaEnv):
-    def __init__(self, params_env, comms_port=49054):
+    def __init__(self, params_scene, params_env, comms_port=49054):
         """
         Custom environment for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaEnv class.
 
         Args:
+            params_scene (dict): Dictionary of parameters for configuring the scene.
             params_env (dict): Dictionary of parameters for configuring the environment
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
 
@@ -349,7 +352,7 @@ class BurgerBotEnv(CoppeliaEnv):
                 - angle: [-pi,pi] rads.
                 - time_elapsed: [0, 100] seconds of time consumed by the agent. Optional.
         """
-        super(BurgerBotEnv, self).__init__(params_env, comms_port)
+        super(BurgerBotEnv, self).__init__(params_scene, params_env, comms_port)
 
         # Define action space
         low = np.asarray(params_env["action_bottom_limits"], dtype=np.float32)
@@ -363,11 +366,12 @@ class BurgerBotEnv(CoppeliaEnv):
 
 
 class TurtleBotEnv(CoppeliaEnv):
-    def __init__(self, params_env, comms_port=49054):
+    def __init__(self, params_scene, params_env, comms_port=49054):
         """
         Custom environment for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaEnv class.
 
         Args:
+            params_scene (dict): Dictionary of parameters for configuring the scene.
             params_env (dict): Dictionary of parameters for configuring the environment
             comms_port (int, optional): The port to be used for communication with the agent system. Defaults to 49054.
 
@@ -378,7 +382,7 @@ class TurtleBotEnv(CoppeliaEnv):
                 - laser_obs: 4 floats in the range [0,4] representing the distance in m. to the closest obstacle.
                 - time_elapsed: [0, 100] seconds of time consumed by the agent. Optional.
         """
-        super(TurtleBotEnv, self).__init__(params_env, comms_port)
+        super(TurtleBotEnv, self).__init__(params_scene, params_env, comms_port)
 
         # Define action space
         low = np.asarray(params_env["action_bottom_limits"], dtype=np.float32)

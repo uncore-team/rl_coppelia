@@ -223,12 +223,12 @@ def sysCall_init():
 
     # INITIAL POSE
     # Create a dummy to set the initial robot pose (used on odometry estimation)
-    robot_initial_pose_handle = sim.createDummy(0.1)
-    sim.setObjectAlias(robot_initial_pose_handle, robotAlias + '_initial_pose')
-    p = sim.getObjectPosition(footprintHandle,-1)
-    o = sim.getObjectQuaternion(footprintHandle,-1)
-    sim.setObjectPosition(robot_initial_pose_handle,-1,p)
-    sim.setObjectQuaternion(robot_initial_pose_handle,-1,o)
+    # robot_initial_pose_handle = sim.createDummy(0.1)
+    # sim.setObjectAlias(robot_initial_pose_handle, robotAlias + '_initial_pose')
+    # p = sim.getObjectPosition(footprintHandle,-1)
+    # o = sim.getObjectQuaternion(footprintHandle,-1)
+    # sim.setObjectPosition(robot_initial_pose_handle,-1,p)
+    # sim.setObjectQuaternion(robot_initial_pose_handle,-1,o)
     
     # ROS2 PUBLISHERS AND SUBSCRIBERS
     if simROS2_flag:

@@ -88,7 +88,7 @@ def _derive_generic_env_fields_from_spec(env_spec: Dict[str, Any]) -> Dict[str, 
         env_spec: Dict with:
             - "obs": named or size-based space
             - "act": named or size-based space
-            - "robot_data": optional, handled elsewhere (params_robot)
+            - "robot_data": optional, handled elsewhere (params_scene)
 
     Returns:
         Dict with fields suitable for params_env:
@@ -163,7 +163,7 @@ def _create_generic_params_file(
          `<base_path>/configs/params_default_file_<robot_name>.json`.
       2) Load that copy.
       3) Inject generic space fields (dim_*, *_limits) from `env_spec`.
-      4) Inject `params_robot` from `env_spec["robot_data"]`.
+      4) Inject `params_scene` from `env_spec["robot_data"]`.
       5) Inject `params_train` handles from `agent_spec`.
       6) Apply explicit `updates` if provided.
 
@@ -193,7 +193,7 @@ def _create_generic_params_file(
 
     # Ensure required sections exist
     data.setdefault("params_env", {})
-    data.setdefault("params_robot", {})
+    data.setdefault("params_scene", {})
     data.setdefault("params_train", {})
     data.setdefault("params_test", {})
 
@@ -204,7 +204,7 @@ def _create_generic_params_file(
     # --- Step 4: inject robot_data -------------------------------------------
     robot_data = env_spec.get("robot_data")
     if isinstance(robot_data, dict) and robot_data:
-        _deep_update(data["params_robot"], robot_data)
+        _deep_update(data["params_scene"], robot_data)
 
     # --- Step 5: Inject training handles (robot/laser handles)
     agent_fields = _extract_agent_fields_from_agent_spec(agent_spec)
@@ -309,10 +309,11 @@ def generate_env_code(robot_name: str, spec: Dict[str, Any]) -> str:
         from common.coppelia_envs import CoppeliaEnv
 
         class {class_name}(CoppeliaEnv):
-            def __init__(self, params_env, comms_port=49054):
+            def __init__(self, params_scene, params_env, comms_port=49054):
                 """Custom environment for '{robot_name}'.
 
                 Args:
+                    params_scene (dict): Scene parameters.
                     params_env (dict): Environment parameters.
                     comms_port (int, optional): Port for communication with the agent. Defaults to 49054.
 
@@ -322,7 +323,7 @@ def generate_env_code(robot_name: str, spec: Dict[str, Any]) -> str:
                     Action space {doc_act_names}.
 
                 """
-                super({class_name}, self).__init__(params_env, comms_port)
+                super({class_name}, self).__init__(params_scene, params_env, comms_port)
 
                 # Define observation space
                 self.observation_space = spaces.Box(
@@ -379,6 +380,7 @@ def generate_env_plugin_code(robot_name: str) -> str:
                 n_envs=1,
                 monitor_dir=manager.log_monitor,
                 env_kwargs={{
+                    "params_scene": self.params_scene,
                     "params_env": manager.params_env,
                     "comms_port": manager.free_comms_port,
                 }},
@@ -480,18 +482,19 @@ def generate_agent_code(robot_name: str, spec: dict) -> str:
         from common.coppelia_agents import CoppeliaAgent
 
         class {class_name}(CoppeliaAgent):
-            def __init__(self, sim, params_env, paths, file_id, verbose, comms_port=49054):
+            def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, comms_port=49054):
                 """Custom agent for {robot_name} (auto-generated).
 
                 Args:
                     sim: Coppelia object for handling the scene's objects.
+                    params_scene (dict): Robot parameters
                     params_env (dict): Environment parameters.
                     paths (dict): Project paths.
                     file_id (str): Experiment/session ID.
                     verbose (int): Verbosity.
                     comms_port (int): Port for RL-side communications. Defaults to 49054.
                 """
-                super({class_name}, self).__init__(sim, params_env, paths, file_id, verbose, comms_port)
+                super({class_name}, self).__init__(sim, params_scene, params_env, paths, file_id, verbose, comms_port)
 
                 # --- Scene handles which are specific for this robot ---
                 {robot_line}
@@ -515,11 +518,12 @@ def generate_agent_plugin_code(robot_name: str) -> str:
         from plugins.agents import register_agent
         from robots.{robot_name}.agent import {class_name}
 
-        def make_agent(sim, params_env, paths, file_id, verbose, comms_port=49054):
+        def make_agent(sim, params_scene, params_env, paths, file_id, verbose, comms_port=49054):
             """Return an instance of the robot-specific Agent.
 
             Args:
                 sim: Coppelia API object.
+                params_scene (dict): Robot parameters
                 params_env (dict): Environment parameters.
                 paths (dict): Project paths.
                 file_id (str): Experiment/session identifier.
@@ -529,7 +533,7 @@ def generate_agent_plugin_code(robot_name: str) -> str:
             Returns:
                 {class_name}: Configured agent instance.
             """
-            return {class_name}(sim, params_env, paths, file_id, verbose, comms_port)
+            return {class_name}(sim, params_scene, params_env, paths, file_id, verbose, comms_port)
         
         register_agent("{robot_name}", make_agent)
     ''')

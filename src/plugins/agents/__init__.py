@@ -7,7 +7,7 @@ Example usage in Coppelia:
     from plugins.agents import get_agent_factory
     factory = get_agent_factory("turtleBot")
     if factory:
-        agent = factory(sim, params_env, paths, file_id, verbose, comms_port)
+        agent = factory(sim, params_scene, params_env, paths, file_id, verbose, comms_port)
 """
 
 from typing import Callable, Dict, Any

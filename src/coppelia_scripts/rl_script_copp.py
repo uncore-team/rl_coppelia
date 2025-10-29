@@ -83,7 +83,9 @@ def sysCall_init():
     """
     Called at the beginning of the simulation to configure logging and path setup. It alseo receives variable data from the RL side.
     """
-    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_env, comms_port, paths, file_id, scene_to_load_folder, save_scene, save_traj, action_times, model_name, test_scene_mode
+    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_scene, params_env, comms_port, paths, file_id, save_scene, save_traj, action_times, model_name, test_scene_mode
+    global obstacles_csv_folder, scene_to_load_folder
+
     sim = require('sim')    # type: ignore
 
     # Variables to get from agent_copp.py script
@@ -93,9 +95,11 @@ def sysCall_init():
     model_ids = None
     comms_port = 49054
     base_path = ""
+    params_scene = {}
     params_env = {}
     verbose = 1
     scene_to_load_folder = ""
+    obstacles_csv_folder = ""
     save_scene = None
     save_traj = None
     action_times = None
@@ -119,7 +123,8 @@ def sysCall_thread():
     """
     Called once after simulation starts to create the agent and configure paths.
     """
-    global sim, agent, robot_name, params_env, comms_port, sim_initialized, model_ids, paths, file_id, scene_to_load_folder, save_scene, save_traj, agent_created, action_times, model_name, verbose, test_scene_mode
+    global sim, agent, robot_name, params_scene, params_env, comms_port, sim_initialized, model_ids, paths, file_id, save_scene, save_traj, agent_created, action_times, model_name, verbose, test_scene_mode
+    global obstacles_csv_folder, scene_to_load_folder
 
     if sim_initialized:
         logging.debug("Inside thread sim_initialized")
@@ -137,9 +142,9 @@ def sysCall_thread():
 
             # Fallback to hardcoded agents
             if robot_name == "turtleBot":
-                agent = TurtleBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
+                agent = TurtleBotAgent(sim, params_scene, params_env, paths, file_id, verbose, comms_port=comms_port)
             elif robot_name == "burgerBot":
-                agent = BurgerBotAgent(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
+                agent = BurgerBotAgent(sim, params_scene, params_env, paths, file_id, verbose, comms_port=comms_port)
                 agent.robot_baselink = agent.robot
             else:
                 raise ValueError(f"Unknown robot name '{robot_name}' and no plugin found.")
@@ -151,6 +156,7 @@ def sysCall_thread():
 
         # Configure scene and trajectory behavior
         agent.scene_to_load_folder = scene_to_load_folder
+        agent.obstacles_csv_folder = obstacles_csv_folder
         agent.save_scene = save_scene
         agent.model_ids = model_ids
         agent.action_times = action_times

@@ -255,7 +255,7 @@ def get_fixed_actimes(rl_copp_obj):
     actime_values = []
 
     for model_id in rl_copp_obj.args.model_ids:
-        json_file = os.path.join(rl_copp_obj.paths["parameters_used"], f"params_file_model_{model_id}.json")
+        json_file = os.path.join(rl_copp_obj.paths["parameters_used"], f"params_default_file_{rl_copp_obj.args.robot_name}_model_{model_id}.json")
         
         if not os.path.isfile(json_file):
             raise FileNotFoundError(f"JSON file not found: {json_file}")
@@ -293,7 +293,7 @@ def get_next_retrain_subfolder(log_dir):
     return f"retrain_{next_index}"
 
 
-def get_model_names_and_paths(rl_copp_obj):
+def get_model_names_and_paths(rl_copp_obj): # TODO Fix that models are repeated as they are multiplied per the iterations
     '''
     For test_scene functionality
     '''
@@ -305,7 +305,24 @@ def get_model_names_and_paths(rl_copp_obj):
         model_name = f"{rl_copp_obj.args.robot_name}_model_{model_id_str}"
         model_dir = os.path.join(rl_copp_obj.paths["models"], model_name)
         model_path = os.path.join(model_dir, f"{model_name}_last")
+        
+        # If last model is not avaliable, then it will use one of the 'best' saved models' 
+        if not os.path.exists(model_path + ".zip"):
+            logging.warning(f"Last version of the model not found: {model_path}.zip")
+            logging.info("Searching for other saved models for that experiment")
+            pattern = os.path.join(model_dir, f"{model_name}_best*.zip")
+            matches = glob.glob(pattern)
+            if matches:
+                model_path = os.path.splitext(matches[0])[0]
+                logging.info(f"Using best model found: {model_path}.zip")
+            else:
+                logging.error(f"No best model found matching pattern: {pattern}")
+                sys.exit()
 
+        # Use last model by default
+        else:
+            logging.warning(f"Last version of the model has been found: {model_path}.zip")
+            
         model_names[model_id_str] = model_name
         model_paths[model_id_str] = model_path
 
@@ -688,39 +705,99 @@ def _get_default_params ():
         dicts: Three dictionaries with the parameters of the environment, the training and the testing process.
     """
     params = {
+        "params_scene": {
+            "wheel_radius": 0.033,
+            "distance_between_wheels": 0.16,
+            "n_obstacles": 10,
+            "diam_obstacles": 0.12,
+            "height_obstacles": 0.25,
+            "flag_grid": true,  # type: ignore
+            "grid_visible": false,  # type: ignore
+            "quads_x": 2,
+            "quads_y": 2,
+            "grid_rows_per_quad": 5,
+            "grid_cols_per_quad": 5,
+            "fixed_obs": true,  # type: ignore
+            "outer_disk_diam": 0.1,
+            "middle_disk_diam": 0.05,
+            "inner_disk_diam": 0.006            
+        },
         "params_env": {
-            "var_action_time_flag": False,
-            "fixed_actime": 1.0,
-            "bottom_actime_limit": 0.2,
-            "upper_actime_limit": 3.0,
-            "bottom_lspeed_limit": 0.05,
-            "upper_lspeed_limit": 0.5,
-            "bottom_aspeed_limit": -0.5,
-            "upper_aspeed_limit": 0.5,
-            "finish_episode_flag": False,
+            "fixed_actime": 0.75,
             "dist_thresh_finish_flag": 0.5,
-            "obs_time": False,
-            "reward_dist_1": 0.25,
-            "reward_1": 25,
-            "reward_dist_2": 0.05,
-            "reward_2": 50,
-            "reward_dist_3": 0.015,
-            "reward_3": 100,
+            "reward_1": 0.25,
+            "reward_2": 0.5,
+            "reward_3": 1,
             "max_count": 400,
-            "max_time": 80,
-            "max_dist": 2.5,
-            "finish_flag_penalty": -10,
-            "overlimit_penalty": -10,
-            "crash_penalty": -20,
-            "max_crash_dist": 0.1
-
+            "max_time": 40,
+            "max_dist": 2,
+            "finish_flag_penalty": -0.1,
+            "overlimit_penalty": -0.5,
+            "crash_penalty": -1,
+            "max_crash_dist": 0.18,
+            "max_crash_dist_critical": 0.18,
+            "laser_observations": 8,
+            "dim_action_space": 2,
+            "action_names": [
+                "linear",
+                "angular"
+            ],
+            "action_bottom_limits": [ 
+                -0.22,
+                -2.84
+            ],
+            "action_upper_limits": [
+                0.22,
+                2.84
+            ],
+            "dim_observation_space": 10,
+            "observation_names": [
+                "laser_obs0",
+                "laser_obs1",
+                "laser_obs2",
+                "laser_obs3",
+                "laser_obs4",
+                "laser_obs5",
+                "laser_obs6",
+                "laser_obs7",
+                "distance",
+                "angle"
+            ],
+            "observation_bottom_limits": [
+                0.0,
+                -3.141592653589793,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            "observation_upper_limits": [
+                5.0,
+                3.141592653589793,
+                8.0,
+                8.0,
+                8.0,
+                8.0,
+                8.0,
+                8.0,
+                8.0,
+                8.0
+            ]
         },
         "params_train": {
             "sb3_algorithm": "SAC",
             "policy": "MlpPolicy",
-            "total_timesteps": 300000,
+            "total_timesteps": 1500000,
             "callback_frequency": 10000,
-            "n_training_steps": 2048
+            "n_training_steps": 2048,
+            "scene_name": "burgerBot_scene.ttt",
+            "robot_handle": "/Burger",
+            "robot_base_handle": "/Burger/base_link_visual",
+            "laser_handle": "/Burger/Laser"
         },
         "params_test": {
             "sb3_algorithm": "",
@@ -738,7 +815,7 @@ def load_params(file_path):
         file_path (str): Path to the JSON configuration file.
 
     Returns:
-        params_robot (dict): Parameters for configuring the robot.
+        params_scene (dict): Parameters for configuring the robot.
         params_env (dict): Parameters for configuring the environment.
         params_train (dict): Parameters for configuring the training process.
         params_test (dict): Parameters for configuring the testing process.
@@ -747,12 +824,12 @@ def load_params(file_path):
         with open(file_path, 'r') as f:
             params_file = json.load(f)
             if params_file :
-                params_robot = params_file["params_robot"]
+                params_scene = params_file["params_scene"]
                 params_env = params_file["params_env"]
                 params_train = params_file["params_train"]
                 params_test = params_file["params_test"]
                 logging.info(f"Configuration loaded successfully from {file_path}.")
-                return params_robot, params_env, params_train, params_test
+                return params_scene, params_env, params_train, params_test
             else:
                 logging.error("Failed to load configuration.")
                 raise
@@ -1267,6 +1344,50 @@ def replace_std_variables(script_content, replacements):
     return script_content
 
 
+# Comments in English. Docstring uses Google style.
+
+def _get_params_scene(rl_copp_obj) -> dict:
+    """Extract `params_scene` from whatever container you use.
+
+    Returns:
+        dict: Scene parameters or empty dict if not present.
+    """
+    # Try known locations in your project structure
+    if hasattr(rl_copp_obj, "params_scene") and isinstance(rl_copp_obj.params_scene, dict):
+        return rl_copp_obj.params_scene
+    if hasattr(rl_copp_obj, "params") and isinstance(rl_copp_obj.params, dict):
+        if isinstance(rl_copp_obj.params.get("params_scene", {}), dict):
+            return rl_copp_obj.params["params_scene"]
+    # Fallback: nothing
+    return {}
+
+
+def _apply_scene_params(rl_copp_obj) -> None:
+    """Push `params_scene` into the customization script and optionally regenerate obstacles.
+
+    This calls:
+      - setObsParams@/Obs_Generator  (customization script)
+      - generate_obs@/Obs_Generator  (child/simulation script)  [optional]
+
+    Args:
+        rl_copp_obj: Manager with an active ZMQ `current_sim`.
+    """
+
+    if not rl_copp_obj.params_scene:
+        logging.warning("No params_scene provided; skipping setObsParams.")
+        return
+
+    try:
+        obstacles_custom_script=rl_copp_obj.current_sim.getObject('/Obs_Generator/script')  # TODO get Obs_Generator name from agent
+        handle_obstacles_custom_script=rl_copp_obj.current_sim.getScript(rl_copp_obj.current_sim.scripttype_customization,obstacles_custom_script,'setObsParams')
+
+        rl_copp_obj.current_sim.callScriptFunction('setObsParams', handle_obstacles_custom_script, rl_copp_obj.params_scene)
+        logging.info("Applied params_scene to Obs_Generator via setObsParams.")
+    except Exception as e:
+        logging.warning(f"Could not call setObsParams: {e}")
+        return
+
+
 def update_and_copy_script(rl_copp_obj):
     """
     Updates and copies both agent and robot scripts of the CoppeliaSim scene 
@@ -1334,6 +1455,11 @@ def update_and_copy_script(rl_copp_obj):
     else:
         scene_to_load_folder = rl_copp_obj.args.scene_to_load_folder
 
+    if not hasattr(rl_copp_obj.args, "obstacles_csv_folder"):  # Train with fixed osbtacles case
+        obstacles_csv_folder = None
+    else:
+        obstacles_csv_folder = rl_copp_obj.args.obstacles_csv_folder
+
     if not hasattr(rl_copp_obj.args, "save_scene"):
         save_scene = None
     else:
@@ -1384,6 +1510,7 @@ def update_and_copy_script(rl_copp_obj):
         "comms_port": rl_copp_obj.free_comms_port,
         "verbose": rl_copp_obj.args.verbose,
         "scene_to_load_folder": scene_to_load_folder,
+        "obstacles_csv_folder": obstacles_csv_folder,
         "save_scene": save_scene,
         "save_traj": save_traj,
         "testvar": rl_copp_obj.free_comms_port+1,
@@ -1393,8 +1520,8 @@ def update_and_copy_script(rl_copp_obj):
 
     replacements_robot = {
         "verbose": rl_copp_obj.args.verbose,
-        "distance_between_wheels": rl_copp_obj.params_robot["distance_between_wheels"],
-        "wheel_radius": rl_copp_obj.params_robot["wheel_radius"],
+        "distance_between_wheels": rl_copp_obj.params_scene["distance_between_wheels"],
+        "wheel_radius": rl_copp_obj.params_scene["wheel_radius"],
         "robot_alias": rl_copp_obj.params_train["robot_handle"],
         "robot_base_alias": rl_copp_obj.params_train["robot_base_handle"],
         "laser_alias": rl_copp_obj.params_train["laser_handle"]
@@ -1421,11 +1548,36 @@ def update_and_copy_script(rl_copp_obj):
     # Replace the script content with the formatted dictionary.
     agent_script_content = re.sub(r'params_env\s*=\s*\{\}', f'params_env = {params_str}', agent_script_content)
 
+    # Format the 'params_scene' dictionary for the agent script     # TODO Optimize this code (it's replicated from the one above)
+    params_str = "{"
+    for key, value in rl_copp_obj.params_scene.items():
+        if isinstance(value, bool):
+            # Convert booleans to the right format (True/False)
+            params_str += f'\n    "{key}": {"True" if value else "False"},'
+        elif isinstance(value, str):
+            # Add quotation marks for strings
+            params_str += f'\n    "{key}": "{value}",'
+        else:
+            # Numbers and other types
+            params_str += f'\n    "{key}": {value},'
+    params_str += "\n}"
+
+    # Replace the script content with the formatted dictionary.
+    agent_script_content = re.sub(r'params_scene\s*=\s*\{\}', f'params_scene = {params_str}', agent_script_content)
+
     # Send updated scripts content to the scripts in CoppeliaSim
     rl_copp_obj.current_sim.setScriptText(agent_script_handle, agent_script_content)
     rl_copp_obj.current_sim.setScriptText(robot_script_handle, robot_script_content)
 
     logging.info("Scripts updated successfully in CoppeliaSim.")
+
+
+    try:
+        _apply_scene_params(rl_copp_obj)
+    except Exception as e:
+        logging.warning(f"Failed to apply scene params: {e}")
+
+
     return True
 
 
@@ -1454,9 +1606,9 @@ def create_discs_under_target(rl_copp_obj):
 
     # Disc properties: name, color (R, G, B), relative Z position
     disc_properties = [
-        ("Target_disc_1", [0, 0, 1], 0.002, rl_copp_obj.params_env["reward_dist_1"]),  # Blue
-        ("Target_disc_2", [1, 0, 0], 0.004, rl_copp_obj.params_env["reward_dist_2"]),  # Red
-        ("Target_disc_3", [1, 1, 0], 0.006, rl_copp_obj.params_env["reward_dist_3"])   # Yellow
+        ("Target_disc_1", [0, 0, 1], 0.002, rl_copp_obj.params_scene["outer_disk_diam"]),  # Blue
+        ("Target_disc_2", [1, 0, 0], 0.004, rl_copp_obj.params_scene["middle_disk_diam"]),  # Red
+        ("Target_disc_3", [1, 1, 0], 0.006, rl_copp_obj.params_scene["inner_disk_diam"])   # Yellow
     ]
 
     disc_handles = []
