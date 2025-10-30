@@ -2078,7 +2078,7 @@ def main(args):
 
     if "spider" in args.plot_types:
         plot_type_correct = True
-        if len(args.model_ids) <= 1:    # A spider graph doesn't make sense if there are less than 2 models. In fact it doesn't make sense to compare less than 3 models (#TODO)
+        if len(args.model_ids) <= 2:    # A spider graph doesn't make sense if there are less than 2 models. In fact it doesn't make sense to compare less than 3 models
             logging.error(f"Please, introduce more than one model ID for creating a spider graph. Models specified: {args.model_ids}")
         
         else:

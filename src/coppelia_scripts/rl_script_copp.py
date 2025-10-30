@@ -137,7 +137,7 @@ def sysCall_thread():
                 f"[plugins] Agent created via plugin for '{robot_name}'. "
                 f"Comms port: {comms_port}"
             )
-        else:
+        else:   
             logging.info(f"[plugins] No agent plugin found for '{robot_name}'. ")
 
             # Fallback to hardcoded agents

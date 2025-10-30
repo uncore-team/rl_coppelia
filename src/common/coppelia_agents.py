@@ -312,34 +312,6 @@ class CoppeliaAgent:
         return distance, angle, lasers_obs
 
 
-    # def get_observation_space(self):
-    #     """
-    #     Returns the observation space of the agent.
-    #     The observation space includes distance and angle to the target, laser observations (if available), and optionally the action time.
-    #     """
-    #     observation_space = {}
-
-    #     # Get an observation from the agent
-    #     distance, angle, laser_obs = self.get_observation()
-    #     # Add all the laser observations "laser_obs{i}"
-    #     if laser_obs is not None:
-    #         for i, val in enumerate(laser_obs):
-    #             observation_space[f"laser_obs{i}"] = val
-
-    #     observation_space = {
-    #         "distance": distance,
-    #         "angle": angle
-    #     }
-
-        
-
-    #     # Add action time to the observation if required    # TODO This belongs to the old version, we need to automatize observation_space creation
-    #     # if self.params_env["obs_time"]:
-    #     #     observation_space["action_time"] = self._rltimestep
-
-    #     return observation_space
-
-
     def get_observation_space(self):
         """Build the observation dict using names from params_env["observation_names"].
 
@@ -361,7 +333,7 @@ class CoppeliaAgent:
 
         # Build a value pool from available signals
         # (distance, angle are always present; lasers may be None)
-        value_pool = {
+        value_pool = {  #TODO What happens if there is no distance or angle in observation?
             "distance": float(distance),
             "angle": float(angle),
         }
@@ -388,7 +360,7 @@ class CoppeliaAgent:
                     obs[name] = value_pool[name]
                 else:
                     # Unknown name in config: keep numeric output stable and warn once
-                    logging.warning(f"[obs] Unknown observation name in config: '{name}'. Filling 0.0")
+                    logging.warning(f"Unknown observation name in config: '{name}'. Filling 0.0")
                     obs[name] = 0.0
             logging.info(f"Observation stored as: {obs}")
             return obs
@@ -406,13 +378,12 @@ class CoppeliaAgent:
             None
         '''
         logging.debug(f"Generating obstacles from csv file")
-        height_obstacles = 0.4
-        # size_obstacles = 0.25   # TODO This is not generic at all, fix it
-        size_obstacles = 0.12
+        height_obstacles = self.params_scene["height_obstacles"]
+        diam_obstacles = self.params_scene["diam_obstacles"]
 
         x, y = row["x"], row["y"]
         logging.debug(f"Placing obstacle at x: {x} and y: {y}")
-        obs = self.sim.createPrimitiveShape(5, [size_obstacles, size_obstacles, height_obstacles])
+        obs = self.sim.createPrimitiveShape(5, [diam_obstacles, diam_obstacles, height_obstacles])
         self.sim.setObjectPosition(obs, self.sim.handle_world, [x, y, height_obstacles / 2])
         self.sim.setObjectAlias(obs, f"Obstacle_csv_{self.id_obstacle}")
         self.sim.setObjectParent(obs, self.generator, True)
@@ -574,13 +545,11 @@ class CoppeliaAgent:
                     coords = []
                     for _, row in self.df.iterrows():
                         if row['type'] == 'obstacle':
-                            self.id_obstacle += 1   # TODO Check if this is neccessary here
                             coords.append((float(row['x']), float(row['y'])))
                     
                     # self.generate_obs_from_csv(row)
                     logging.info(f"Obstacles coords: {coords}")
                     self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script, coords)
-                    # TODO CALL OBSTACLES SCRIPT DIRECTLY
 
                 while True:
                     posX, posY = self.get_random_object_pos('robot')

@@ -339,7 +339,7 @@ def generate_env_code(robot_name: str, spec: Dict[str, Any]) -> str:
                     dtype=np.float32
                 )
 
-            # TODO: Implement other environment-specific methods if needed,
+            # NOTE: Implement other environment-specific methods if needed,
             # such as _get_observation(), _compute_reward(), step(), reset(), etc.
     ''')
 

@@ -57,15 +57,13 @@ def initial_warnings(self):
 
     Returns: None
     """
-
-    # TODO Remove, unnecessary
-    # if hasattr(self.args, "robot_name") and not self.args.robot_name:
-    #     logging.warning("WARNING: '--robot_name' was not specified, so default name 'burgerBot' will be used")
     
     if hasattr(self.args, "params_file") and not self.args.params_file:
         if self.args.command == 'train':
             self.args.params_file = os.path.join(self.base_path, "configs", f"params_default_file_{self.args.robot_name}.json")
-        logging.warning(f"WARNING: '--params_file' was not specified, so the default file of the selected robot will be used: {self.args.params_file}.")
+            logging.warning(f"WARNING: '--params_file' was not specified, so the default file of the selected robot will be used: {self.args.params_file}.")
+        elif self.args.command == 'test' or self.args.command == 'test_scene':
+            logging.warning("WARNING: '--params_file' was not specified, so the json file used for training this model will be used.")
 
     if hasattr(self.args, "model_name") and not self.args.model_name:  
         logging.warning("WARNING: '--model_name' is required for testing functionality. The testing experiment will use the last saved model.")
@@ -841,17 +839,31 @@ def load_params(file_path):
     
 def get_output_csv(model_name, metrics_path, train_flag=True):
     """
-    Get the path to to csv file that will be generated for storing the training/inference metrics. The name of the file
-    will be unique, as it makes use of the timestamp. In case of inference, it will generate also the path of the csv 
-    to store the speeds of the robot during the testing process.
+    Generate unique file names and paths for CSV files used to store model metrics.
+
+    This function creates timestamped CSV file names based on the given model name.
+    - In **training mode**, it generates one CSV file for storing training metrics.
+    - In **inference (testing) mode**, it generates two CSV files: one for test metrics
+      and another for additional data such as robot speeds.
 
     Args:
-        model_name (str): Name of the model file, as it will be used for identifying the csv file.
-        metrics_path (str): Path to store the csv files with the obtained metrics.
-        train_flag (bool): True if the script has been executed in training mode, False in case of running a test. True by default.
+        model_name (str): Name of the model, used as a prefix in the CSV file names.
+        metrics_path (str): Directory where the CSV files will be saved.
+        train_flag (bool, optional): Indicates whether the script is running in 
+            training mode (True) or inference/testing mode (False). Defaults to True.
 
-    Return: #TODO complete the return
-        output_csv_path (str): Path to the new csv file.
+    Returns:
+        tuple:
+            If ``train_flag`` is True:
+                - output_csv_name (str): Name of the training CSV file.
+                - output_csv_path (str): Full path to the training CSV file.
+            
+            If ``train_flag`` is False:
+                - output_csv_name_1 (str): Name of the test metrics CSV file.
+                - output_csv_name_2 (str): Name of the secondary (e.g., robot speeds) CSV file.
+                - output_csv_path_1 (str): Full path to the test metrics CSV file.
+                - output_csv_path_2 (str): Full path to the secondary CSV file.
+
     """
     # Get current timestamp so the metrics.csv file will have an unique name
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -1749,9 +1761,6 @@ def start_coppelia_and_simulation(rl_copp_obj, process_name:str):
         logging.info(f"Loading scene: {rl_copp_obj.args.scene_path}")
         rl_copp_obj.current_sim.loadScene(rl_copp_obj.args.scene_path)
         logging.info("Scene loaded successfully.")
-
-    # Create target's discs # TODO: no needed anymore with the customization scripts, but then it should be removed from the params config json files
-    # create_discs_under_target(rl_copp_obj)
 
     # Update code inside Coppelia's scene
     update_and_copy_script(rl_copp_obj)
@@ -4143,87 +4152,6 @@ def map_files_by_timestamp(files_1, files_2=None):
     else:
         path_2 = None
     return path_1, path_2
-
-
-def create_robot_plugin_file(base_src_path: str, robot_name: str) -> str:
-    """Create (idempotently) a robot plugin module for dynamic registration.
-
-    Args:
-        base_src_path: Path to your 'src' root (where 'rl_coppelia' lives).
-        robot_name: New robot name (e.g., "myNewBot").
-
-    Returns:
-        The absolute path to the plugin file created or already existing.
-
-    Raises:
-        OSError: If directories cannot be created or file cannot be written.
-    """
-    import os
-
-    # Ensure package path: src/rl_coppelia/robot_plugins/
-    pkg_dir = os.path.join(base_src_path, "rl_coppelia", "robot_plugins")
-    os.makedirs(pkg_dir, exist_ok=True)
-
-    init_path = os.path.join(pkg_dir, "__init__.py")
-    if not os.path.exists(init_path):
-        # Create empty __init__.py to mark package (safe if repeated)
-        with open(init_path, "w", encoding="utf-8") as f:
-            f.write("# Plugin package for robot environments\n")
-
-    # Target plugin file
-    module_path = os.path.join(pkg_dir, f"{robot_name}.py")
-
-    # Template (same text as shown above)
-    template = f'''"""Plugin to register '{robot_name}' robot environment.
-
-This module is auto-generated by the GUI. It registers a factory that builds
-a VecEnv for the robot using the manager's parameters.
-"""
-
-from rl_coppelia.rl_coppelia_manager import RLCoppeliaManager  # adjust if your package root differs
-from stable_baselines3.common.env_util import make_vec_env
-
-# TODO: Replace `BurgerBotEnv` with the actual Env class for this robot,
-# or keep it if you use a generic Env that reads robot-specific params.
-from common.coppelia_envs import BurgerBotEnv  # or: from robots.{robot_name}.envs import NewRobotEnv
-
-
-def _factory(manager: RLCoppeliaManager):
-    """Create a VecEnv instance for '{robot_name}'.
-
-    Args:
-        manager: The current RLCoppeliaManager instance. You can access:
-            - manager.params_env
-            - manager.free_comms_port
-            - manager.log_monitor
-            - manager.paths
-            - manager.args
-
-    Returns:
-        A vectorized environment (VecEnv) suitable for training/testing.
-    """
-    env_cls = BurgerBotEnv  # TODO: change to your specific Env class if needed
-    return make_vec_env(
-        env_cls,
-        n_envs=1,
-        monitor_dir=manager.log_monitor,
-        env_kwargs={{
-            "params_env": manager.params_env,
-            "comms_port": manager.free_comms_port,
-        }},
-    )
-
-
-# Register on module import
-RLCoppeliaManager.register_robot("{robot_name}", _factory)
-'''
-
-    # Create only if not exists (idempotent)
-    if not os.path.exists(module_path):
-        with open(module_path, "w", encoding="utf-8") as f:
-            f.write(template)
-
-    return module_path
 
 
 def unwrap_env(vec_env, idx=0):
