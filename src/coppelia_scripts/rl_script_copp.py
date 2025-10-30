@@ -132,7 +132,7 @@ def sysCall_thread():
         # Create agent
         factory = get_agent_factory(robot_name)
         if factory is not None:
-            agent = factory(sim, params_env, paths, file_id, verbose, comms_port=comms_port)
+            agent = factory(sim, params_scene, params_env, paths, file_id, verbose, comms_port=comms_port)
             logging.info(
                 f"[plugins] Agent created via plugin for '{robot_name}'. "
                 f"Comms port: {comms_port}"
