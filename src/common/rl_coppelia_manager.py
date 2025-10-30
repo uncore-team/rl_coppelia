@@ -155,7 +155,7 @@ class RLCoppeliaManager():
         """
         Prompt the user to write notes about the current training experiment and save them into a text file.
 
-        If the 'save_notes' argument is passed, the user is prompted via terminal to input custom text describing
+        If the 'dis_save_notes' argument is not passed, the user is prompted via terminal to input custom text describing
         the experiment. The notes are then stored in a file named 'experiment_notes.txt' inside the corresponding
         robot folder (robots/<robot_name>). Each new entry is separated by an empty line and includes the experiment ID.
 
@@ -167,9 +167,9 @@ class RLCoppeliaManager():
             # Testing PPO with dynamic action times
         """
         # Check notes_flag before doing anything else
-        notes_flag = getattr(self.args, "save_notes", None)
-        if not notes_flag:
-            return  # Nothing to do if flag is missing
+        dis_notes_flag = getattr(self.args, "dis_save_notes", None)
+        if dis_notes_flag:
+            return  # Nothing to do if flag is set to True
         
         # Get timestamp
         if hasattr(self.args, "timestamp") and self.args.timestamp is not None:
@@ -192,6 +192,8 @@ class RLCoppeliaManager():
 
         # Prepare text to append
         entry = f"\n\nExperiment: {self.file_id} - Process: {process_name} - Timestamp: {timestamp}\n{user_notes}\n"
+
+        # TODO Fix filed_id, as for testing functionlity is returning not just the ID but also the timestamp, which is an undesired behavior.
 
         # Append notes to file
         with open(notes_path, "a", encoding="utf-8") as f:

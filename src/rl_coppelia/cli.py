@@ -24,7 +24,7 @@ def main(argv=None):
     train_parser.add_argument("--no_gui", action="store_true", help="Disables Coppelia GUI, it will just show the terminal", required=False)
     train_parser.add_argument("--params_file", type=str, help="Path to the configuration file.",required=False)
     train_parser.add_argument("--obstacles_csv_folder", type=str, help="Path to scene configuration folder in case that we want to train with fixed obstacles. Please just indicate the folder not the whole path (e.g. /Scene014)",required=False)
-    train_parser.add_argument("--save_notes", action="store_true", help="Flag to save some notes for the experiment.", default = False, required=False)
+    train_parser.add_argument("--dis_save_notes", action="store_true", help="Flag to save some notes for the experiment.", default = False, required=False)
     train_parser.add_argument("--timestamp", type=str, help="Timestamp provided externally (e.g., from GUI).", required=False)
     train_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=0, required=False)
@@ -40,7 +40,7 @@ def main(argv=None):
     test_parser.add_argument("--no_gui", action="store_true", help="Disables Coppelia GUI, it will just show the terminal", required=False)
     test_parser.add_argument("--params_file", type=str, help="Path to the configuration file.",required=False)
     test_parser.add_argument("--iterations", type=int, help="Number of iterations for the test. If set, it will override the parameter from the parameters' json file.",required=False)
-    test_parser.add_argument("--save_notes", action="store_true", help="Flag to save some notes for the experiment.", default = False, required=False)
+    test_parser.add_argument("--dis_save_notes", action="store_true", help="Flag to save some notes for the experiment.", default = False, required=False)
     test_parser.add_argument("--timestamp", type=str, help="Timestamp provided externally (e.g., from GUI).", required=False)
     test_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=0, required=False)
