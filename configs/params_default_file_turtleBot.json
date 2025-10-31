@@ -12,9 +12,13 @@
         "grid_rows_per_quad": 5,
         "grid_cols_per_quad": 5,
         "fixed_obs": false,
-        "outer_disk_diam": 0.25,
-        "middle_disk_diam": 0.125,
-        "inner_disk_diam": 0.015
+        "outer_disk_rad": 0.25,
+        "middle_disk_rad": 0.125,
+        "inner_disk_rad": 0.015,
+        "scene_x_dim": 5,
+        "scene_y_dim": 5,
+        "scene_walls_height": 0.25,
+        "scene_walls_thickness": 0.1
     },
     "params_env": {
         "fixed_actime": 0.75,

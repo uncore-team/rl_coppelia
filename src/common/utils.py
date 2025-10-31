@@ -1394,7 +1394,7 @@ def _apply_scene_params(rl_copp_obj, script_path, fcn_name) -> None:
 
     if not rl_copp_obj.params_scene:
         logging.warning("[Sim Scene] No params_scene provided; skipping.")
-        return
+        return False
 
     try:
         script=rl_copp_obj.current_sim.getObject(script_path) 
@@ -1402,9 +1402,10 @@ def _apply_scene_params(rl_copp_obj, script_path, fcn_name) -> None:
 
         rl_copp_obj.current_sim.callScriptFunction(fcn_name, handle_script, rl_copp_obj.params_scene)
         logging.info(f"[Sim Scene] Applied params_scene to {script_path} via {fcn_name} function.")
+        return True
     except Exception as e:
         logging.warning(f"[Sim Scene] Could not call {fcn_name} in {script_path}: {e}")
-        return
+        return False
 
 
 def _build_replacements(
@@ -1651,10 +1652,15 @@ def update_and_copy_script(rl_copp_obj):
     logging.info("[Sim Scene] Scripts updated successfully in CoppeliaSim.")
 
     # Override customization scripts 
-    _apply_scene_params(rl_copp_obj, "/Obs_Generator/script", "setObsParams")
-    _apply_scene_params(rl_copp_obj, "/Target/script", "setTargetParams")
-    _apply_scene_params(rl_copp_obj, "/ExternalWall/script", "setExternalWallParams")
-    logging.info("[Sim Scene] Customization scripts of the CoppeliaSim scene have been overrided with the specified params in json file.")
+    apply_params_errors = []
+    apply_params_errors.append(_apply_scene_params(rl_copp_obj, "/Obs_Generator/script", "setObsParams"))
+    apply_params_errors.append(_apply_scene_params(rl_copp_obj, "/Target/script", "setTargetParams"))
+    apply_params_errors.append(_apply_scene_params(rl_copp_obj, "/ExternalWall/script", "setExternalWallParams"))
+    
+    if False in apply_params_errors:
+        logging.error("[Sim Scene] Some customization scripts could not be updated with the specified params.")
+    else:
+        logging.info("[Sim Scene] Customization scripts of the CoppeliaSim scene have been overrided with the specified params in json file.")
 
     return True
 
