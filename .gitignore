@@ -24,3 +24,5 @@ src/plugins/*
 
 src/test_program.py
 src/common/clean_test_records.py
+requirements.txt
+requirements5.txt
