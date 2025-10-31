@@ -411,14 +411,14 @@ class CoppeliaAgent:
         # Get wall info from its customization script
         raw_container = self.sim.readCustomBufferData(self.container, '__config__')
         cfg_wall   = self.sim.unpackTable(raw_container) if raw_container else {}
-        containerSideX    = cfg_wall.get('xSize', None)
-        containerSideY    = cfg_wall.get('ySize', None)
+        containerSideX    = cfg_wall.get('scene_x_dim', None)
+        containerSideY    = cfg_wall.get('scene_y_dim', None)
 
         if object_type == "target":
             # Get target outer radius from its customization script
             raw_target = self.sim.readCustomBufferData(self.target, '__config__')
             cfg_target = self.sim.unpackTable(raw_target) if raw_target else {}
-            objectRadius  = cfg_target.get('outerRadius', None)
+            objectRadius  = cfg_target.get('outer_disk_rad', None)
         elif object_type == "robot":
             objectRadius = self.params_scene["distance_between_wheels"]/2 + self.params_env["max_crash_dist_critical"] + 0.05 # wheels width aprox
 
@@ -453,7 +453,7 @@ class CoppeliaAgent:
                 threshold = self.params_scene["distance_between_wheels"]/2 + self.params_env["max_crash_dist_critical"] + 0.01  # Half width of the wheel
             elif object_type == "target":
                 print("target case")
-                threshold = self.params_scene["outer_disk_diam"] 
+                threshold = self.params_scene["outer_disk_rad"] 
             
             # Always add the obstacle radius and some tolerance (2cm)
             threshold = threshold + self.params_scene["diam_obstacles"]/2 + 0.02

@@ -278,15 +278,15 @@ class CoppeliaEnv(gym.Env, ABC):
             return p_env["crash_penalty"]
         
         # --- Distance-based rewards ---
-        if distance < p_scene["inner_disk_diam"]:
+        if distance < p_scene["inner_disk_rad"]:
             self.target_zone = 3
             self.terminated = True
             return self.compute_adjusted_reward(p_env["reward_3"])
-        elif distance < p_scene["middle_disk_diam"]:
+        elif distance < p_scene["middle_disk_rad"]:
             self.target_zone = 2
             self.terminated = True
             return self.compute_adjusted_reward(p_env["reward_2"])
-        elif distance < p_scene["outer_disk_diam"]:
+        elif distance < p_scene["outer_disk_rad"]:
             self.target_zone = 1
             self.terminated = True
             return self.compute_adjusted_reward(p_env["reward_1"])

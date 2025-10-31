@@ -1,5 +1,4 @@
 absl-py==2.3.0
-action-tutorials-py==0.9.4
 ament-copyright==0.9.8
 ament-cppcheck==0.9.8
 ament-cpplint==0.9.8

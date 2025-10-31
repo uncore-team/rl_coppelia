@@ -54,7 +54,6 @@ def main(argv=None):
     test_scene_parser.add_argument("--dis_parallel_mode", action="store_true", help="Disables the parallel training or testing.", required=False)
     test_scene_parser.add_argument("--no_gui", action="store_true", help="Disables Coppelia GUI, it will just show the terminal", required=False)
     test_scene_parser.add_argument("--params_file", type=str, help="Path to the configuration file.",required=False)
-    test_scene_parser.add_argument("--test_scene_mode", type=str, help="Simulation mode for testing a scene. Choose between alternate_targets and alternate_action_times (default)", required=False)
     test_scene_parser.add_argument("--timestamp", type=str, help="Timestamp provided externally (e.g., from GUI).", required=False)
     test_scene_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=0, required=False)

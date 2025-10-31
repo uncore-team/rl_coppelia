@@ -83,7 +83,7 @@ def sysCall_init():
     """
     Called at the beginning of the simulation to configure logging and path setup. It alseo receives variable data from the RL side.
     """
-    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_scene, params_env, comms_port, paths, file_id, save_scene, save_traj, action_times, model_name, test_scene_mode
+    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_scene, params_env, comms_port, paths, file_id, save_scene, save_traj, action_times, model_name
     global obstacles_csv_folder, scene_to_load_folder
 
     sim = require('sim')    # type: ignore
@@ -103,7 +103,6 @@ def sysCall_init():
     save_scene = None
     save_traj = None
     action_times = None
-    test_scene_mode = ""
 
     # Send verbose value to RObot_Script
     sim.setInt32Signal('verboseValue', verbose)
@@ -123,7 +122,7 @@ def sysCall_thread():
     """
     Called once after simulation starts to create the agent and configure paths.
     """
-    global sim, agent, robot_name, params_scene, params_env, comms_port, sim_initialized, model_ids, paths, file_id, save_scene, save_traj, agent_created, action_times, model_name, verbose, test_scene_mode
+    global sim, agent, robot_name, params_scene, params_env, comms_port, sim_initialized, model_ids, paths, file_id, save_scene, save_traj, agent_created, action_times, model_name, verbose
     global obstacles_csv_folder, scene_to_load_folder
 
     if sim_initialized:
@@ -160,7 +159,6 @@ def sysCall_thread():
         agent.save_scene = save_scene
         agent.model_ids = model_ids
         agent.action_times = action_times
-        agent.test_scene_mode = test_scene_mode
 
         # Set the folder where the trajectories will be saved (inside testing_metrics folder)
         if model_name is None:

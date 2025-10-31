@@ -4,7 +4,7 @@
         "distance_between_wheels": 0.16,
         "n_obstacles": 10,
         "diam_obstacles": 0.12,
-        "height_obstacles": 0.25,
+        "height_obstacles": 0.65,
         "flag_grid": true,
         "grid_visible": false,
         "quads_x": 2,
@@ -12,9 +12,13 @@
         "grid_rows_per_quad": 5,
         "grid_cols_per_quad": 5,
         "fixed_obs": false,
-        "outer_disk_diam": 0.1,
-        "middle_disk_diam": 0.05,
-        "inner_disk_diam": 0.006
+        "outer_disk_rad": 0.3,
+        "middle_disk_rad": 0.05,
+        "inner_disk_rad": 0.006,
+        "scene_x_dim": 4.6,
+        "scene_y_dim": 3.7,
+        "scene_walls_height": 1,
+        "scene_walls_thickness": 0.15
     },
     "params_env": {
         "fixed_actime": 0.75,
