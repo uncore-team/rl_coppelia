@@ -2,9 +2,9 @@
     "params_scene": {
         "wheel_radius": 0.033,
         "distance_between_wheels": 0.16,
-        "n_obstacles": 10,
+        "n_obstacles": 8,
         "diam_obstacles": 0.12,
-        "height_obstacles": 0.65,
+        "height_obstacles": 0.25,
         "flag_grid": true,
         "grid_visible": false,
         "quads_x": 2,

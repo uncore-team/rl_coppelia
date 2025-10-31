@@ -167,7 +167,7 @@ class RLCoppeliaManager():
             # Testing PPO with dynamic action times
         """
         # Check notes_flag before doing anything else
-        dis_notes_flag = getattr(self.args, "dis_save_notes", None)
+        dis_notes_flag = getattr(self.args, "dis_save_notes", True)
         if dis_notes_flag:
             return  # Nothing to do if flag is set to True
         
