@@ -253,9 +253,8 @@ class CoppeliaAgent:
     def start_communication(self):
         # rl_side_ip = BaseCommPoint.get_ip()
         rl_side_ip = "150.214.109.164"
-
-        # rl_port = self.comms_port
-        rl_port = 49062
+        rl_port = self.comms_port
+        
         while True:
             try:
                 logging.info(f"Trying to establish communication using the port {rl_port}")

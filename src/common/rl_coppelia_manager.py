@@ -251,7 +251,10 @@ class RLCoppeliaManager():
             # --- Runtime state ---
             self.current_sim = None
             # The next free port to be used for the communication between the agent (CoppeliaSim) and the RL side (Python)
-            self.free_comms_port = self._select_comms_port(args, default_start=49054)
+            if args.comms_port is None:
+                self.free_comms_port = self._select_comms_port(args, default_start=49054)
+            else: 
+                self.free_comms_port = args.comms_port
             # Temporary folder for storing a tensorboard monitor file during training. This is needed for saving a model 
             # based ion the mean reward obtained during training.
             self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
