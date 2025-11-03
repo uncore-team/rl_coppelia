@@ -251,11 +251,13 @@ class CoppeliaAgent:
 
     
     def start_communication(self):
+        # rl_side_ip = BaseCommPoint.get_ip()
+        rl_side_ip = "150.214.109.164"
         while True:
             try:
                 logging.info(f"Trying to establish communication using the port {self.comms_port}")
-                self._commstoRL = AgentSide(BaseCommPoint.get_ip(),self.comms_port)
-                logging.info("Communication with RL established successfully")
+                self._commstoRL = AgentSide(rl_side_ip, self.comms_port)
+                logging.info(f"Communication with RL established successfully, through IP {rl_side_ip} and port {self.comms_port}")
                 break
             except:
                 logging.info("Connection with RL failed. Retrying in few secs...")
