@@ -27,7 +27,7 @@ def main(argv=None):
     train_parser.add_argument("--dis_save_notes", action="store_true", help="Flag to save some notes for the experiment.", default = False, required=False)
     train_parser.add_argument("--rl_side", action="store_true", help="Flag to just execute rl side code.", default = False, required=False)
     train_parser.add_argument("--agent_side", action="store_true", help="Flag to just execute agent side code.", default = False, required=False)
-    train_parser.add_argument("--port_commm", type=int, help="Number of the port to start the communications with the RL Side.", default = False, required=False)
+    train_parser.add_argument("--comms_port", type=int, help="Number of the port to start the communications with the RL Side.", required=False)
     train_parser.add_argument("--timestamp", type=str, help="Timestamp provided externally (e.g., from GUI).", required=False)
     train_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=0, required=False)

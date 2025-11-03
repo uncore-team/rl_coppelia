@@ -23,6 +23,7 @@ import os
 import pkgutil
 import shutil
 import sys
+import time
 import traceback
 
 # Locate rl_coppelia installation and append the source folder to sys.path
@@ -238,6 +239,9 @@ def sysCall_sensing():
         logging.info(" ----- END OF EXPERIMENT ----- ")
         
         sim.stopSimulation()
+        while sim.getSimulationState() != sim.simulation_stopped:
+            time.sleep(0.1)
+
 
     # Time tracking setup
     if agent and not agent.training_started:
