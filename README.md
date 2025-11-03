@@ -86,7 +86,7 @@ At this point, the repository and it's submodule should be correctly cloned.
 
 Before using this project, ensure that the following dependencies are installed:
 
-- **Python 3.x** (preferably 3.6 or later). It has been tested with python 3.8.10.
+- **Python 3.x** (preferably 3.6 or later). It has been tested with python 3.10.
 - **CoppeliaSim**: The simulator must be installed and configured correctly for the project to work. The project has been tested with CoppeliaSim Edu v4.9.0 (rev. 6) 64bit.
 
 It is recommended to install all the dependencies within a virtual environment. For that purpose, you will need to install venv package:
@@ -117,7 +117,7 @@ From now on, you will need to operate from the `src` subfolder.
 To start training a model for a robot, execute the train option of the `uncore_rl` package. You do not need to have CoppeliaSim opened, as a new instance of the program will be opened if you do not set the `dis_parallel_mode` to True. 
 
 ```bash
-uncore_rl train --robot_name turtleBot --verbose 2
+uncore_rl train --robot_name turtleBot --verbose 3
 ```
 **Key arguments**:
 - **`--robot_name`** (required): The name of the robot you wish to train or test for. This will create a folder for the robot in the `robots` directory. 
@@ -140,6 +140,14 @@ If you need to check the possible key arguments for any functionality (e.g., `te
 
 ```bash
 uncore_rl test -h
+```
+
+### Decouple experiments
+
+With the default configuration, all the experiments will run in the same machine, with RL and agent loops decoupled but running in the same machine. If you want to use two different computers, one for the RL process and another for the agent simulation, then you will need to use the args `--agent_side` and `---rl_side`, respectively. For indicating the ip address and port of the RL you will need to run that process first, check the ip address and comms port that it has enabled, and then run the agent side in your second PC using the args `--comms_port` and `--ip_address`.
+
+```bash
+uncore_rl train --robot_name turtleBot --verbose 3 --agent_side --comms_port 49058 --ip_address "150.216.111.152"
 ```
 
 ## 🖥️ Graphical Interface (GUI)

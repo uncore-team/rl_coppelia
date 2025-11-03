@@ -238,8 +238,9 @@ def sysCall_sensing():
         sim.callScriptFunction('cmd_vel',agent.handle_robot_scripts,0,0)
         sim.callScriptFunction('draw_path', agent.handle_robot_scripts, 0,0, agent.colorID)
 
-        logging.info(" ----- END OF EXPERIMENT ----- ")
+        logging.info(" ----- END OF EXPERIMENT ----- ") # TODO This message appears multiple times before the simulation ends
         
+        # Stop the simulation
         sim.stopSimulation()
 
     # Time tracking setup
