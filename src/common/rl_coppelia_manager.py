@@ -25,6 +25,7 @@ import os
 import shutil
 import sys
 
+from socketcomms.comms import BaseCommPoint
 from spindecoupler import RLSide
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import inspect
@@ -312,7 +313,7 @@ class RLCoppeliaManager():
         else:
             raise ValueError(f"Unknown robot name '{self.args.robot_name}' and no plugin found.")
 
-        logging.info(f"Environment created for robot {self.args.robot_name}. Comms port: {self.free_comms_port}")
+        logging.info(f"Environment created for robot {self.args.robot_name}. IP: {BaseCommPoint.get_ip()}. Comms port: {self.free_comms_port}")
         
 
     def start_communication(self):

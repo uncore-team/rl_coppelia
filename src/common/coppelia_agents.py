@@ -891,7 +891,7 @@ class CoppeliaAgent:
 # -----------------------------------------------
 
 class BurgerBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, comms_port=49054):
+    def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port=49054):
         """
         Custom agent for the BurgerBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
@@ -906,7 +906,7 @@ class BurgerBotAgent(CoppeliaAgent):
             robot_baselink (CoppeliaObject): Object of the robot's basein CoppeliaSim scene.
             laser (CoppeliaObject): Lase object in CoppeliaSim scene.
         """
-        super(BurgerBotAgent, self).__init__(sim, params_scene, params_env, paths, file_id, verbose, comms_port)
+        super(BurgerBotAgent, self).__init__(sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port)
 
         self.robot = sim.getObject("/Burger")
         self.robot_baselink = self.robot
@@ -918,7 +918,7 @@ class BurgerBotAgent(CoppeliaAgent):
 
 
 class TurtleBotAgent(CoppeliaAgent):
-    def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, comms_port=49054):
+    def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port=49054):
         """
         Custom agent for the TurtleBot robot simulation in CoppeliaSim, inherited from CoppeliaAgent class.
 
@@ -934,7 +934,7 @@ class TurtleBotAgent(CoppeliaAgent):
             laser (CoppeliaObject): Lase object in CoppeliaSim scene.
 
         """
-        super(TurtleBotAgent, self).__init__(sim, params_scene, params_env, paths, file_id, verbose, comms_port)
+        super(TurtleBotAgent, self).__init__(sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port)
 
         self.robot=sim.getObject('/Turtlebot2')
         self.robot_baselink=sim.getObject('/Turtlebot2/base_link_respondable')
