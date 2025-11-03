@@ -188,7 +188,7 @@ class RLCoppeliaManager():
         notes_path = os.path.join(robot_dir, "experiment_notes.txt")
 
         # Ask user for custom notes
-        print("\n📝 Please write your notes for this experiment (press Enter when done):")
+        print("\n📝 Please write your notes for this experiment (press Enter when done!):")
         user_notes = input(">> ").strip()
 
         # Prepare text to append

@@ -1458,7 +1458,7 @@ def _build_replacements(
     obstacles_csv_folder = getattr(args, "obstacles_csv_folder", None)
     save_scene = getattr(args, "save_scene", None)
     save_traj = getattr(args, "save_traj", None)
-    ip_address = getattr(args, "ip_address", BaseCommPoint.get_ip())
+    ip_address = getattr(args, "ip_address", None) or BaseCommPoint.get_ip()
 
     model_ids = getattr(args, "model_ids", None)
     action_times = None
