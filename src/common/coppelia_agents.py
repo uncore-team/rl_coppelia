@@ -79,7 +79,7 @@ class CoppeliaAgent:
         self._validate_rltimestep()
 
 
-    def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, comms_port = 49054) -> None:
+    def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port = 49054) -> None:
         """
         Custom agent for CoppeliaSim simulations of different robots.
         
@@ -92,6 +92,7 @@ class CoppeliaAgent:
             paths (dict): Dictionary containing various paths for saving/loading data.
             file_id (str): Unique identifier for the current training/testing session.
             verbose (int): Verbosity level for logging.
+            ip_address (str, optional): IP address for communication with the RL side. Defaults to BaseCommPoint.get_ip().
             comms_port (int, optional): Port for communication with the RL side. Defaults to 49054.
         Attributes:
             _commstoRL: Instance of AgentSide for communication with the RL side.
@@ -201,6 +202,7 @@ class CoppeliaAgent:
         self.first_reset_done = False
 
         # Communication
+        self.ip_address = ip_address
         self.comms_port = comms_port
         self._commstoRL = None  # To be initialized externally after agent creation
         
@@ -250,14 +252,14 @@ class CoppeliaAgent:
         self.obstacles_csv_folder = ""
 
     
-    def start_communication(self, ip_address):
+    def start_communication(self):
         # rl_side_ip = BaseCommPoint.get_ip()
-        rl_side_ip = ip_address
+        rl_side_ip = self.ip_address
         rl_port = self.comms_port
 
         while True:
             try:
-                logging.info(f"Trying to establish communication using the port {rl_port}")
+                logging.info(f"Trying to establish communication using the IP {rl_side_ip}, and the port {rl_port}")
                 self._commstoRL = AgentSide(rl_side_ip, rl_port)
                 logging.info(f"Communication with RL established successfully, through IP {rl_side_ip} and port {rl_port}")
                 break

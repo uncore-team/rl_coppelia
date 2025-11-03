@@ -144,15 +144,15 @@ def sysCall_thread():
 
             # Fallback to hardcoded agents
             if robot_name == "turtleBot":
-                agent = TurtleBotAgent(sim, params_scene, params_env, paths, file_id, verbose, comms_port=comms_port)
+                agent = TurtleBotAgent(sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port)
             elif robot_name == "burgerBot":
-                agent = BurgerBotAgent(sim, params_scene, params_env, paths, file_id, verbose, comms_port=comms_port)
+                agent = BurgerBotAgent(sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port)
                 agent.robot_baselink = agent.robot
             else:
                 raise ValueError(f"Unknown robot name '{robot_name}' and no plugin found.")
-            logging.info(f"Agent created via hardcoded class for '{robot_name}'. Comms port: {comms_port}")
+            logging.info(f"Agent created via hardcoded class for '{robot_name}'. IP: {ip_address}. Comms port: {comms_port}.")
         
-        agent.start_communication(ip_address)
+        agent.start_communication()
 
         logging.info("Agent initialized and communication with RL side established")
 

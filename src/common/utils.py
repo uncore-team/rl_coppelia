@@ -32,6 +32,8 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import spearmanr
 
+from socketcomms.comms import BaseCommPoint
+
 AGENT_SCRIPT_COPPELIA = "/Agent_Script"                     # Name of the agent script in CoppeliaSim scene
 AGENT_SCRIPT_PYTHON = "coppelia_scripts/rl_script_copp.py"  # Script with the agent-specific functions: observations, rewards, step, reset, etc.
 
@@ -1456,6 +1458,7 @@ def _build_replacements(
     obstacles_csv_folder = getattr(args, "obstacles_csv_folder", None)
     save_scene = getattr(args, "save_scene", None)
     save_traj = getattr(args, "save_traj", None)
+    ip_address = getattr(args, "ip_address", BaseCommPoint.get_ip())
 
     model_ids = getattr(args, "model_ids", None)
     action_times = None
@@ -1499,7 +1502,7 @@ def _build_replacements(
         "model_ids": amp_model_ids,
         "base_path": rl_copp_obj.base_path,
         "comms_port": rl_copp_obj.free_comms_port,
-        "ip_address": args.ip_address,
+        "ip_address": ip_address,
         "verbose": args.verbose,
         "scene_to_load_folder": scene_to_load_folder,
         "obstacles_csv_folder": obstacles_csv_folder,
