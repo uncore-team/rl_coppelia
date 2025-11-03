@@ -23,7 +23,6 @@ import os
 import pkgutil
 import shutil
 import sys
-import time
 import traceback
 
 # Locate rl_coppelia installation and append the source folder to sys.path
@@ -84,8 +83,11 @@ def sysCall_init():
     """
     Called at the beginning of the simulation to configure logging and path setup. It alseo receives variable data from the RL side.
     """
-    global sim, agent, verbose, sim_initialized, robot_name, model_ids, params_scene, params_env, comms_port, paths, file_id, save_scene, save_traj, action_times, model_name
-    global obstacles_csv_folder, scene_to_load_folder
+    global sim, agent
+    global sim_initialized
+    global robot_name, model_ids, params_scene, params_env, paths, file_id, model_name, verbose
+    global save_scene, save_traj, action_times, obstacles_csv_folder, scene_to_load_folder
+    global comms_port, ip_address
 
     sim = require('sim')    # type: ignore
 
@@ -95,6 +97,7 @@ def sysCall_init():
     model_name = None
     model_ids = None
     comms_port = 49054
+    ip_address = ""
     base_path = ""
     params_scene = {}
     params_env = {}
@@ -104,9 +107,6 @@ def sysCall_init():
     save_scene = None
     save_traj = None
     action_times = None
-
-    # Send verbose value to RObot_Script
-    sim.setInt32Signal('verboseValue', verbose)
 
     # Generate needed routes for logs and tf
     paths = utils.get_robot_paths(base_path, robot_name, agent_logs=True)
@@ -123,12 +123,14 @@ def sysCall_thread():
     """
     Called once after simulation starts to create the agent and configure paths.
     """
-    global sim, agent, robot_name, params_scene, params_env, comms_port, sim_initialized, model_ids, paths, file_id, save_scene, save_traj, agent_created, action_times, model_name, verbose
-    global obstacles_csv_folder, scene_to_load_folder
+    global sim, agent
+    global sim_initialized
+    global robot_name, model_ids, params_scene, params_env, paths, file_id, model_name, verbose
+    global save_scene, save_traj, action_times, obstacles_csv_folder, scene_to_load_folder
+    global comms_port, ip_address
 
+    # Just execute sysCall_thread when the script is initialized
     if sim_initialized:
-        logging.debug("Inside thread sim_initialized")
-
         # Create agent
         factory = get_agent_factory(robot_name)
         if factory is not None:
@@ -150,7 +152,7 @@ def sysCall_thread():
                 raise ValueError(f"Unknown robot name '{robot_name}' and no plugin found.")
             logging.info(f"Agent created via hardcoded class for '{robot_name}'. Comms port: {comms_port}")
         
-        agent.start_communication()
+        agent.start_communication(ip_address)
 
         logging.info("Agent initialized and communication with RL side established")
 
@@ -190,16 +192,16 @@ def sysCall_thread():
             os.makedirs(agent.save_traj_csv_folder, exist_ok=True)
             logging.info(f"Scene configuration inside {agent.scene_to_load_folder} will be loaded and trajectory will be saved inside it.")
 
-        agent_created = True
 
 
 def sysCall_sensing():
     """
     Called at each simulation step. Executes the agent's action and logs trajectories.
     """
-    global sim, agent, verbose, agent_created
+    global sim, agent
+    global verbose
     
-    if agent and not agent.finish_rec and agent_created:
+    if agent and not agent.finish_rec:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
         action = agent.agent_step()
 
@@ -239,9 +241,6 @@ def sysCall_sensing():
         logging.info(" ----- END OF EXPERIMENT ----- ")
         
         sim.stopSimulation()
-        while sim.getSimulationState() != sim.simulation_stopped:
-            time.sleep(0.1)
-
 
     # Time tracking setup
     if agent and not agent.training_started:

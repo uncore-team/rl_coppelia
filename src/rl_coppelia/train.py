@@ -216,6 +216,8 @@ def main(args):
 
         rl_copp.remove_tmp_data()
 
+        time.sleep(3)
+
     # if not args.rl_side:
     #     ### Close the CoppeliaSim instance
     #     rl_copp.stop_coppelia_sim()

@@ -250,11 +250,11 @@ class CoppeliaAgent:
         self.obstacles_csv_folder = ""
 
     
-    def start_communication(self):
+    def start_communication(self, ip_address):
         # rl_side_ip = BaseCommPoint.get_ip()
-        rl_side_ip = "150.214.109.164"
+        rl_side_ip = ip_address
         rl_port = self.comms_port
-        
+
         while True:
             try:
                 logging.info(f"Trying to establish communication using the port {rl_port}")

@@ -1499,6 +1499,7 @@ def _build_replacements(
         "model_ids": amp_model_ids,
         "base_path": rl_copp_obj.base_path,
         "comms_port": rl_copp_obj.free_comms_port,
+        "ip_address": args.ip_address,
         "verbose": args.verbose,
         "scene_to_load_folder": scene_to_load_folder,
         "obstacles_csv_folder": obstacles_csv_folder,
@@ -1515,6 +1516,7 @@ def _build_replacements(
         "robot_alias": rl_copp_obj.params_train["robot_handle"],
         "robot_base_alias": rl_copp_obj.params_train["robot_base_handle"],
         "laser_alias": rl_copp_obj.params_train["laser_handle"],
+        "verbose": args.verbose,
     }
 
     replacements_obstacles_gen = {
