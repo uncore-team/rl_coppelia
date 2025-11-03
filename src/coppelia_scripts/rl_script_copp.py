@@ -236,7 +236,8 @@ def sysCall_sensing():
         sim.callScriptFunction('draw_path', agent.handle_robot_scripts, 0,0, agent.colorID)
 
         logging.info(" ----- END OF EXPERIMENT ----- ")
-        agent.finish_rec = False
+        
+        sim.stopSimulation()
 
     # Time tracking setup
     if agent and not agent.training_started:

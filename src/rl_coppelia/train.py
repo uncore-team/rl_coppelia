@@ -214,6 +214,8 @@ def main(args):
 
         logging.info("Training completed")
 
+        rl_copp.remove_tmp_data()
+
     # if not args.rl_side:
     #     ### Close the CoppeliaSim instance
     #     rl_copp.stop_coppelia_sim()

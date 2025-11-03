@@ -349,3 +349,12 @@ class RLCoppeliaManager():
             logging.info("Monitor removed")
         else:
             logging.error(f"Monitor not found: {self.log_monitor}")
+
+    
+    def remove_tmp_data(self):
+        # Remove monitor folder
+        if os.path.exists(self.log_monitor):
+            shutil.rmtree(self.log_monitor)
+            logging.info("Monitor removed")
+        else:
+            logging.error(f"Monitor not found: {self.log_monitor}")
