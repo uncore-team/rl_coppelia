@@ -215,7 +215,7 @@ def sysCall_thread():
 
     # ----- Path sampling -----
     _robot_script = agent.handle_robot_scripts
-    agent.pos_samples = agent.sim.callScriptFunction('rp_init', _robot_script, n_samples, sample_step_m, n_extra_poses, path_alias)
+    agent.pos_samples = agent.sim.callScriptFunction('rp_init', _robot_script, n_samples, n_extra_poses, path_alias)
 
     logging.info(" ----- START EXPERIMENT ----- ")
 

@@ -57,224 +57,120 @@ wheel_radius = None            # meters
 linealSpeed = -1
 angularSpeed = -1
 
+MAX_SAMPLES = 1000
+MIN_SAMPLES = 10
+
 
 # ----------------------------------------------------------------------
-# ------------- RecordedPath (Dummy + ctrlPt*) polyline helpers --------
+# ----------------------------Path  helpers ----------------------------
 # ----------------------------------------------------------------------
 
-def _get_ctrlpts_polyline(sim, recorded_path_handle):
-    """Collect ctrlPt children under a 'RecordedPath' dummy and return their world positions.
+def build_world_poses_from_path_data(
+    path_handle,
+    n_samples: int,
+    n_extra_poses: int = 0,
+    delta_deg: float = 10.0
+):
+    """Return (x, y, z, yaw) poses uniformly sub-sampled by index from a CoppeliaSim Path.
 
-    Behavior:
-      - Scans descendants of 'recorded_path_handle' and keeps Dummies whose alias starts with 'ctrlPt'.
-      - Sorts them by numeric suffix (ctrlPt0, ctrlPt1, ...). If no suffix, keeps name order.
-      - Returns a list of points [[x,y,z], ...] in world coordinates.
-
-    Raises:
-      RuntimeError if no ctrlPt children are found.
-    """
-    # Gather all descendant dummies
-    dummies = sim.getObjectsInTree(recorded_path_handle, sim.object_dummy_type, 1) or []
-    pts = []
-    for h in dummies:
-        alias = sim.getObjectAlias(h, 0) or ""
-        if alias.startswith("ctrlPt"):
-            # Extract numeric suffix if any (ctrlPt12 -> 12), else None
-            suf = alias[6:]  # characters after 'ctrlPt'
-            try:
-                idx = int(suf) if suf else None
-            except Exception:
-                idx = None
-            pos = sim.getObjectPosition(h, sim.handle_world)  # [x,y,z]
-            pts.append((idx, alias, [float(pos[0]), float(pos[1]), float(pos[2])]))
-
-    if not pts:
-        raise RuntimeError("No ctrlPt* dummies found under the provided RecordedPath object.")
-
-    # Sort: first by idx (if present), then by alias for stability
-    pts.sort(key=lambda t: (999999 if t[0] is None else t[0], t[1]))
-    return [p for _, __, p in pts]
-
-
-def _sample_polyline_world_poses_by_count(points_w, n_samples: int, n_extra_poses: int = 0, delta_deg: float = 10.0):
-    """Sample exactly n_samples points evenly (by arc-length) along the polyline,
-    and optionally augment each point with extra yaw-only variations.
+    This reduced version:
+      - Works directly on the Path's local-frame flattened arrays:
+          * path_positions_flat: [x,y,z, x,y,z, ...]
+          * path_quaternions_flat: [qx,qy,qz,qw, qx,qy,qz,qw, ...]
+      - Picks exactly `n_samples` evenly spaced indices (uniform by index).
+      - Computes yaw (Z rotation) directly from the quaternion at each sample.
+      - Augments each base pose with ±k*delta_deg yaw-only variants.
 
     Args:
-        points_w (list[tuple[float, float, float]]): Polyline points in world frame (x, y, z).
-        n_samples (int): Number of evenly spaced samples along the polyline.
-        n_extra_poses (int, optional): Number of extra yaw-only variants on each side
-            of the base yaw. If N>0, for each sampled pose we add +k*delta and -k*delta
-            (k=1..N). Defaults to 0.
-        delta_deg (float, optional): Angle step in degrees for the extra yaw variants.
-            Defaults to 10.0.
+        path_positions_flat (list[float]): Flattened [x,y,z,...] in Path LOCAL frame.
+        path_quaternions_flat (list[float]): Flattened [qx,qy,qz,qw,...] in Path LOCAL frame.
+        n_samples (int): Desired number of samples (must be <= total poses).
+        n_extra_poses (int, optional): Extra yaw variants on each side (+/-k*delta).
+            If N>0, adds +k*delta and -k*delta for k=1..N. Defaults to 0.
+        delta_deg (float, optional): Angle step (degrees) for yaw augmentation. Defaults to 10.0.
 
     Returns:
-        list[tuple[float, float, float, float]]: List of (x, y, z, yaw) world poses.
+        list[tuple[float, float, float, float]]: List of (x, y, z, yaw) in Path LOCAL frame.
 
     Notes:
-        - Base yaw is the direction of the local segment (atan2(dy, dx)).
-        - Yaw normalization uses atan2(sin, cos) to keep angles within [-pi, pi].
-        - If the polyline is degenerate, all samples repeat the first point with yaw 0.
+        - This function assumes n_samples <= number_of_path_poses. If n_samples > M,
+          it will clamp to M and print a warning.
+        - Yaw is extracted from quaternion using a standard ZYX convention:
+            yaw = atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z)).
+        - Yaw is normalized to [-pi, pi].
     """
-    import numpy as np
 
-    def _normalize_angle(a: float) -> float:
-        """Normalize angle to [-pi, pi]."""
+    # ------------- Helpers ---------------
+    def _yaw_from_quat(qx: float, qy: float, qz: float, qw: float) -> float:
+        """Extract yaw (Z) from quaternion (ZYX convention)."""
+        s = 2.0 * (qw * qz + qx * qy)
+        c = 1.0 - 2.0 * (qy * qy + qz * qz)
+        return math.atan2(s, c)
+
+    def _normalize_angle(a):
         return math.atan2(math.sin(a), math.cos(a))
 
-    n_samples = max(1, int(n_samples))
-    poses = []
 
-    # Handle short/degenerate polylines
-    if len(points_w) < 2:
-        x, y, z = points_w[0]
-        poses = [(float(x), float(y), float(z), 0.0)] * n_samples
-    else:
-        # Accumulated lengths
-        cum = [0.0]
-        for i in range(len(points_w) - 1):
-            x1, y1, _ = points_w[i]
-            x2, y2, _ = points_w[i + 1]
-            cum.append(cum[-1] + math.hypot(x2 - x1, y2 - y1))
-        total = cum[-1]
+    # --- Get path positions and quaternions
+    pathData = sim.unpackDoubleTable(sim.getBufferProperty(path_handle, 'customData.PATH'))
 
-        if total <= 1e-12:
-            x, y, z = points_w[0]
-            poses = [(float(x), float(y), float(z), 0.0)] * n_samples
+    m = np.array(pathData).reshape(len(pathData) // 7, 7)
+    path_positions_flat = m[:, :3].flatten().tolist()
+    path_quaternions_flat = m[:, 3:].flatten().tolist()
+
+    # -------------------------- Parse & sanity checks --------------------------
+    n_pos = len(path_positions_flat) // 3
+    n_quat = len(path_quaternions_flat) // 4
+    if n_pos != n_quat or n_pos == 0:
+        raise ValueError(f"Inconsistent path arrays: {n_pos} positions vs {n_quat} quaternions")
+    n_original_samples = n_pos
+
+    # --- Compute uniform-by-index sample indices
+    if n_samples != n_original_samples:
+        if n_samples > n_original_samples:
+            print(f"Resampling the apth will not be neccessary as it already has {n_original_samples}")
         else:
-            # Target arc-lengths (include endpoints if n_samples>=2)
-            if n_samples == 1:
-                targets = [total * 0.5]
-            else:
-                targets = [k * (total / (n_samples - 1)) for k in range(n_samples)]
+            print(f"N original samples: {n_original_samples}, will be resampled to {n_samples}")
+     
+        # Evenly spread integers in [0..M-1]
+        indices = []
+        for k in range(n_samples):
+            # Round to nearest valid index
+            idx = int(round(k * (n_original_samples - 1) / (n_samples - 1)))
+            if not indices or idx != indices[-1]:
+                indices.append(idx)
+        # Ensure exact count
+        while len(indices) < n_samples and indices[-1] < n_original_samples - 1:
+            indices.append(indices[-1] + 1)
 
-            for s in targets:
-                # Locate segment
-                i = min(len(cum) - 2, max(0, int(np.searchsorted(cum, s, side="right") - 1)))
-                s0, s1 = cum[i], cum[i + 1]
-                p1, p2 = points_w[i], points_w[i + 1]
-                seglen = s1 - s0
+    # --- Build base (x,y,z,yaw) samples 
+    base_poses = []
 
-                if seglen <= 1e-12:
-                    x, y, z = p1
-                    yaw = 0.0
-                    # Try to infer yaw from valid neighbors
-                    found = False
-                    for j in range(i - 1, -1, -1):
-                        if (cum[j + 1] - cum[j]) > 1e-12:
-                            dx = points_w[j + 1][0] - points_w[j][0]
-                            dy = points_w[j + 1][1] - points_w[j][1]
-                            yaw = math.atan2(dy, dx)
-                            found = True
-                            break
-                    if not found:
-                        for j in range(i + 1, len(points_w) - 1):
-                            if (cum[j + 1] - cum[j]) > 1e-12:
-                                dx = points_w[j + 1][0] - points_w[j][0]
-                                dy = points_w[j + 1][1] - points_w[j][1]
-                                yaw = math.atan2(dy, dx)
-                                break
-                else:
-                    t = (s - s0) / seglen
-                    x = p1[0] + t * (p2[0] - p1[0])
-                    y = p1[1] + t * (p2[1] - p1[1])
-                    z = p1[2] + t * (p2[2] - p1[2])
-                    yaw = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
+    for i in indices:
+        x = float(path_positions_flat[3 * i + 0])
+        y = float(path_positions_flat[3 * i + 1])
+        z = float(path_positions_flat[3 * i + 2])
 
-                poses.append((float(x), float(y), float(z), float(yaw)))
+        qx = float(path_quaternions_flat[4 * i + 0])
+        qy = float(path_quaternions_flat[4 * i + 1])
+        qz = float(path_quaternions_flat[4 * i + 2])
+        qw = float(path_quaternions_flat[4 * i + 3])
 
-    # ---- Augment each pose with extra yaw-only variants --------------------
-    delta_rad = math.radians(float(delta_deg))
+        yaw = _normalize_angle(_yaw_from_quat(qx, qy, qz, qw))
+        base_poses.append((x, y, z, yaw))
+
+    # --- Yaw augmentation for extra cases
     n_extra = max(0, int(n_extra_poses))
-    augmented = []
+    delta = math.radians(float(delta_deg))
+    out = []
+    for (x, y, z, yaw) in base_poses:
+        out.append((x, y, z, yaw))  # base
+        for k in range(1, n_extra + 1):
+            out.append((x, y, z, _normalize_angle(yaw + k * delta)))
+        for k in range(1, n_extra + 1):
+            out.append((x, y, z, _normalize_angle(yaw - k * delta)))
 
-    for (x, y, z, yaw) in poses:
-        # Base
-        augmented.append((x, y, z, _normalize_angle(yaw)))
-        if n_extra > 0:
-            # +10°, +20°, ..., +N*10°
-            for k in range(1, n_extra + 1):
-                augmented.append((x, y, z, _normalize_angle(yaw + k * delta_rad)))
-            # -10°, -20°, ..., -N*10°
-            for k in range(1, n_extra + 1):
-                augmented.append((x, y, z, _normalize_angle(yaw - k * delta_rad)))
-
-    print(f"Robot positions to be tested: {len(augmented)}")
-    return augmented
-
-
-def _sample_polyline_world_poses(points_w, step_m: float, keep_last: bool = True):
-    """Sample a polyline (list of world XYZ points) at fixed arc-length step.
-
-    Returns:
-      list of tuples (x, y, z, yaw), where yaw comes from the local segment tangent.
-
-    Notes:
-      - If keep_last is True, the final vertex is included even if it doesn't land exactly on a step.
-      - Duplicate consecutive points (zero-length segments) are skipped/handled gracefully.
-    """
-    if len(points_w) < 2:
-        return []
-
-    # Build cumulative arc-length along the piecewise-linear chain
-    cum = [0.0]
-    for i in range(len(points_w) - 1):
-        x1, y1, _ = points_w[i]
-        x2, y2, _ = points_w[i + 1]
-        seglen = math.hypot(x2 - x1, y2 - y1)
-        cum.append(cum[-1] + seglen)
-
-    total = cum[-1]
-    if total <= 1e-12:
-        return []
-
-    # Sampling positions along s = 0..total
-    poses = []
-    n = max(1, int(math.floor(total / step_m)))
-    samples = [k * step_m for k in range(n + 1)]
-    if keep_last and samples[-1] < total - 1e-9:
-        samples.append(total)
-
-    # For each target arc-length, find the segment and interpolate
-    for s in samples:
-        # Locate segment index such that cum[i] <= s <= cum[i+1]
-        i = min(len(cum) - 2, max(0, int(np.searchsorted(cum, s, side="right") - 1)))
-        s0, s1 = cum[i], cum[i + 1]
-        p1 = points_w[i]
-        p2 = points_w[i + 1]
-        seglen = s1 - s0
-
-        if seglen <= 1e-12:
-            # Degenerate: use p1 and try to borrow a direction from neighbors
-            x, y, z = p1
-            yaw = 0.0
-            # Search left
-            found = False
-            for j in range(i - 1, -1, -1):
-                if (cum[j + 1] - cum[j]) > 1e-12:
-                    dx = points_w[j + 1][0] - points_w[j][0]
-                    dy = points_w[j + 1][1] - points_w[j][1]
-                    yaw = math.atan2(dy, dx)
-                    found = True
-                    break
-            # Or search right
-            if not found:
-                for j in range(i + 1, len(points_w) - 1):
-                    if (cum[j + 1] - cum[j]) > 1e-12:
-                        dx = points_w[j + 1][0] - points_w[j][0]
-                        dy = points_w[j + 1][1] - points_w[j][1]
-                        yaw = math.atan2(dy, dx)
-                        break
-        else:
-            t = (s - s0) / seglen
-            x = p1[0] + t * (p2[0] - p1[0])
-            y = p1[1] + t * (p2[1] - p1[1])
-            z = p1[2] + t * (p2[2] - p1[2])
-            yaw = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
-
-        poses.append((float(x), float(y), float(z), float(yaw)))
-    return poses
+    return out
 
 
 # -------------------------------
@@ -364,7 +260,7 @@ def sysCall_cleanup():
 # --------------------------------------------
 
 
-def rp_init(n_samples, sample_step_m, n_extra_poses, path_name):
+def rp_init(n_samples, n_extra_poses, path_name):
     """Initialize path sampling.    # TODO: UPdate docstring
 
     Args:
@@ -375,22 +271,14 @@ def rp_init(n_samples, sample_step_m, n_extra_poses, path_name):
     Returns:
         outInts[0]: number of sampled poses
     """
-    print(f"Trying to sample the path using a path alias: {path_name}, with {n_samples} samples, or sampling it with a {sample_step_m}m step.")
+    if n_samples < MIN_SAMPLES:
+        n_samples = 10
+    elif n_samples > MAX_SAMPLES:
+        n_samples = 1000
+    print(f"Trying to sample the path using a path alias: {path_name}, with {n_samples} samples.")
     path_alias = path_name if path_name else "/RecordedPath"
-    N = n_samples if n_samples else 0
-
-    if sample_step_m == 0:
-        step_m = 0.01
-    else:
-        step_m = sample_step_m
-
     path_handle = sim.getObject(path_alias)
-    pts = _get_ctrlpts_polyline(sim, path_handle)
-
-    if N > 0:
-        pos_samples = _sample_polyline_world_poses_by_count(pts, N, n_extra_poses)
-    else:
-        pos_samples = _sample_polyline_world_poses(pts, step_m, keep_last=True)
+    pos_samples = build_world_poses_from_path_data(path_handle, n_samples, n_extra_poses)
 
     return pos_samples
 
