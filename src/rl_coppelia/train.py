@@ -174,7 +174,7 @@ def main(args):
         model.save(os.path.join(to_save_model_path, f"{model_name}_last"))
 
         # Parse metrics from tensorboard log and save them in a csv file. Also, we get the metrics of the last row of that csv file
-        _, experiment_csv_path = utils.get_output_csv(model_name, training_metrics_path)
+        _, experiment_csv_path = utils.get_output_csv(model_name, training_metrics_path, "train")
         logging.info(f"PATH TO SAVE CSV TRAINIG: {experiment_csv_path}")
         try:
             _, last_metric_row = utils.parse_tensorboard_logs(train_log_file_path, output_csv=experiment_csv_path)

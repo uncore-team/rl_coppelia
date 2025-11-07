@@ -77,7 +77,7 @@
     "params_train": {
         "sb3_algorithm": "SAC",
         "policy": "MlpPolicy",
-        "total_timesteps": 100,
+        "total_timesteps": 1000000,
         "callback_frequency": 10000,
         "n_training_steps": 2048,
         "scene_name": "turtleBot_scene.ttt",

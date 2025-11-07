@@ -251,6 +251,13 @@ class CoppeliaAgent:
         # For loading obstacles when training with fixed osbtacles:
         self.obstacles_csv_folder = ""
 
+        # Path version script for buildin timesteps map
+        self.current_trial_idx_pv = 0
+        self.trials_per_sample = 0
+        self.ts_received = False
+        self.current_sample_idx_pv = 0
+        self.pos_samples = []
+
     
     def start_communication(self):
         # rl_side_ip = BaseCommPoint.get_ip()
@@ -368,7 +375,8 @@ class CoppeliaAgent:
                     # Unknown name in config: keep numeric output stable and warn once
                     logging.warning(f"Unknown observation name in config: '{name}'. Filling 0.0")
                     obs[name] = 0.0
-            logging.info(f"Observation stored as: {obs}")
+            logging.info(f"Observation stored as: { {key: round(value, 3) for key, value in obs.items()} }")
+
             return obs
 
         else:
@@ -884,6 +892,165 @@ class CoppeliaAgent:
                     
         self._lastaction = action
         return action  # Continue the loop
+    
+
+    def agent_step_pv(self):
+        """
+        A step of the agent. Process incoming instructions from the server side and execute actions accordingly.
+        Args:
+            self: The CoppeliaAgent instance.
+        Returns:
+            dict: The action to be executed.
+        """
+        
+        action = self._lastaction	# by default, continue executing the same last action
+
+        # Waiting state --> It waits until the current action is finished
+        if not self._waitingforrlcommands: # not waiting new commands from RL, just executing last action
+            self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
+            # if (self.current_sim_offset_time-self._lastactiont0_sim >= self._rltimestep): # last action finished
+            if (self.current_sim_offset_time-self._lastactiont0_sim >= 0.2):
+            # if (self.sim.getSimulationTime()-self._lastactiont0 >= self._rltimestep):
+
+                logging.info("Act time completed.")
+                self.ts_received = False
+
+                # Get an observation
+                observation = self.get_observation_space()
+                    
+                logging.info(f"Obs send STEP: { {key: round(value, 3) for key, value in observation.items()} }")
+
+                # Send observation to RL
+                simTime = self.sim.getSimulationTime() - self.initial_simTime
+                self._commstoRL.stepSendObs(observation, simTime, False) # RL was waiting for this; no reward is actually needed here
+                logging.info(f"Obs STEP already sent with simTime: {simTime}")
+                self.crash_flag = False  # Reset the flag for next iterations
+                self._waitingforrlcommands = True  
+           
+            action = self._lastaction
+            
+        # Execution/ Reading state --> The action has finished, so it tries to read a new command from RL
+        else:  # waiting for new RL step() or reset()            
+            # logging.info(f"WAiting for command")
+            # read the last (pending) step()/reset() indicator and then proceed accordingly
+            rl_instruction = self._commstoRL.readWhatToDo()
+            
+            if rl_instruction is not None: # otherwise the RL has not sent any new command
+                self.training_started = True    # Flag set to True whenever the training starts
+            
+                # STEP received
+                if rl_instruction[0] == AgentSide.WhatToDo.REC_ACTION_SEND_OBS:
+                    logging.info("Received: REC_ACTION_SEND_OBS")
+
+                    # Receive an action
+                    action = rl_instruction[1]
+                    logging.info(f"Action rec: { {key: round(value, 3) for key, value in action.items()} }")
+                
+                    if self.variable_timestep:
+                        self._update_rltimestep(action)
+
+                    if self.first_reset_done and not self.lat_reset:
+                        self._lastactiont0_sim = 0.0
+                        self._lastactiont0_wall = 0.0
+                        self.lat_sim = 0.0
+                        self.lat_wall = 0.0
+                        self.lat_reset = True
+                        
+
+                    if self.reset_flag:
+                        logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}")
+                        self._commstoRL.stepSendLastActDur(self.lat_sim, self.lat_wall)
+                        logging.info("LAT already sent")
+
+                        self.episode_start_time_sim = self.sim.getSimulationTime()
+                        self.episode_start_time_wall = self.sim.getSystemTime()
+                        self.reset_flag = False
+                        
+                        self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
+                        self.current_wall_offset_time = self.sim.getSystemTime()-self.episode_start_time_wall
+
+                        self._lastactiont0_sim = self.current_sim_offset_time
+                        self._lastactiont0_wall = self.current_wall_offset_time
+                        
+
+                    else:
+                        self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
+                        self.current_wall_offset_time = self.sim.getSystemTime()-self.episode_start_time_wall
+
+                        self.lat_sim= self.current_sim_offset_time-self._lastactiont0_sim
+                        self.lat_wall= self.current_wall_offset_time-self._lastactiont0_wall
+
+                        self._lastactiont0_sim = self.current_sim_offset_time
+                        self._lastactiont0_wall = self.current_wall_offset_time
+
+                        logging.info(f"LAT sim: {round(self.lat_sim,4)}. LAT wall: {round(self.lat_wall,4)}")
+                        self._commstoRL.stepSendLastActDur(self.lat_sim, self.lat_wall)
+                        logging.info("LAT already sent")
+                    
+                    self._waitingforrlcommands = False # from now on, we are waiting to execute the action
+                    self.ts_received = True
+
+                    
+                    
+                # RESET received
+                elif rl_instruction[0] == AgentSide.WhatToDo.RESET_SEND_OBS:
+                    logging.info("Received: RESET_SEND_OBS")
+                    # --- Stop the robot
+                    # self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
+
+                    # --- Reset obstacles for first reset
+                    if not self.first_reset_done:
+                        if self.generator is not None:
+                            logging.info(f"Regenerating new obstacles as it's the first RESET...")
+                            self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script, [])
+
+                    # --- Reset the target/robot
+                    # Place target randomly
+                    while True:
+                        posX, posY = self.get_random_object_pos('target')
+                        if self.is_position_valid('target', posX, posY):
+                            break
+                    logging.info(f"Target new position: {posX}, {posY}")
+                    self.sim.setObjectPosition(self.target, -1, [posX, posY, 0])
+
+                    # If the robot has been tested N trials_per_sample in the same position of the path, then change the position
+                    if not self.first_reset_done or self.current_trial_idx_pv == self.trials_per_sample-1:
+                        self.sim.callScriptFunction('rp_tp', self.handle_robot_scripts, self.pos_samples[self.current_sample_idx_pv])
+                        logging.info(f"Robot teletransported to new pos: {self.pos_samples[self.current_sample_idx_pv]}")
+                        if not self.first_reset_done:
+                            self.first_reset_done = True
+
+                        else:
+                            self.current_sample_idx_pv +=1
+                            self.current_trial_idx_pv = 0
+
+                    else:
+                        self.current_trial_idx_pv+=1    # Increment trial counter for current position
+                        
+                    # --- Get an observation
+                    observation = self.get_observation_space()
+                    logging.info(f"Obs send RESET: { {key: round(value, 3) for key, value in observation.items()} }")
+                    
+                    # --- Send the observation and the agent time (simulation time) to the RLSide
+                    simTime = self.sim.getSimulationTime() - self.initial_simTime
+                    self._commstoRL.resetSendObs(observation, simTime)
+
+                    self.reset_flag = True
+                    action = None
+                    
+                # FINISH received --> the loop ends (train or inference has finished)
+                elif rl_instruction[0] == AgentSide.WhatToDo.FINISH:
+                    logging.info("Received: FINISH")
+                    self.finish_rec = True
+                    return {}  # End the loop
+                
+                # In case another instruction is received, we will get a log
+                else:
+                    logging.error(f"Received Other: {rl_instruction}")
+                                    
+        self._lastaction = action
+        return action  
+
 
 
 # -----------------------------------------------

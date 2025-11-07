@@ -24,6 +24,7 @@ import datetime
 import os
 import shutil
 import sys
+from typing import Optional
 
 from socketcomms.comms import BaseCommPoint
 from spindecoupler import RLSide
@@ -251,11 +252,10 @@ class RLCoppeliaManager():
         if self.calling_script != "plot.py":
             # --- Runtime state ---
             self.current_sim = None
+            self.client = None
             # The next free port to be used for the communication between the agent (CoppeliaSim) and the RL side (Python)
-            if args.comms_port is None:
-                self.free_comms_port = self._select_comms_port(args, default_start=49054)
-            else: 
-                self.free_comms_port = args.comms_port
+            self.free_comms_port = getattr(args, "comms_port", None) or self._select_comms_port(args, default_start=49054)
+
             # Temporary folder for storing a tensorboard monitor file during training. This is needed for saving a model 
             # based ion the mean reward obtained during training.
             self.log_monitor = os.path.join(self.base_path, "tmp", self.file_id)
@@ -328,14 +328,14 @@ class RLCoppeliaManager():
         base_env._commstoagent = comm
     
         
-    def start_coppelia_sim(self, process_name:str):
+    def start_coppelia_sim(self, process_name:str, path_version:Optional[bool]=False):
         """
         Run CoppeliaSim and open the selected scene. It will override the code of the 'Agent_Script' file inside the scene with the
         content of the agent_coppelia_script.py.
 
         Two different instances are needed, so one will be used for training and the other for evaluating during the EvalCallback
         """
-        utils.start_coppelia_and_simulation(self, process_name)
+        utils.start_coppelia_and_simulation(self, process_name, path_version)
 
 
     def stop_coppelia_sim(self):

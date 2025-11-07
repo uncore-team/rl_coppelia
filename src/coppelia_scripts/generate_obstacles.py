@@ -167,13 +167,21 @@ def _is_position_valid(
             max_x = sim.getObjectFloatParam(obj, 18)  # bbox max x
             radius = (max_x - min_x) / 2.0
             threshold = radius + (diam_obstacles / 2.0) + 0.02
+            print("target th case")
         elif "Burger" in name:
             threshold = 0.033/2.0 + 0.18/2.0 + 0.01 + diam_obstacles/2.0 + 0.02 # TODO Fix, right now it's hardcoded
+        elif "Turtlebot2" in name or "ctrlPt" in name:
+            threshold = 0.035/2.0 + 0.13/2.0 + 0.01 + diam_obstacles/2.0 + 0.02
+            if "ctrlPt" in name:
+                print("path th case")
+            else:
+                print("Turtlebot2 th case")
         else:
             threshold = diam_obstacles + 0.18 + 0.02
         if d < threshold:
+            print("Not valid position, obstacle is too close")
             return False
-
+    print("Valid position")
     return True
 
 

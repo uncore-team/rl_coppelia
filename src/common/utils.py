@@ -43,6 +43,10 @@ ROBOT_SCRIPT_PYTHON = "coppelia_scripts/robot_script_copp.py"   # Script with th
 OBSTACLES_GEN_SCRIPT_COPPELIA = "/ObstaclesGenerator"                   # Name of the obstacles generator script in CoppeliaSim scene
 OBSTACLES_GEN_SCRIPT_PYTHON = "coppelia_scripts/generate_obstacles.py"  # Script with the obstacles generator functions.
 
+# --- Path scene version, used for building timesteps map
+AGENT_SCRIPT_PV_PYTHON = "coppelia_scripts/rl_script_pv_copp.py"  
+ROBOT_SCRIPT_PV_PYTHON = "coppelia_scripts/robot_script_pv_copp.py"
+
 
 # ------------------------------------------
 # ------------------------------------------
@@ -843,7 +847,7 @@ def load_params(file_path):
         raise
     
     
-def get_output_csv(model_name, metrics_path, train_flag=True):
+def get_output_csv_deprecated(model_name, metrics_path, train_flag=True):   # TODO remove it's deprecated
     """
     Generate unique file names and paths for CSV files used to store model metrics.
 
@@ -885,6 +889,31 @@ def get_output_csv(model_name, metrics_path, train_flag=True):
         output_csv_path_1 = os.path.join(metrics_path, output_csv_name_1)
         output_csv_path_2 = os.path.join(metrics_path, output_csv_name_2)
         return output_csv_name_1, output_csv_name_2, output_csv_path_1, output_csv_path_2
+
+
+def get_output_csv(model_name, metrics_path, file_type):
+    """
+    Generate unique file names and paths for CSV files used to store model metrics.
+
+    Args:
+        model_name (str): Name of the model, used as a prefix in the CSV file names.
+        metrics_path (str): Directory where the CSV files will be saved.
+        file_type (str): String that will be included in the file name (e.g. train, otherdata, test, etc.).
+
+    Returns:
+        tuple:
+            
+            output_csv_name (str): Name of the CSV file.
+            output_csv_path (str): Full path to the CSV file.
+    """
+    # Get current timestamp so the metrics.csv file will have an unique name
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    # Get name and return the path to the csv file
+    output_csv_name = f"{model_name}_{file_type}_{timestamp}.csv"
+    output_csv_path = os.path.join(metrics_path, output_csv_name)
+    return output_csv_name, output_csv_path
+
 
 
 def update_records_file (file_path, exp_name, start_time, end_time, other_metrics):
@@ -1411,7 +1440,8 @@ def _apply_scene_params(rl_copp_obj, script_path, fcn_name) -> None:
 
 
 def _build_replacements(
-    rl_copp_obj
+    rl_copp_obj,
+    path_version: Optional[bool] = False
 ) -> Tuple[Dict, Dict, Dict]:
     """
     Build replacement dictionaries for agent, robot, and obstacle generator configuration.
@@ -1512,6 +1542,15 @@ def _build_replacements(
         "action_times": action_times
     }
 
+    if path_version:
+        replacements_agent.update({
+            "path_alias": args.path_alias,
+            "trials_per_sample": args.trials_per_sample,
+            "n_samples": args.n_samples,
+            "sample_step_m": args.sample_step_m,
+            "n_extra_poses": args.n_extra_poses
+        })
+
     replacements_robot = {
         "verbose": args.verbose,
         "distance_between_wheels": rl_copp_obj.params_scene["distance_between_wheels"],
@@ -1524,7 +1563,6 @@ def _build_replacements(
 
     replacements_obstacles_gen = {
         "distance_between_wheels": rl_copp_obj.params_scene["distance_between_wheels"],
-
     }
 
     return replacements_agent, replacements_robot, replacements_obstacles_gen
@@ -1576,7 +1614,7 @@ def _send_params_dict (rl_copp_obj, target_dict_name: str, script_content: str) 
     return script_content
 
 
-def update_and_copy_script(rl_copp_obj):
+def update_and_copy_script_deprecated(rl_copp_obj):
     """
     Updates and copies both agent and robot scripts of the CoppeliaSim scene 
     with the content of the Python scripts specified in AGENT_SCRIPT_PYTHON, 
@@ -1670,6 +1708,106 @@ def update_and_copy_script(rl_copp_obj):
     return True
 
 
+def update_and_copy_script(rl_copp_obj, path_version = False):   # TODO Review Docstring (it's copypasted from twin function), and consider the option of splitting the original function
+    """
+    Updates and copies both agent and robot scripts of the CoppeliaSim scene 
+    with the content of the Python scripts specified in AGENT_SCRIPT_PYTHON, 
+    ROBOT_SCRIPT_PYTHON and OBSTACLES_GEN_SCRIPT_PYTHON.
+
+    This function loads both scripts from the specified paths, updates certain 
+    variables in the scripts (such as robot name, base path, communication port,
+    environment parameters, etc.), and sends the updated script content back to 
+    the CoppeliaSim scene.
+
+    Args:
+        rl_copp_obj (RLCoppeliaManager): Object containing the simulation object, 
+            base paths, parameters and command line arguments.
+
+    Returns:
+        bool: True if both scripts were successfully updated and copied to CoppeliaSim, 
+              False otherwise.
+
+    Raises:
+        Exception: If an error occurs during the script update or copying process.
+    """
+    # ----- Get script handles of CoppeliaSim scene
+    try:
+        agent_object = rl_copp_obj.current_sim.getObject(AGENT_SCRIPT_COPPELIA)
+        agent_script_handle = rl_copp_obj.current_sim.getScript(1, agent_object)
+    except Exception as e:
+        raise ValueError(f"Error with agent script handle {AGENT_SCRIPT_COPPELIA}")
+
+    robot_script_copp_path = f"{rl_copp_obj.params_train['robot_handle']}{ROBOT_SCRIPT_COPPELIA}"
+    try:
+        robot_object = rl_copp_obj.current_sim.getObject(robot_script_copp_path)
+        robot_script_handle = rl_copp_obj.current_sim.getScript(1, robot_object)
+    except Exception as e:
+        raise ValueError(f"Error with robot script handle or script name {robot_script_copp_path}. Error: {e}")
+    
+    try:
+        obstacles_gen_object = rl_copp_obj.current_sim.getObject(OBSTACLES_GEN_SCRIPT_COPPELIA)
+        obstacles_gen_script_handle = rl_copp_obj.current_sim.getScript(1, obstacles_gen_object)
+    except Exception as e:
+        raise ValueError(f"Error with obstacles generator script handle {OBSTACLES_GEN_SCRIPT_COPPELIA}")
+
+
+    # ----- Get paths to the scripts
+    # Normal scene version
+    if not path_version:
+        agent_script_path = os.path.join(rl_copp_obj.base_path, "src", AGENT_SCRIPT_PYTHON)
+        robot_script_path = os.path.join(rl_copp_obj.base_path, "src", ROBOT_SCRIPT_PYTHON)
+    else:
+        agent_script_path = os.path.join(rl_copp_obj.base_path, "src", AGENT_SCRIPT_PV_PYTHON)
+        robot_script_path = os.path.join(rl_copp_obj.base_path, "src", ROBOT_SCRIPT_PV_PYTHON)
+
+    obstacles_gen_script_path = os.path.join(rl_copp_obj.base_path, "src", OBSTACLES_GEN_SCRIPT_PYTHON)
+
+    logging.info(f"Copying content of {agent_script_path} inside the scene in {AGENT_SCRIPT_COPPELIA}")
+    logging.info(f"Copying content of {robot_script_path} inside the scene in {ROBOT_SCRIPT_COPPELIA}")
+    logging.info(f"Copying content of {obstacles_gen_script_path} inside the scene in {OBSTACLES_GEN_SCRIPT_COPPELIA}")
+
+
+    # ----- Read current content of the scripts
+    with open(agent_script_path, "r") as file:
+        agent_script_content = file.read()
+    with open(robot_script_path, "r") as file:
+        robot_script_content = file.read()
+    with open(obstacles_gen_script_path, "r") as file:
+        obstacles_gen_script_content = file.read()
+
+    # ----- Build dicts with variables to update
+    replacements_agent, replacements_robot, replacements_obstacles_gen = _build_replacements(rl_copp_obj, path_version)
+
+    # Update standard variables
+    agent_script_content = replace_std_variables(agent_script_content, replacements_agent)
+    robot_script_content = replace_std_variables(robot_script_content, replacements_robot)
+    obstacles_gen_script_content = replace_std_variables(obstacles_gen_script_content, replacements_obstacles_gen)
+    
+    # Format the params dictionaries for updating the agent script
+    agent_script_content = _send_params_dict(rl_copp_obj, "params_env", agent_script_content)
+    agent_script_content = _send_params_dict(rl_copp_obj, "params_scene", agent_script_content)
+   
+
+    # Send updated scripts content to the scripts in CoppeliaSim
+    rl_copp_obj.current_sim.setScriptText(agent_script_handle, agent_script_content)
+    rl_copp_obj.current_sim.setScriptText(robot_script_handle, robot_script_content)
+    rl_copp_obj.current_sim.setScriptText(obstacles_gen_script_handle, obstacles_gen_script_content)
+    logging.info("[Sim Scene] Scripts updated successfully in CoppeliaSim.")
+
+    # Override customization scripts 
+    apply_params_errors = []
+    apply_params_errors.append(_apply_scene_params(rl_copp_obj, "/Obs_Generator/script", "setObsParams"))
+    apply_params_errors.append(_apply_scene_params(rl_copp_obj, "/Target/script", "setTargetParams"))
+    apply_params_errors.append(_apply_scene_params(rl_copp_obj, "/ExternalWall/script", "setExternalWallParams"))
+    
+    if False in apply_params_errors:
+        logging.error("[Sim Scene] Some customization scripts could not be updated with the specified params.")
+    else:
+        logging.info("[Sim Scene] Customization scripts of the CoppeliaSim scene have been overrided with the specified params in json file.")
+
+    return True
+
+
 def create_discs_under_target(rl_copp_obj):     # TODO Remove, it's deprecated
     """
     Creates three disc shapes in CoppeliaSim, assigns them as children of the Target object, 
@@ -1724,7 +1862,7 @@ def create_discs_under_target(rl_copp_obj):     # TODO Remove, it's deprecated
     return disc_handles  # Return the handles of the created discs
 
 
-def start_coppelia_and_simulation(rl_copp_obj, process_name:str):
+def start_coppelia_and_simulation(rl_copp_obj, process_name:str, path_version:Optional[bool]=False):
     """
     Run CoppeliaSim if it's not already running and open the scene if it's not loaded.
 
@@ -1820,8 +1958,8 @@ def start_coppelia_and_simulation(rl_copp_obj, process_name:str):
     # Wait for CoppeliaSim connection
     try:
         logging.info("Waiting for connection with CoppeliaSim...")
-        client = RemoteAPIClient(port=zmq_port)
-        rl_copp_obj.current_sim = client.getObject('sim')
+        rl_copp_obj.client = RemoteAPIClient(port=zmq_port)
+        rl_copp_obj.current_sim = rl_copp_obj.client.getObject('sim')
     except Exception as e:
         logging.error(f"It was not possible to connect with CoppeliaSim: {e}")
         if process:
@@ -1836,11 +1974,20 @@ def start_coppelia_and_simulation(rl_copp_obj, process_name:str):
         stop_coppelia_simulation(rl_copp_obj)
     else:
         logging.info(f"Loading scene: {rl_copp_obj.args.scene_path}")
-        rl_copp_obj.current_sim.loadScene(rl_copp_obj.args.scene_path)
+        try:
+            rl_copp_obj.current_sim.loadScene(rl_copp_obj.args.scene_path)
+        except:
+            # Build scene path
+            scene_path = os.path.join(rl_copp_obj.base_path, "scenes", rl_copp_obj.args.scene_path)
+
+            # Check file existence
+            if not os.path.isfile(scene_path):
+                raise FileNotFoundError(f"Scene file not found: {scene_path}")
+            rl_copp_obj.current_sim.loadScene(scene_path)
         logging.info("Scene loaded successfully.")
 
     # Update code inside Coppelia's scene
-    update_and_copy_script(rl_copp_obj)
+    update_and_copy_script(rl_copp_obj, path_version)
 
     # Start the simulation
     rl_copp_obj.current_sim.startSimulation()

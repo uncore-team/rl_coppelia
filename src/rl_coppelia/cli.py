@@ -12,7 +12,7 @@ def main(argv=None):
     Args:
         argv (list[str], optional): List of CLI arguments (for programmatic use). Defaults to None.
     """
-    parser = argparse.ArgumentParser(prog="rl_coppelia", description="Training and testing CLI")
+    parser = argparse.ArgumentParser(prog="uncore_rl", description="Training and testing CLI")
     subparsers = parser.add_subparsers(dest="command")
 
     create_robot_parser = subparsers.add_parser("create_robot", help="Create an environment and its corresponding agent for CoppeliaSim simulation.")
@@ -45,9 +45,56 @@ def main(argv=None):
     test_parser.add_argument("--params_file", type=str, help="Path to the configuration file.",required=False)
     test_parser.add_argument("--iterations", type=int, help="Number of iterations for the test. If set, it will override the parameter from the parameters' json file.",required=False)
     test_parser.add_argument("--dis_save_notes", action="store_true", help="Flag to save some notes for the experiment.", default = False, required=False)
+    test_parser.add_argument("--rl_side", action="store_true", help="Flag to just execute rl side code.", default = False, required=False)
+    test_parser.add_argument("--agent_side", action="store_true", help="Flag to just execute agent side code.", default = False, required=False)
+    test_parser.add_argument("--comms_port", type=int, help="Number of the port to start the communications with the RL Side.", required=False)
+    test_parser.add_argument("--ip_address", type=str, help="IP address of the RL Side.", required=False)
     test_parser.add_argument("--timestamp", type=str, help="Timestamp provided externally (e.g., from GUI).", required=False)
     test_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=0, required=False)
+
+    test_program_parser = subparsers.add_parser("test_program", help="Test a trained RL algorithm for robot movement in CoppeliaSim.")
+    test_program_parser.add_argument("--model_name", type=str, help="Name of the trained model is required (it must be located under 'models' folder)", required=True)
+    test_program_parser.add_argument("--robot_name", type=str, help="Name for the robot. Default will be burgerBot.", required=False)
+    test_program_parser.add_argument("--scene_path", type=str, help="Path to the CoppeliaSim scene file.", required=False)
+    test_program_parser.add_argument("--save_scene", action="store_true", help="Enables saving scene mode.", required=False, default=False)
+    test_program_parser.add_argument("--save_traj", action="store_true", help="Enables saving trajectory mode.", required=False, default=False)
+    test_program_parser.add_argument("--obstacles_csv_folder", type=str, help="Path to scene configuration folder in case that we want to test with fixed obstacles. Please just indicate the folder not the whole path (e.g. /Scene014)",required=False)
+    test_program_parser.add_argument("--no_gui", action="store_true", help="Disables Coppelia GUI, it will just show the terminal", required=False)
+    test_program_parser.add_argument("--params_file", type=str, help="Path to the configuration file.",required=False)
+    test_program_parser.add_argument("--iterations", type=int, help="Number of iterations for the test. If set, it will override the parameter from the parameters' json file.",required=False)
+    test_program_parser.add_argument("--rl_side", action="store_true", help="Flag to just execute rl side code.", default = False, required=False)
+    test_program_parser.add_argument("--agent_side", action="store_true", help="Flag to just execute agent side code.", default = False, required=False)
+    test_program_parser.add_argument("--comms_port", type=int, help="Number of the port to start the communications with the RL Side.", required=False)
+    test_program_parser.add_argument("--ip_address", type=str, help="IP address of the RL Side.", required=False)
+    test_program_parser.add_argument("--dis_parallel_mode", action="store_true", help="Disables the parallel training or testing.", required=False)
+
+    test_program_parser.add_argument("--timestamp", type=str, help="Timestamp provided externally (e.g., from GUI).", required=False)
+    test_program_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
+                             1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=0, required=False)
+
+    test_path_parser = subparsers.add_parser("test_path", help="Test a trained RL algorithm for robot movement in CoppeliaSim.")
+
+    test_path_parser.add_argument("--model_name", type=str, required=True,help="Model file name under models/ (or full path).")
+    test_path_parser.add_argument("--scene_path", type=str, help="Path to the CoppeliaSim scene file.", required=False)
+    test_path_parser.add_argument("--path_alias", type=str, default="/RecordedPath",help="Alias/path of the Dummy that contains ctrlPt* children.")
+    test_path_parser.add_argument("--trials_per_sample", type=int, default=10,help="Random target placements per sampled pose.")
+    test_path_parser.add_argument("--n_samples", type=int, default=50,help="POints number to sample the path.")
+    test_path_parser.add_argument("--n_extra_poses", type=int, default=2,help="Extra robot poses for testing the robot at each scenario in each direction, changing the orientation of the robot in 10º each time.")
+    test_path_parser.add_argument("--sample_step_m", type=float, help="Path sampling step in meters.", default=0, required=False)
+    test_path_parser.add_argument("--robot_name", type=str, help="Name of the robot to be tested.")
+    test_path_parser.add_argument("--no_gui", action="store_true", help="Run Coppelia without GUI.")
+    test_path_parser.add_argument("--agent_side", action="store_true", help="Only start agent side (advanced).")
+    test_path_parser.add_argument("--rl_side", action="store_true", help="Only start RL side (advanced).")
+    test_path_parser.add_argument("--verbose", type=int, default=1, choices=[0,1,2,3], help="Verbosity (0..3).")
+    test_path_parser.add_argument("--timestamp", type=str, help="Timestamp provided externally (e.g., from GUI).", required=False)
+    test_path_parser.add_argument("--dis_parallel_mode", action="store_true", help="Disables the parallel training or testing.", required=False)
+    test_path_parser.add_argument("--comms_port", type=int, help="Number of the port to start the communications with the RL Side.", required=False)
+    test_path_parser.add_argument("--ip_address", type=str, help="IP address of the RL Side.", required=False)
+    test_path_parser.add_argument("--params_file", type=str, help="Path to the configuration file.",required=False)
+    test_path_parser.add_argument("--save_scene", action="store_true", help="Enables saving scene mode.", required=False, default=False)
+    test_path_parser.add_argument("--save_traj", action="store_true", help="Enables saving trajectory mode.", required=False, default=False)
+    test_path_parser.add_argument("--obstacles_csv_folder", type=str, help="Path to scene configuration folder in case that we want to test with fixed obstacles. Please just indicate the folder not the whole path (e.g. /Scene014)",required=False)
 
     test_scene_parser = subparsers.add_parser("test_scene", help="Test a trained RL algorithm for robot movement in CoppeliaSim for just one iteration, using a preconfigured scene.")
     test_scene_parser.add_argument("--model_ids", type=int, nargs='+', help="List with numerical IDs of the different models to be plotted. They must be located inside 'models' folder. Program will take the '_last' one", required=True)
@@ -164,6 +211,12 @@ def main(argv=None):
     elif args.command == "create_robot":
         from rl_coppelia import create_robot
         create_robot.main()
+    elif args.command == "test_program":
+        from rl_coppelia import test_program
+        test_program.main(args)
+    elif args.command == "test_path":
+        from rl_coppelia import test_path
+        test_path.main(args)
     else:
         parser.print_help() # Show help if no command provided
 

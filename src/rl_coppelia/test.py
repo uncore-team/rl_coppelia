@@ -100,7 +100,8 @@ def main(args):
         os.makedirs(trajs_folder, exist_ok=True)
 
         # Get output csv path
-        experiment_csv_name, _, experiment_csv_path, otherdata_csv_path = utils.get_output_csv(model_name, testing_folder, train_flag=False)
+        experiment_csv_name, experiment_csv_path= utils.get_output_csv(model_name, testing_folder, "test")
+        _, otherdata_csv_path = utils.get_output_csv(model_name, testing_folder, "otherdata")
 
         # Save a timestamp of the beggining of the testing
         start_time = time.time()
