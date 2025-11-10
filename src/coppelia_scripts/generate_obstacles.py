@@ -3,8 +3,9 @@ import math
 from typing import List, Tuple, Optional
 
 
-outer_disk_rad = -1
-distance_between_wheels = -1
+# ----- Variables for placing obstacles
+wheel_width = 0.01
+collision_tolerance = 0.02
 
 
 # -------------------------------
@@ -136,6 +137,7 @@ def _is_position_valid(
     r_x: float,
     r_y: float,
     diam_obstacles: float,
+    path_base_poses: Optional[list],
 ) -> bool:
     """Check clearance to all objects in collection using XY distance.
 
@@ -153,34 +155,43 @@ def _is_position_valid(
         True if the position is valid, False otherwise.
     """
     global sim
-    global outer_disk_rad
+
+    # Calculate the distance between the laser and the robot perimiter (it will be useful later)
+    laser_distance = max (0, max_crash_dist_critical - distance_between_wheels/2.0)
+
+    # Get objects collection of the scene
     objs = sim.getCollectionObjects(collection_handle) or []
+
     for obj in objs:
         pos = sim.getObjectPosition(obj, sim.handle_world)  # [x, y, z]
         dx, dy = (r_x - pos[0]), (r_y - pos[1])
         d = math.hypot(dx, dy)
 
         name = sim.getObjectAlias(obj) or ""
+        # Target case
         if "Outer_disk" in name:
-            # Bounding box provides a characteristic radius
-            min_x = sim.getObjectFloatParam(obj, 15)  # bbox min x
-            max_x = sim.getObjectFloatParam(obj, 18)  # bbox max x
-            radius = (max_x - min_x) / 2.0
-            threshold = radius + (diam_obstacles / 2.0) + 0.02
-            print("target th case")
-        elif "Burger" in name:
-            threshold = 0.033/2.0 + 0.18/2.0 + 0.01 + diam_obstacles/2.0 + 0.02 # TODO Fix, right now it's hardcoded
-        elif "Turtlebot2" in name or "ctrlPt" in name:
-            threshold = 0.035/2.0 + 0.13/2.0 + 0.01 + diam_obstacles/2.0 + 0.02
-            if "ctrlPt" in name:
-                print("path th case")
-            else:
-                print("Turtlebot2 th case")
+            threshold = outer_disk_rad + (diam_obstacles / 2.0) + collision_tolerance
+        # Robot case
+        elif any(k in name for k in ("Turtlebot2", "Burger")):
+            threshold = distance_between_wheels/2.0 + laser_distance + wheel_width + diam_obstacles/2.0 + collision_tolerance
+            print(threshold)
+        # Other obstacle/wall case
         else:
-            threshold = diam_obstacles + 0.18 + 0.02
+            threshold = diam_obstacles + max_crash_dist_critical+ collision_tolerance
         if d < threshold:
             print("Not valid position, obstacle is too close")
             return False
+        
+    # Path case
+    if path_base_poses is not None:
+        for pathPoint in path_base_poses:
+            dx, dy = (r_x - pathPoint[0]), (r_y - pathPoint[1])
+            d = math.hypot(dx, dy)
+            threshold = distance_between_wheels/2.0 + laser_distance + 0.01 + diam_obstacles/2.0 + 0.02
+            if d < threshold:
+                print("Not valid position, path point is too close")
+                return False
+        
     print("Valid position")
     return True
 
@@ -249,7 +260,14 @@ def sysCall_init():
     global n_quads_x, n_quads_y, grid_rows_per_quad, grid_cols_per_quad, flag_grid, grid_visible
     global floor_xSize, floor_ySize
     global max_X, max_Y, obstacles, cells
+    global distance_between_wheels, wheel_radius, max_crash_dist_critical, outer_disk_rad
     sim = require('sim')    # type: ignore
+
+    # Get parameters from RL side
+    distance_between_wheels = None
+    wheel_radius = None
+    max_crash_dist_critical = None
+    outer_disk_rad = None
     
     # Read config from customization script 
     gen = sim.getObject("..") #The same as: gen = sim.getObjectHandle('/Burger/Obs_Generator')
@@ -295,7 +313,7 @@ def sysCall_init():
                 sim.addDrawingObjectItem(h_dbg, [x, y, 0.02])
     
 
-def generate_obs(positions: Optional[List[Tuple[float, float]]]):
+def generate_obs(positions: Optional[List[Tuple[float, float]]], path_base_poses: Optional[list]):
     """
     Generate obstacles either:
       - Grid mode (flag_grid=True): just grid positions are allowed.
@@ -323,7 +341,7 @@ def generate_obs(positions: Optional[List[Tuple[float, float]]]):
             for (r_x, r_y) in cells:
                 if placed >= to_place:
                     break
-                if _is_position_valid(collection_handle, r_x, r_y, diam_obstacles):
+                if _is_position_valid(collection_handle, r_x, r_y, diam_obstacles, path_base_poses):
                     _place_obstacle(obstacles, r_x, r_y, height_obstacles, diam_obstacles, placed+1, collection_handle)
                     placed += 1
 
@@ -340,7 +358,7 @@ def generate_obs(positions: Optional[List[Tuple[float, float]]]):
                     r_x = random.uniform(-max_X, max_X)
                     r_y = random.uniform(-max_Y, max_Y)
 
-                    if _is_position_valid(collection_handle, r_x, r_y, diam_obstacles):
+                    if _is_position_valid(collection_handle, r_x, r_y, diam_obstacles, path_base_poses):
                         _place_obstacle(obstacles, r_x, r_y, height_obstacles, diam_obstacles, i+1, collection_handle)
                         done = True
 

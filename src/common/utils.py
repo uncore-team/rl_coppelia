@@ -1554,15 +1554,16 @@ def _build_replacements(
     replacements_robot = {
         "verbose": args.verbose,
         "distance_between_wheels": rl_copp_obj.params_scene["distance_between_wheels"],
-        "wheel_radius": rl_copp_obj.params_scene["wheel_radius"],
         "robot_alias": rl_copp_obj.params_train["robot_handle"],
         "robot_base_alias": rl_copp_obj.params_train["robot_base_handle"],
-        "laser_alias": rl_copp_obj.params_train["laser_handle"],
-        "verbose": args.verbose,
+        "laser_alias": rl_copp_obj.params_train["laser_handle"]
     }
 
     replacements_obstacles_gen = {
         "distance_between_wheels": rl_copp_obj.params_scene["distance_between_wheels"],
+        "wheel_radius": rl_copp_obj.params_scene["wheel_radius"],
+        "max_crash_dist_critical": rl_copp_obj.params_env["max_crash_dist_critical"],
+        "outer_disk_rad": rl_copp_obj.params_scene["outer_disk_rad"]
     }
 
     return replacements_agent, replacements_robot, replacements_obstacles_gen

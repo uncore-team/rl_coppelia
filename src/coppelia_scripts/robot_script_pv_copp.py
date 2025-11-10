@@ -162,15 +162,15 @@ def build_world_poses_from_path_data(
     # --- Yaw augmentation for extra cases
     n_extra = max(0, int(n_extra_poses))
     delta = math.radians(float(delta_deg))
-    out = []
+    augmented_poses = []
     for (x, y, z, yaw) in base_poses:
-        out.append((x, y, z, yaw))  # base
+        augmented_poses.append((x, y, z, yaw))  # base
         for k in range(1, n_extra + 1):
-            out.append((x, y, z, _normalize_angle(yaw + k * delta)))
+            augmented_poses.append((x, y, z, _normalize_angle(yaw + k * delta)))
         for k in range(1, n_extra + 1):
-            out.append((x, y, z, _normalize_angle(yaw - k * delta)))
+            augmented_poses.append((x, y, z, _normalize_angle(yaw - k * delta)))
 
-    return out
+    return augmented_poses, base_poses
 
 
 # -------------------------------

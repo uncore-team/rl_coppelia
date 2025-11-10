@@ -256,7 +256,12 @@ class CoppeliaAgent:
         self.trials_per_sample = 0
         self.ts_received = False
         self.current_sample_idx_pv = 0
-        self.pos_samples = []
+        self.path_pos_samples = []
+        self.path_base_pos_samples = []
+        self.path_handle = None
+        self.perimeterRadius = 1.0 # meters
+        self.new_robot_pose = (0.0,0.0,0.0,0.0)
+        
 
     
     def start_communication(self):
@@ -272,7 +277,8 @@ class CoppeliaAgent:
                 break
             except:
                 logging.info("Connection with RL failed. Retrying in few secs...")
-                self.sim.wait(20)
+                self.sim.wait(5)
+        return True
         
     
     def get_observation(self):
@@ -440,6 +446,162 @@ class CoppeliaAgent:
         objectPosY = random.uniform(-containerSideY/2 + objectRadius, containerSideY/2 - objectRadius)
 
         return objectPosX, objectPosY 
+
+    
+    def get_target_in_path_pos(
+        self,
+        robot_pose_world: tuple[float, float, float, float],
+        radius: float,
+    ):
+        """Compute a target point on the path using a robot-centered lookahead circle.
+
+        The algorithm:
+        1) Reads the densified path samples from `customData.PATH` (local Path frame).
+        2) Transforms path points into world frame using the Path pose.
+        3) Computes 2D intersections (XY) between the path segments and a circle of
+            radius `radius` centered at the robot (x, y).
+        4) Selects the nearest intersection that is AHEAD of the robot (dot(h, p-c) > 0),
+            where h = [cos(yaw), sin(yaw)] and c = robot XY.
+        5) If no AHEAD intersection exists, falls back to a point D=radius straight
+            ahead of the robot along +X (its heading).
+        6) Returns the chosen (x, y, z) in world frame and, if `self.target_handle`
+            is available, places the target there.
+
+        Args:
+            robot_pose_world (tuple[float, float, float, float]): (x, y, z, yaw) of the robot in world frame.
+            radius (float): Lookahead circle radius in meters. Also used as forward distance D for the fallback.
+
+        Returns:
+            tuple[float, float, float]: Target world position (x, y, z).
+
+        Notes:
+            - Requires the Path object to have `customData.PATH` with flattened
+            [x, y, z, qx, qy, qz, qw] per sample.
+            - Intersections are computed in XY; z is linearly interpolated across the segment.
+            - If multiple AHEAD intersections exist, the closest to the robot center is chosen.
+            - Fallback uses the robot's z. If you prefer the last path z, see the commented line.
+        """
+        import math
+
+        # ---------------- Quaternion helpers (Path local -> world) ----------------
+        def _q_normalize(q):
+            """Normalize quaternion (x, y, z, w)."""
+            x, y, z, w = q
+            n = math.sqrt(x * x + y * y + z * z + w * w)
+            if n < 1e-16:
+                return (0.0, 0.0, 0.0, 1.0)
+            return (x / n, y / n, z / n, w / n)
+
+        def _q_rotate_point(q, p):
+            """Rotate point p=(x,y,z) by quaternion q=(x,y,z,w)."""
+            x, y, z = p
+            qx, qy, qz, qw = q
+            ix = qw * x + qy * z - qz * y
+            iy = qw * y + qz * x - qx * z
+            iz = qw * z + qx * y - qy * x
+            iw = -qx * x - qy * y - qz * z
+            rx = ix * qw + iw * -qx + iy * -qz - iz * -qy
+            ry = iy * qw + iw * -qy + iz * -qx - ix * -qz
+            rz = iz * qw + iw * -qz + ix * -qy - iy * -qx
+            return (rx, ry, rz)
+
+        # ---------------- Read & unpack densified path (local frame) ---------------
+        buf = self.sim.getBufferProperty(self.path_handle, 'customData.PATH', {'noError': True})
+        if not buf:
+            self.sim.addLog(self.sim.verbosity_scripterrors, 'customData.PATH not found on the Path.')
+            return None
+        data = self.sim.unpackDoubleTable(buf)  # [x,y,z,qx,qy,qz,qw, ...]
+        if len(data) % 7 != 0:
+            self.sim.addLog(self.sim.verbosity_scripterrors, 'customData.PATH size is not a multiple of 7.')
+            return None
+
+        n = len(data) // 7
+        if n < 2:
+            self.sim.addLog(self.sim.verbosity_scripterrors, 'Path has fewer than 2 samples.')
+            return None
+
+        # Keep only local positions (we ignore local quaternions for intersections)
+        loc_pts = [(data[7 * i + 0], data[7 * i + 1], data[7 * i + 2]) for i in range(n)]
+
+        # ---------------- Transform local path points -> world ----------------------
+        p_path = self.sim.getObjectPosition(self.path_handle, -1)     # world
+        q_path = self.sim.getObjectQuaternion(self.path_handle, -1)   # world
+        q_path = _q_normalize((q_path[0], q_path[1], q_path[2], q_path[3]))
+
+        w_pts = []
+        append_wp = w_pts.append
+        px, py, pz = p_path
+        for (lx, ly, lz) in loc_pts:
+            wx, wy, wz = _q_rotate_point(q_path, (lx, ly, lz))
+            append_wp((wx + px, wy + py, wz + pz))
+
+        # ---------------- Unpack robot pose & heading -------------------------------
+        cx, cy, cz, yaw = robot_pose_world
+        r = float(radius)
+        hx, hy = math.cos(yaw), math.sin(yaw)  # heading unit vector
+
+        # ---------------- Circle–segment intersections in XY -----------------------
+        def _segment_circle_intersections(a, b, center_xy, radius_):
+            """Return list of (t, x, y, z) with t in [0,1] for segment a->b, circle in XY."""
+            ax, ay, az = a
+            bx, by, bz = b
+            cx_, cy_ = center_xy
+            dx, dy = (bx - ax), (by - ay)
+
+            A = dx * dx + dy * dy
+            if A <= 1e-16:
+                return []  # degenerate segment in XY
+
+            fx, fy = (ax - cx_), (ay - cy_)
+            B = 2.0 * (dx * fx + dy * fy)
+            C = fx * fx + fy * fy - radius_ * radius_
+            disc = B * B - 4.0 * A * C
+            if disc < -1e-12:
+                return []
+
+            out = []
+            disc = max(disc, 0.0)  # clamp small negatives due to precision
+            sqrt_disc = math.sqrt(disc)
+            for s in (-1.0, 1.0):
+                t = (-B + s * sqrt_disc) / (2.0 * A)
+                if -1e-12 <= t <= 1.0 + 1e-12:
+                    t = min(1.0, max(0.0, t))
+                    x = ax + t * (bx - ax)
+                    y = ay + t * (by - ay)
+                    z = az + t * (bz - az)  # linear z interpolation
+                    out.append((t, x, y, z))
+            return out
+
+        candidates_ahead = []
+        for i in range(len(w_pts) - 1):
+            a = w_pts[i]
+            b = w_pts[i + 1]
+            for (t, x, y, z) in _segment_circle_intersections(a, b, (cx, cy), r):
+                vx, vy = (x - cx), (y - cy)
+                if (hx * vx + hy * vy) > 0.0:  # AHEAD test
+                    dist2 = vx * vx + vy * vy
+                    candidates_ahead.append((dist2, x, y, z, i, t))
+
+        # ---------------- Choose best AHEAD intersection or fallback ----------------
+        if candidates_ahead:
+            # Nearest ahead
+            _, x, y, z, seg_idx, t = min(candidates_ahead, key=lambda c: c[0])
+            log_msg = f'Placed target at AHEAD intersection: seg={seg_idx}, t={t:.3f}.'
+        else:
+            # Fallback: place D=radius straight ahead along robot +X
+            x = cx + r * hx
+            y = cy + r * hy
+            z = cz  # (Alternative) use last path z: z = w_pts[-1][2]
+            log_msg = 'No AHEAD intersection. Fallback: placed target D ahead along robot +X.'
+
+        # ---------------- Apply to target (if available) & return -------------------
+        if getattr(self, 'target_handle', None) is not None:
+            self.sim.setObjectPosition(self.target_handle, [x, y, z], -1)
+
+        self.sim.addLog(self.sim.verbosity_scriptinfos, log_msg)
+        return x, y
+
+
     
 
     def is_position_valid(self, object_type, posObjectX, posObjectY):
@@ -1002,21 +1164,14 @@ class CoppeliaAgent:
                     if not self.first_reset_done:
                         if self.generator is not None:
                             logging.info(f"Regenerating new obstacles as it's the first RESET...")
-                            self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script, [])
+                            self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script, [], self.path_base_pos_samples)
 
-                    # --- Reset the target/robot
-                    # Place target randomly
-                    while True:
-                        posX, posY = self.get_random_object_pos('target')
-                        if self.is_position_valid('target', posX, posY):
-                            break
-                    logging.info(f"Target new position: {posX}, {posY}")
-                    self.sim.setObjectPosition(self.target, -1, [posX, posY, 0])
-
-                    # If the robot has been tested N trials_per_sample in the same position of the path, then change the position
+                    # --- Reset the robot
+                    # If the robot has been tested N trials_per_sample in the same position of the path, then change its position
                     if not self.first_reset_done or self.current_trial_idx_pv == self.trials_per_sample-1:
-                        self.sim.callScriptFunction('rp_tp', self.handle_robot_scripts, self.pos_samples[self.current_sample_idx_pv])
-                        logging.info(f"Robot teletransported to new pos: {self.pos_samples[self.current_sample_idx_pv]}")
+                        self.new_robot_pose = self.path_pos_samples[self.current_sample_idx_pv]
+                        self.sim.callScriptFunction('rp_tp', self.handle_robot_scripts, self.new_robot_pose)
+                        logging.info(f"Robot teletransported to new pos: {self.new_robot_pose}")
                         if not self.first_reset_done:
                             self.first_reset_done = True
 
@@ -1026,7 +1181,22 @@ class CoppeliaAgent:
 
                     else:
                         self.current_trial_idx_pv+=1    # Increment trial counter for current position
-                        
+
+                    # --- Reset the target
+                    # - Option A: Calculate target position randomly
+                    while True:
+                        posX, posY = self.get_random_object_pos('target')
+                        if self.is_position_valid('target', posX, posY):
+                            break
+
+                    # - Option B: Calculate target position based on the path
+                    # The position will be the intersection between the path and a circular perimeter around the robot
+                    posX, posY = self.get_target_in_path_pos(self.new_robot_pose, self.perimeterRadius)
+                    
+                    # Place the target
+                    logging.info(f"Target new position: {posX}, {posY}")
+                    self.sim.setObjectPosition(self.target, -1, [posX, posY, 0])
+
                     # --- Get an observation
                     observation = self.get_observation_space()
                     logging.info(f"Obs send RESET: { {key: round(value, 3) for key, value in observation.items()} }")

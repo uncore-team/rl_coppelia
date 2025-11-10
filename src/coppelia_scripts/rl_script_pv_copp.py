@@ -56,6 +56,7 @@ agent = None
 verbose = 1
 agent_created = False
 init_done = False
+comm_init_done = False
 
 # Config variables (values received from RL side)
 path_alias = ""
@@ -164,13 +165,13 @@ def sysCall_init():
 
 def sysCall_thread():
     global sim, agent
-    global init_done
+    global init_done, comm_init_done
     global trials_per_sample, sample_step_m, n_samples, path_alias, n_extra_poses
 
     if not init_done: 
         pass
 
-    agent.start_communication()
+    comm_init_done = agent.start_communication()
 
     logging.info("Agent initialized and communication with RL side established")
 
@@ -215,7 +216,8 @@ def sysCall_thread():
 
     # ----- Path sampling -----
     _robot_script = agent.handle_robot_scripts
-    agent.pos_samples = agent.sim.callScriptFunction('rp_init', _robot_script, n_samples, n_extra_poses, path_alias)
+    agent.path_handle = sim.getObject(path_alias)
+    agent.path_pos_samples, agent.path_base_pos_samples = agent.sim.callScriptFunction('rp_init', _robot_script, n_samples, n_extra_poses, path_alias)
 
     logging.info(" ----- START EXPERIMENT ----- ")
 
@@ -226,8 +228,9 @@ def sysCall_sensing():
     """
     global sim, agent
     global verbose
+    global comm_init_done
     
-    if agent and not agent.finish_rec:
+    if agent and comm_init_done and not agent.finish_rec:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
         action = agent.agent_step_pv()
 
