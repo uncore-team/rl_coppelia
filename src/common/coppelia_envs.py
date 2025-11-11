@@ -202,7 +202,7 @@ class CoppeliaEnv(gym.Env, ABC):
         logging.info("RESET Call")
 
         # Get the initial observation after resetting the environment
-        self.observation, self.ato = self._commstoagent.resetGetObs(timeout = 20.0)
+        self.observation, self.ato, self.info_obs = self._commstoagent.resetGetObs(timeout = 20.0)
 
         # Reset counters and termination flags
         self.terminated = False
@@ -219,10 +219,10 @@ class CoppeliaEnv(gym.Env, ABC):
         self.observation = np.array(list(self.observation.values()), dtype=np.float32)
 
         # Add additional information (optional)
-        self.info = {}
+        # self.info_obs = {}
 
         # SB3 learn method needs a tuple
-        return (self.observation, self.info) 
+        return (self.observation, self.info_obs) 
     
 
     def compute_reward(self):

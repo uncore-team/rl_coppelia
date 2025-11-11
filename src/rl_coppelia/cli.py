@@ -81,7 +81,8 @@ def main(argv=None):
     test_path_parser.add_argument("--trials_per_sample", type=int, default=10,help="Random target placements per sampled pose.")
     test_path_parser.add_argument("--n_samples", type=int, default=50,help="POints number to sample the path.")
     test_path_parser.add_argument("--n_extra_poses", type=int, default=2,help="Extra robot poses for testing the robot at each scenario in each direction, changing the orientation of the robot in 10º each time.")
-    test_path_parser.add_argument("--sample_step_m", type=float, help="Path sampling step in meters.", default=0, required=False)
+    test_path_parser.add_argument("--place_obstacles_flag", action="store_true", help="Flag for placing obstacles in the scene or not.", default=False, required=False)
+    test_path_parser.add_argument("--random_target_flag", action="store_true", help="Flag for placing target randomly or not.", default=False, required=False)
     test_path_parser.add_argument("--robot_name", type=str, help="Name of the robot to be tested.")
     test_path_parser.add_argument("--no_gui", action="store_true", help="Run Coppelia without GUI.")
     test_path_parser.add_argument("--agent_side", action="store_true", help="Only start agent side (advanced).")
@@ -95,6 +96,8 @@ def main(argv=None):
     test_path_parser.add_argument("--save_scene", action="store_true", help="Enables saving scene mode.", required=False, default=False)
     test_path_parser.add_argument("--save_traj", action="store_true", help="Enables saving trajectory mode.", required=False, default=False)
     test_path_parser.add_argument("--obstacles_csv_folder", type=str, help="Path to scene configuration folder in case that we want to test with fixed obstacles. Please just indicate the folder not the whole path (e.g. /Scene014)",required=False)
+    test_path_parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE", help="Override of params.json parameters (use dot notation).")
+
 
     test_scene_parser = subparsers.add_parser("test_scene", help="Test a trained RL algorithm for robot movement in CoppeliaSim for just one iteration, using a preconfigured scene.")
     test_scene_parser.add_argument("--model_ids", type=int, nargs='+', help="List with numerical IDs of the different models to be plotted. They must be located inside 'models' folder. Program will take the '_last' one", required=True)

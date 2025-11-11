@@ -25,18 +25,10 @@ import os
 import csv
 import logging
 import stable_baselines3
+from tqdm.auto import tqdm
 
 from common import utils
 from common.rl_coppelia_manager import RLCoppeliaManager
-
-# ZMQ Remote API
-try:
-    from coppeliasim_zmqremoteapi_client import RemoteAPIClient
-except Exception as e:
-    raise ImportError(
-        "Could not import coppeliasim_zmqremoteapi_client. "
-        "Make sure CoppeliaSim's ZMQ Remote API Python client is on PYTHONPATH."
-    ) from e
 
 
 # ----------------------------------------------------------------------
@@ -85,12 +77,15 @@ def main(args):
     
         # CSV header
         observation_names = rl_copp.env.envs[0].unwrapped.params_env.get("observation_names", [])
-        headers = ["Point idx"] + ["Timestep"] + observation_names
+        id_headers = ["Position idx"] + ["Scenario idx"]  + ["Trial idx"] 
+        position_info_headers = ["Pos X"] + ["Pos Y"] 
+        headers = id_headers + position_info_headers + ["Timestep"] + observation_names
         
         logging.info(
-            f" --- Testing the robot {rl_copp.robot_name} with its model {model_name} ---\n"
-            f"          - Path will be sampled in: {args.n_samples} -\n"
-            f"          - Each sample will be tested with {args.trials_per_sample} scenarios")
+            f" ----- Testing the robot {rl_copp.robot_name} with its model {model_name} -----\n"
+            f"          --- Path will be sampled in: {args.n_samples}. ---\n"
+            f"          --- Each sample will be tested with {args.n_extra_poses*2+1} scenarios. ---\n"
+            f"          --- Each scenario will be repeated {args.trials_per_sample} times. ---\n")
 
         with open(experiment_csv_path, mode="w", newline="") as f:
             writer = csv.writer(f)
@@ -98,27 +93,34 @@ def main(args):
 
             # Iterate sampled points trials_per_sample times each point
             total_robot_poses = args.n_samples*(args.n_extra_poses*2+1)
-            for point_idx in range(total_robot_poses):
 
-                # For each sampled point of the path, test different target scenarios
-                for trial_idx in range(args.trials_per_sample):
-                    
-                    observation, *_ = rl_copp.env.envs[0].reset()
-                    logging.info(f"Current sample idx: {point_idx}. Current trial idx: {trial_idx}.")
+            for position_idx in range(args.n_samples):
 
-                    # Predict action based on last observation
-                    action, _states = model.predict(observation, deterministic=True)
+                for scenario_idx in range(args.n_extra_poses*2+1):
 
-                    # Send a step to the agent jsut to confirm that a new action has been predicted successfully
-                    observation, _, terminated, truncated, info = rl_copp.env.envs[0].step(action)
-                    
-                    # Save the predicted timestep
-                    ts_value = float(info["actions"]["timestep"])
+                    # For each sampled point of the path, test different target scenarios
+                    for trial_idx in range(args.trials_per_sample):
+                        
+                        observation, info_obs = rl_copp.env.envs[0].reset()
+                        logging.info(f"Position idx: {position_idx}. Scenario idx: {scenario_idx}. Trial idx: {trial_idx}")
 
-                    obs_values = [round(float(v), 4) for v in observation.tolist()]
+                        # Predict action based on last observation
+                        action, _states = model.predict(observation, deterministic=True)
 
-                    row = [point_idx] + [ts_value] + obs_values
-                    writer.writerow(row)
+                        # Send a step to the agent jsut to confirm that a new action has been predicted successfully
+                        observation, _, terminated, truncated, info = rl_copp.env.envs[0].step(action)
+                        
+                        # Save the predicted timestep
+                        ts_value = float(info["actions"]["timestep"])
+
+                        obs_values = [round(float(v), 4) for v in observation.tolist()]
+
+                        # Format obtained info
+                        logging.info(f"Extra info in the osbervation: {info_obs}")
+                        info_obs = [info_obs["posX"], info_obs["posY"]]
+
+                        row = [position_idx] + [scenario_idx] + [trial_idx] + info_obs + [ts_value] + obs_values
+                        writer.writerow(row)
 
             logging.info(f"[test_path] Saved results to: {experiment_csv_path}")
 

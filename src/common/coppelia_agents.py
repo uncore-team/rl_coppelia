@@ -586,19 +586,19 @@ class CoppeliaAgent:
         if candidates_ahead:
             # Nearest ahead
             _, x, y, z, seg_idx, t = min(candidates_ahead, key=lambda c: c[0])
-            log_msg = f'Placed target at AHEAD intersection: seg={seg_idx}, t={t:.3f}.'
+            # log_msg = f'Placed target at AHEAD intersection: seg={seg_idx}, t={t:.3f}.'
         else:
             # Fallback: place D=radius straight ahead along robot +X
             x = cx + r * hx
             y = cy + r * hy
             z = cz  # (Alternative) use last path z: z = w_pts[-1][2]
-            log_msg = 'No AHEAD intersection. Fallback: placed target D ahead along robot +X.'
+            # log_msg = 'No AHEAD intersection. Fallback: placed target D ahead along robot +X.'
 
         # ---------------- Apply to target (if available) & return -------------------
         if getattr(self, 'target_handle', None) is not None:
             self.sim.setObjectPosition(self.target_handle, [x, y, z], -1)
 
-        self.sim.addLog(self.sim.verbosity_scriptinfos, log_msg)
+        # self.sim.addLog(self.sim.verbosity_scriptinfos, log_msg)
         return x, y
 
 
@@ -1056,11 +1056,12 @@ class CoppeliaAgent:
         return action  # Continue the loop
     
 
-    def agent_step_pv(self):
+    def agent_step_pv(self, place_obstacles_flag, random_target_flag):
         """
         A step of the agent. Process incoming instructions from the server side and execute actions accordingly.
         Args:
             self: The CoppeliaAgent instance.
+            # TODO
         Returns:
             dict: The action to be executed.
         """
@@ -1071,7 +1072,7 @@ class CoppeliaAgent:
         if not self._waitingforrlcommands: # not waiting new commands from RL, just executing last action
             self.current_sim_offset_time = self.sim.getSimulationTime()-self.episode_start_time_sim
             # if (self.current_sim_offset_time-self._lastactiont0_sim >= self._rltimestep): # last action finished
-            if (self.current_sim_offset_time-self._lastactiont0_sim >= 0.2):
+            if (self.current_sim_offset_time-self._lastactiont0_sim >= 0.15):
             # if (self.sim.getSimulationTime()-self._lastactiont0 >= self._rltimestep):
 
                 logging.info("Act time completed.")
@@ -1161,7 +1162,7 @@ class CoppeliaAgent:
                     # self.sim.callScriptFunction('cmd_vel',self.handle_robot_scripts,0,0)
 
                     # --- Reset obstacles for first reset
-                    if not self.first_reset_done:
+                    if place_obstacles_flag and not self.first_reset_done:
                         if self.generator is not None:
                             logging.info(f"Regenerating new obstacles as it's the first RESET...")
                             self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script, [], self.path_base_pos_samples)
@@ -1169,33 +1170,39 @@ class CoppeliaAgent:
                     # --- Reset the robot
                     # If the robot has been tested N trials_per_sample in the same position of the path, then change its position
                     if not self.first_reset_done or self.current_trial_idx_pv == self.trials_per_sample-1:
+                        if self.current_trial_idx_pv == self.trials_per_sample-1:
+                            self.current_sample_idx_pv +=1
+                            self.current_trial_idx_pv = 0
+                        else:
+                            self.first_reset_done = True
+
                         self.new_robot_pose = self.path_pos_samples[self.current_sample_idx_pv]
                         self.sim.callScriptFunction('rp_tp', self.handle_robot_scripts, self.new_robot_pose)
                         logging.info(f"Robot teletransported to new pos: {self.new_robot_pose}")
-                        if not self.first_reset_done:
-                            self.first_reset_done = True
-
-                        else:
-                            self.current_sample_idx_pv +=1
-                            self.current_trial_idx_pv = 0
 
                     else:
                         self.current_trial_idx_pv+=1    # Increment trial counter for current position
 
                     # --- Reset the target
+                    posX, posY = None, None
+
                     # - Option A: Calculate target position randomly
-                    while True:
-                        posX, posY = self.get_random_object_pos('target')
-                        if self.is_position_valid('target', posX, posY):
-                            break
+                    if random_target_flag:
+                        while True:
+                            posX, posY = self.get_random_object_pos('target')
+                            if self.is_position_valid('target', posX, posY):
+                                break
 
                     # - Option B: Calculate target position based on the path
                     # The position will be the intersection between the path and a circular perimeter around the robot
-                    posX, posY = self.get_target_in_path_pos(self.new_robot_pose, self.perimeterRadius)
+                    # This option just needs to be done before the first trial of each scenario
+                    elif self.current_trial_idx_pv==0:   
+                        posX, posY = self.get_target_in_path_pos(self.new_robot_pose, self.perimeterRadius)
                     
                     # Place the target
-                    logging.info(f"Target new position: {posX}, {posY}")
-                    self.sim.setObjectPosition(self.target, -1, [posX, posY, 0])
+                    if posX is not None and posY is not None:
+                        logging.info(f"Target new position: {posX}, {posY}")
+                        self.sim.setObjectPosition(self.target, -1, [posX, posY, 0])
 
                     # --- Get an observation
                     observation = self.get_observation_space()
@@ -1203,7 +1210,11 @@ class CoppeliaAgent:
                     
                     # --- Send the observation and the agent time (simulation time) to the RLSide
                     simTime = self.sim.getSimulationTime() - self.initial_simTime
-                    self._commstoRL.resetSendObs(observation, simTime)
+                    info = {
+                        "posX": self.new_robot_pose[0], 
+                        "posY": self.new_robot_pose[1]
+                        }
+                    self._commstoRL.resetSendObs(observation, simTime, info)
 
                     self.reset_flag = True
                     action = None

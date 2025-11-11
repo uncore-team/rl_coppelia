@@ -69,7 +69,7 @@ def build_world_poses_from_path_data(
     path_handle,
     n_samples: int,
     n_extra_poses: int = 0,
-    delta_deg: float = 10.0
+    delta_deg: float = 5.0
 ):
     """Return (x, y, z, yaw) poses uniformly sub-sampled by index from a CoppeliaSim Path.
 
@@ -124,16 +124,17 @@ def build_world_poses_from_path_data(
     if n_pos != n_quat or n_pos == 0:
         raise ValueError(f"Inconsistent path arrays: {n_pos} positions vs {n_quat} quaternions")
     n_original_samples = n_pos
+    indices = []
 
     # --- Compute uniform-by-index sample indices
     if n_samples != n_original_samples:
         if n_samples > n_original_samples:
-            print(f"Resampling the apth will not be neccessary as it already has {n_original_samples}")
+            print(f"Resampling the path will not be neccessary as it already has {n_original_samples}")
         else:
             print(f"N original samples: {n_original_samples}, will be resampled to {n_samples}")
      
         # Evenly spread integers in [0..M-1]
-        indices = []
+        
         for k in range(n_samples):
             # Round to nearest valid index
             idx = int(round(k * (n_original_samples - 1) / (n_samples - 1)))
@@ -142,6 +143,10 @@ def build_world_poses_from_path_data(
         # Ensure exact count
         while len(indices) < n_samples and indices[-1] < n_original_samples - 1:
             indices.append(indices[-1] + 1)
+    
+    else:
+        for k in range(n_original_samples):
+            indices.append(k)
 
     # --- Build base (x,y,z,yaw) samples 
     base_poses = []

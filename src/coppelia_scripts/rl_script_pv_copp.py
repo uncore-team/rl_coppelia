@@ -105,7 +105,7 @@ def sysCall_init():
     global robot_name, model_ids, params_scene, params_env, paths, file_id, model_name, verbose
     global save_scene, save_traj, action_times, obstacles_csv_folder, scene_to_load_folder
     global comms_port, ip_address
-    global trials_per_sample, sample_step_m, n_samples, path_alias, n_extra_poses
+    global trials_per_sample, sample_step_m, n_samples, path_alias, n_extra_poses, place_obstacles_flag, random_target_flag
 
     sim = require('sim')    # type: ignore
 
@@ -130,6 +130,8 @@ def sysCall_init():
     trials_per_sample = None
     n_samples = None
     n_extra_poses = None
+    place_obstacles_flag = None
+    random_target_flag = None
 
 
     # Generate needed routes for logs and tf
@@ -218,6 +220,7 @@ def sysCall_thread():
     _robot_script = agent.handle_robot_scripts
     agent.path_handle = sim.getObject(path_alias)
     agent.path_pos_samples, agent.path_base_pos_samples = agent.sim.callScriptFunction('rp_init', _robot_script, n_samples, n_extra_poses, path_alias)
+    logging.info(f"Total number of scenarios to test: {len(agent.path_pos_samples)}.")
 
     logging.info(" ----- START EXPERIMENT ----- ")
 
@@ -229,10 +232,11 @@ def sysCall_sensing():
     global sim, agent
     global verbose
     global comm_init_done
+    global place_obstacles_flag, random_target_flag
     
     if agent and comm_init_done and not agent.finish_rec:
         # Loop for processing instructions from RL continuously until the agent receives a FINISH command.
-        action = agent.agent_step_pv()
+        action = agent.agent_step_pv(place_obstacles_flag, random_target_flag)
 
         # If an action is received, execute it
         if action is not None:
@@ -240,7 +244,7 @@ def sysCall_sensing():
             if agent.ts_received:
                 if len(action)>0:
                     # agent.sim.callScriptFunction('cmd_vel', agent.handle_robot_scripts, action["linear"], action["angular"])
-                    logging.info(f"Current sample idx: {agent.current_sample_idx_pv}. Current sample trial: {agent.current_trial_idx_pv}")
+                    logging.info(f"Sample idx: {agent.current_sample_idx_pv}. Trial idx: {agent.current_trial_idx_pv}")
                     logging.info("Action has been predicted. Changing target and/or robot after action finishes")
                     # agent.sim.callScriptFunction('draw_path', agent.handle_robot_scripts, FIXED_SPEED, action["angular"], agent.colorID)
             agent.ts_received = False

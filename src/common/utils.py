@@ -1,3 +1,5 @@
+import ast
+from copy import deepcopy
 import os
 from collections import defaultdict
 import csv
@@ -846,6 +848,126 @@ def load_params(file_path):
         logging.error(f"Error loading configuration file: {e}")
         raise
     
+
+def smart_cast(v: str):
+    v = v.strip()
+    try: return json.loads(v)       # true/false/null, números, listas/dicts...
+    except: pass
+    try: return ast.literal_eval(v) # tuplas, etc.
+    except: pass
+    if v.lower() in ("true","false"):
+        return v.lower() == "true"
+    return v
+
+_INDEX_RE = re.compile(r"([^\[\]]+)(?:\[(\d+)\])?")  # token o token[idx]
+
+
+def deep_set_indexed(d: dict, dotted: str, value):
+    parts = dotted.split(".")
+    cur = d
+    for i, part in enumerate(parts):
+        m = _INDEX_RE.fullmatch(part)
+        if not m: raise ValueError(f"Clave inválida: {part}")
+        key, idx = m.group(1), m.group(2)
+        last = (i == len(parts) - 1)
+
+        if idx is None:
+            # dict step
+            if last:
+                cur[key] = value
+            else:
+                if key not in cur or not isinstance(cur[key], (dict, list)):
+                    cur[key] = {}
+                if isinstance(cur[key], list):
+                    raise TypeError(f"Se esperaba dict en '{key}' pero hay list.")
+                cur = cur[key]
+        else:
+            # list step
+            idx = int(idx)
+            if key not in cur or not isinstance(cur[key], list):
+                cur[key] = []
+            lst = cur[key]
+            if idx >= len(lst):
+                lst.extend([None]*(idx - len(lst) + 1))
+            if last:
+                lst[idx] = value
+            else:
+                if lst[idx] is None:
+                    lst[idx] = {}
+                if not isinstance(lst[idx], dict):
+                    raise TypeError(f"Se esperaba dict en '{key}[{idx}]'.")
+                cur = lst[idx]
+
+
+def parse_overrides_list(pairs):
+    result = {}
+    for item in pairs:
+        if "=" not in item:
+            raise ValueError(f"Override inválido (usa KEY=VALUE): {item}")
+        key, val = item.split("=", 1)
+        deep_set_indexed(result, key.strip(), smart_cast(val))
+    return result
+
+
+def deep_update(base: dict, patch: dict):
+    for k, v in patch.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            deep_update(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
+def collect_unknown(patch: dict, ref: dict, prefix=""):
+    unknown = []
+
+    # Si el patch no es dict, no hay claves que recorrer
+    if not isinstance(patch, dict):
+        return unknown
+
+    for k, v in patch.items():
+        keypath = f"{prefix}.{k}" if prefix else k
+
+        # Si ref no es dict o no tiene la clave, toda la rama es desconocida
+        if not isinstance(ref, dict) or k not in ref:
+            # aplanamos la rama para reportar todas las subclaves si v es dict
+            if isinstance(v, dict):
+                stack = [(keypath, v)]
+                while stack:
+                    base, sub = stack.pop()
+                    unknown.append(base)
+                    for kk, vv in sub.items():
+                        subpath = f"{base}.{kk}"
+                        if isinstance(vv, dict):
+                            stack.append((subpath, vv))
+                        else:
+                            unknown.append(subpath)
+            else:
+                unknown.append(keypath)
+            continue
+
+        refk = ref[k]
+
+        # Si v es dict y refk también dict, recursiona
+        if isinstance(v, dict) and isinstance(refk, dict):
+            unknown += collect_unknown(v, refk, keypath)
+        # Si v es dict pero refk NO es dict, estás intentando profundizar donde no toca
+        elif isinstance(v, dict) and not isinstance(refk, dict):
+            # reporta toda la rama como desconocida
+            stack = [(keypath, v)]
+            while stack:
+                base, sub = stack.pop()
+                unknown.append(base)
+                for kk, vv in sub.items():
+                    subpath = f"{base}.{kk}"
+                    if isinstance(vv, dict):
+                        stack.append((subpath, vv))
+                    else:
+                        unknown.append(subpath)
+        # Si v no es dict (scalar/list/etc.) y la clave existe, es OK → nada que hacer
+
+    return unknown
+
     
 def get_output_csv_deprecated(model_name, metrics_path, train_flag=True):   # TODO remove it's deprecated
     """
@@ -1547,8 +1669,9 @@ def _build_replacements(
             "path_alias": args.path_alias,
             "trials_per_sample": args.trials_per_sample,
             "n_samples": args.n_samples,
-            "sample_step_m": args.sample_step_m,
-            "n_extra_poses": args.n_extra_poses
+            "n_extra_poses": args.n_extra_poses,
+            "place_obstacles_flag": args.place_obstacles_flag,
+            "random_target_flag": args.random_target_flag
         })
 
     replacements_robot = {

@@ -137,7 +137,41 @@ class RLCoppeliaManager():
         if not os.path.isfile(source):
             raise FileNotFoundError(f"Params file not found: {source}")
 
-        self.params_scene, self.params_env, self.params_train, self.params_test = utils.load_params(source)
+        # self.params_scene, self.params_env, self.params_train, self.params_test = utils.load_params(source)
+
+        # Load base params file
+        scene, env, train, test = utils.load_params(source)
+
+        # Prepare a tree for merging
+        params = {
+            "params_scene": scene,
+            "params_env": env,
+            "params_train": train,
+            "params_test": test,
+        }
+
+        # Apply overrides from CLI
+        overrides_cli = getattr(args, "overrides", []) or []
+        if overrides_cli:
+            patch = utils.parse_overrides_list(overrides_cli)
+
+            # Warning of unknown keys
+            unknown = utils.collect_unknown(patch, params)
+            if unknown:
+                print("[WARN] Keys not present in params base: " + ", ".join(sorted(set(unknown))))
+
+            utils.deep_update(params, patch)
+
+            # Log applied overrides
+            logging.info("[INFO] Overrides applied:")
+            for item in overrides_cli:
+                logging.info(f"   --set {item}")
+
+        # Unpack the parameters
+        self.params_scene = params["params_scene"]
+        self.params_env   = params["params_env"]
+        self.params_train = params["params_train"]
+        self.params_test  = params["params_test"]
 
 
     def _select_comms_port(self, args, default_start: int) -> int:
