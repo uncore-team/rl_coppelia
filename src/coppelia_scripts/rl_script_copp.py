@@ -55,7 +55,7 @@ agent = None
 verbose = 1
 sim_initialized = False
 agent_created = False
-FIXED_SPEED = 0.3
+FIXED_SPEED = 0.4
 
 
 def _autoload_agent_plugins(base_path):

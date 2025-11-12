@@ -380,7 +380,7 @@ def generate_env_plugin_code(robot_name: str) -> str:
                 n_envs=1,
                 monitor_dir=manager.log_monitor,
                 env_kwargs={{
-                    "params_scene": self.params_scene,
+                    "params_scene": manager.params_scene,
                     "params_env": manager.params_env,
                     "comms_port": manager.free_comms_port,
                 }},
@@ -482,7 +482,7 @@ def generate_agent_code(robot_name: str, spec: dict) -> str:
         from common.coppelia_agents import CoppeliaAgent
 
         class {class_name}(CoppeliaAgent):
-            def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, comms_port=49054):
+            def __init__(self, sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port=49054):
                 """Custom agent for {robot_name} (auto-generated).
 
                 Args:
@@ -492,9 +492,10 @@ def generate_agent_code(robot_name: str, spec: dict) -> str:
                     paths (dict): Project paths.
                     file_id (str): Experiment/session ID.
                     verbose (int): Verbosity.
+                    ip_address (str): IP address of the RL side.
                     comms_port (int): Port for RL-side communications. Defaults to 49054.
                 """
-                super({class_name}, self).__init__(sim, params_scene, params_env, paths, file_id, verbose, comms_port)
+                super({class_name}, self).__init__(sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port)
 
                 # --- Scene handles which are specific for this robot ---
                 {robot_line}
@@ -518,7 +519,7 @@ def generate_agent_plugin_code(robot_name: str) -> str:
         from plugins.agents import register_agent
         from robots.{robot_name}.agent import {class_name}
 
-        def make_agent(sim, params_scene, params_env, paths, file_id, verbose, comms_port=49054):
+        def make_agent(sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port=49054):
             """Return an instance of the robot-specific Agent.
 
             Args:
@@ -528,12 +529,13 @@ def generate_agent_plugin_code(robot_name: str) -> str:
                 paths (dict): Project paths.
                 file_id (str): Experiment/session identifier.
                 verbose (int): Verbosity level.
+                ip_address (str): IP address of the RL side.
                 comms_port (int): RL comms port.
 
             Returns:
                 {class_name}: Configured agent instance.
             """
-            return {class_name}(sim, params_scene, params_env, paths, file_id, verbose, comms_port)
+            return {class_name}(sim, params_scene, params_env, paths, file_id, verbose, ip_address, comms_port)
         
         register_agent("{robot_name}", make_agent)
     ''')

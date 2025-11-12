@@ -34,6 +34,9 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import spearmanr
 
+from PIL import Image
+from scipy.spatial import cKDTree
+
 from socketcomms.comms import BaseCommPoint
 
 AGENT_SCRIPT_COPPELIA = "/Agent_Script"                     # Name of the agent script in CoppeliaSim scene
@@ -1677,6 +1680,7 @@ def _build_replacements(
     replacements_robot = {
         "verbose": args.verbose,
         "distance_between_wheels": rl_copp_obj.params_scene["distance_between_wheels"],
+        "wheel_radius": rl_copp_obj.params_scene["wheel_radius"],
         "robot_alias": rl_copp_obj.params_train["robot_handle"],
         "robot_base_alias": rl_copp_obj.params_train["robot_base_handle"],
         "laser_alias": rl_copp_obj.params_train["laser_handle"]
@@ -3380,8 +3384,8 @@ def find_otherdata_files(rl_copp_obj, model_index: int) -> List[str]:
         subfolder_pattern, file_pattern
     ))
     logging.info(f"Files found: {files}")
-    if rl_copp_obj.args.csv_file_path is not None:
-        f = rl_copp_obj.args.csv_file_path
+    if rl_copp_obj.args.csv_file_name is not None:
+        f = rl_copp_obj.args.csv_file_name
         
         full_path = next((path for path in files if os.path.basename(path) == f), None)
         logging.info(f"File {full_path} specified as argument is part of the files.")
@@ -3779,6 +3783,132 @@ def near_collision_analysis(
         "bin_risk_share": per_bin_risk.sort_index(),
         "counts": counts_df,
     }
+
+
+def clean_headers(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize typical column names from logs into canonical names."""
+    df = df.copy()
+    df.columns = [c.strip().replace("\ufeff","") for c in df.columns]
+    m = {}
+    for c in df.columns:
+        lc = c.lower().replace(" ", "").replace("_","")
+        if lc in ("positionidx","posidx","positionindex"):
+            m[c] = "Position idx"
+        elif lc in ("scenarioidx","scidx","scenarioindex"):
+            m[c] = "Scenario idx"
+        elif lc in ("trialidx","trial","trialindex"):
+            m[c] = "Trial idx"
+        elif lc in ("posx","x"):
+            m[c] = "Pos X"
+        elif lc in ("posy","y"):
+            m[c] = "Pos Y"
+        elif lc in ("timestep","time_step","dt","t"):
+            m[c] = "Timestep"
+    return df.rename(columns=m) if m else df
+
+def stat_sanity(a: np.ndarray, how: str) -> float:
+    funcs = {"median": np.median, "mean": np.mean, "min": np.min, "max": np.max, "std": np.std}
+    if how not in funcs:
+        raise ValueError("stat must be one of 'median','mean','min','max','std'")
+    return float(funcs[how](a))
+
+def idw(centers_xy: np.ndarray,
+        pts_xy: np.ndarray,
+        vals: np.ndarray,
+        power: int = 2,
+        k: int = 6,
+        eps: float = 1e-9):
+    """
+    Interpolate scalar values from scattered 2D samples using Inverse Distance Weighting (IDW).
+
+    Given N sample points with known scalar values and M query points (cell centers),
+    this function estimates a value at each query point as a distance-weighted average
+    of the k nearest samples. Closer samples contribute more than farther ones; the
+    weighting steepness is controlled by `power`.
+
+    The implementation uses a KD-tree (scipy.spatial.cKDTree) for efficient neighbor
+    searches and returns both the interpolated values and the minimum neighbor distance
+    per query (useful for masking areas far from any sample).
+
+    Parameters
+    ----------
+    centers_xy : np.ndarray, shape (M, 2)
+        Query points where you want interpolated values (e.g., grid cell centers).
+        Each row is (x, y) in the same coordinate system/units as `pts_xy`.
+
+    pts_xy : np.ndarray, shape (N, 2)
+        Sample 2D coordinates. Each row is (x, y). Must not be empty.
+        If N < k, the function automatically reduces `k` to N.
+
+    vals : np.ndarray, shape (N,)
+        Scalar value at each sample point in `pts_xy`. Must align one-to-one with rows of `pts_xy`.
+
+    power : int, default=2
+        IDW power/exponent p in the weight formula w = 1 / (d^p).
+        Larger values make the interpolation more local (the nearest points dominate more).
+        Typical choices are 1, 2, or 3.
+
+    k : int, default=6
+        Number of nearest neighbors to use for each query. Internally clamped to `min(k, N)`.
+        Use k=1 to emulate nearest-neighbor assignment (no averaging).
+
+    eps : float, default=1e-9
+        Small positive value added inside the distance to avoid division by zero when a query
+        lies exactly on a sample (i.e., replaces d with max(d, eps)). If a query coincides with
+        a sample, the result will be ~that sample’s value (within numerical precision).
+
+    Returns
+    -------
+    interp : np.ndarray, shape (M,)
+        Interpolated scalar value at each query in `centers_xy`, computed as the normalized
+        weighted average of the k nearest sample values.
+
+    dmin : np.ndarray, shape (M,)
+        The minimum distance from each query to its nearest neighbor among the k used.
+        Commonly used to mask queries that are “too far” from any sample (e.g., dmin > radius).
+
+    Notes
+    -----
+    - The weight for neighbor i at distance d_i is w_i = 1 / (max(d_i, eps) ** power).
+      The returned value is sum(w_i * v_i) / sum(w_i).
+    - Units matter: distances are computed in the same units as `pts_xy` and `centers_xy`.
+      If your coordinates are in meters, the effective spatial influence of `power` and `k`
+      depends on the spatial density of points (e.g., 0.2 m vs 1.0 m spacing).
+    - If `k` equals 1, the method degenerates to nearest-neighbor assignment (no smoothing).
+    - If `N == 0`, this routine is undefined; ensure you have at least one sample.
+    - Performance: building the KD-tree is O(N log N); each query is ~O(log N + k).
+
+
+    """
+    tree = cKDTree(pts_xy)
+    k = min(k, len(pts_xy))
+    dists, idxs = tree.query(centers_xy, k=k)
+    d = np.maximum(dists, eps)
+    w = 1.0 / (d ** power)
+    if w.ndim == 1:  # k==1
+        num = w * vals[idxs]
+        den = w
+    else:
+        num = (w * vals[idxs]).sum(axis=1)
+        den = w.sum(axis=1)
+    return (num / den), dists.min(axis=1)
+
+
+def plot_and_maybe_save_hist(counts: pd.Series, title: str, save_path: str | None):
+        """
+        Replicates a simple bar chart like utils.plot_timestep_usage_hist but also saves if path is given.
+        """
+        if counts.empty:
+            return
+        fig = plt.figure(figsize=(7, 4.2))
+        ax = fig.add_subplot(111)
+        ax.bar(counts.index.astype(str), counts.values)
+        ax.set_title(title)
+        ax.set_ylabel("count")
+        ax.set_xlabel("timestep bin")
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, dpi=150)
 
 
 def plot_timestep_usage_hist(counts: pd.Series, title: str = "") -> None:

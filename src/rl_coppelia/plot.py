@@ -48,6 +48,7 @@ Features:
 """
 from datetime import datetime
 import math
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 import matplotlib
 from collections import defaultdict
@@ -71,6 +72,9 @@ from scipy.interpolate import interp1d
 from scipy.interpolate import make_interp_spline
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import spearmanr
+
+from PIL import Image
+from scipy.spatial import cKDTree
 
 
 def plot_spider(rl_copp_obj, title='Models Comparison'):
@@ -1686,9 +1690,6 @@ def plot_boxplots_from_csv_dual_axis(rl_copp_obj):
         plt.show()
 
 
-
-
-
 def plot_convergence_points_comparison(rl_copp_obj, convergence_points_by_model):
     """
     Plots four line charts (one for each convergence metric: WallTime, Steps, SimTime, Episodes),
@@ -2044,6 +2045,291 @@ def plot_timestep_analysis(rl_copp_obj, model_index: int = 0) -> Dict[str, objec
     return results
 
 
+def plot_timesteps_map(
+    rl_copp_obj, 
+    model_index: int = 0,
+    *,
+    m_per_px: float = 0.02013,
+    origin_xy: tuple[float, float] = (-10.5, -6.0),
+    grid_cell: float = 0.2,
+    stat: str = "mean",            # 'median'|'mean'|'min'|'max'|'std'
+    cmap: str = "viridis",
+    heat_alpha: float = 0.55,
+    trajectory_lw: float = 2.0,
+    origin_is_lower_left: bool = False,
+    # --- new options ---
+    method: str = "idw",             # 'idw' or 'nearest'
+    mask_max_dist: float = 0.6,      # mask-out cells farther than this (meters)
+    cbar_percentiles: tuple[float,float] = (5, 95),  # robust color range
+    timestep_bins=(0.2, 0.4, 0.7, 1.25, 1.75, 3.0),
+):
+    """
+    Build a trajectory and a per-position time map on top of a map image, allow drawing
+    circles over the colored map, and show one timestep-usage histogram per circle.
+
+    Workflow
+    --------
+    1) Locate and read the CSV that matches the selected model run.
+    2) Normalize headers and group by 'Position idx':
+       - Position coordinates (Pos X, Pos Y) are averaged (robust to small jitter).
+       - 'Timestep' across scenarios/trials is summarized with `stat` (median by default).
+    3) Render the trajectory polyline over the map PNG using `m_per_px` and `origin_xy`.
+    4) Build a regular grid around the trajectory bounding box. Assign a time to each cell with:
+         - 'nearest': nearest neighbor assignment, or
+         - 'idw': inverse distance weighting (k<=6 neighbors, power=2).
+       Cells farther than `mask_max_dist` from any sampled position are masked out.
+       The heatmap range uses robust percentiles `cbar_percentiles`.
+    5) Overlay the heatmap (semi-transparent) and the trajectory on the map.
+    6) On that colored figure, the user can draw multiple circles (2 clicks per circle:
+       center, then perimeter). Press Enter to finish.
+    7) For each circle, gather ALL raw 'Timestep' values whose 'Position idx' falls inside
+       the circle (includes all scenarios/trials), bucket them into fixed bins `timestep_bins`,
+       and plot one bar chart per circle.
+
+    Parameters
+    ----------
+    rl_copp_obj : object
+        Manager with `.args` providing:
+          - robot_name (str), model_ids (List[int]), csv_file_name (str), map_png_path (str),
+          - save_plots (bool, optional) to enable saving figures.
+    model_index : int, default=0
+        Index into `rl_copp_obj.args.model_ids` to select the model id.
+    m_per_px : float, default=0.02013
+        Map resolution in meters per pixel.
+    origin_xy : tuple[float, float], default=(-10.5, -6.0)
+        World coordinates (x_min, y_min) where the lower-left or upper-left of the image is placed,
+        depending on `origin_is_lower_left`.
+    grid_cell : float, default=0.2
+        Heatmap grid cell size in meters.
+    stat : {'median','mean','min','max','std'}, default='median'
+        Summary statistic for 'Timestep' per 'Position idx'.
+    cmap : str, default='viridis'
+        Matplotlib colormap name for the heatmap.
+    heat_alpha : float, default=0.55
+        Alpha for the heatmap overlay (0=transparent, 1=opaque).
+    trajectory_lw : float, default=2.0
+        Line width of the trajectory polyline.
+    origin_is_lower_left : bool, default=False
+        If True, image origin is bottom-left (y upward). If False, origin is top-left (y downward).
+    method : {'idw','nearest'}, default='idw'
+        Interpolation method for the heatmap values.
+    mask_max_dist : float, default=0.6
+        Maximum distance (meters) from any trajectory point to paint a heatmap value.
+    cbar_percentiles : tuple[float,float], default=(5,95)
+        Percentiles for robust min/max color limits in the heatmap.
+    timestep_bins : tuple[float,...], default=(0.2,0.4,0.7,1.25,1.75,3.0)
+        Explicit bins to aggregate timestep usage when plotting per-circle histograms.
+
+    Saving
+    ------
+    If `rl_copp_obj.args.save_plots` is True, the function saves:
+      - `<csv_base>_trajectory.png`                (trajectory over map)
+      - `<csv_base>_time_map.png`                  (colored time map over map)
+      - `<csv_base>_time_map_with_circles.png`     (colored time map + drawn circles)
+      - `<csv_base>_hist_circle_<i>.png`           (one per circle)
+
+    Notes
+    -----
+    - The circle selection uses the mean (Pos X, Pos Y) per 'Position idx'.
+    - Histograms use all raw 'Timestep' rows for the indices inside each circle.
+    """
+
+    # ----------------- locate the CSV -----------------
+    model_id = rl_copp_obj.args.model_ids[model_index]
+    model_name = f"{rl_copp_obj.args.robot_name}_model_{model_id}"
+    robot_name = rl_copp_obj.args.robot_name
+    subfolder_pattern = f"{model_name}_*_testing"
+    file_pattern = f"{model_name}_*_path_data_*.csv"
+
+    files = glob.glob(os.path.join(
+        rl_copp_obj.base_path, "robots", robot_name, "testing_metrics",
+        subfolder_pattern, file_pattern
+    ))
+    csv_name = rl_copp_obj.args.csv_file_name
+    csv_path = next((p for p in files if os.path.basename(p) == csv_name), None)
+    if not csv_path:
+        raise FileNotFoundError(f"CSV not found: {csv_name}")
+
+    # Prepare output paths (same folder as CSV)
+    out_dir = os.path.dirname(csv_path)
+    csv_base = os.path.splitext(os.path.basename(csv_path))[0]
+    save_flag = bool(getattr(rl_copp_obj.args, "save_plots", False))
+
+    # ----------------- read & prepare data -----------------
+    df = pd.read_csv(csv_path)
+    df = utils.clean_headers(df)
+
+    for col in ["Position idx", "Pos X", "Pos Y", "Timestep"]:
+        if col not in df.columns:
+            raise KeyError(f"Missing column '{col}' in CSV (found: {df.columns.tolist()})")
+
+    # One row per Position idx:
+    # - positions averaged (robust to small drift)
+    # - timestep summarized with the chosen statistic measure
+    per_idx = (
+        df.groupby("Position idx")
+          .agg({"Pos X":"mean", "Pos Y":"mean", "Timestep":lambda s: utils.stat_sanity(s.values, stat)})
+          .reset_index()
+          .rename(columns={"Timestep":"time_stat"})
+    )
+
+    pts = per_idx[["Pos X","Pos Y"]].to_numpy()
+    vals = per_idx["time_stat"].to_numpy()
+    if pts.shape[0] == 0:
+        logging.warning("No trajectory points found in CSV.")
+        return
+
+    # Trajectory polyline in index order
+    traj_xy = per_idx.sort_values("Position idx")[["Pos X","Pos Y"]].to_numpy()
+
+    # ----------------- map placement -----------------
+    map_png_path = rl_copp_obj.args.map_png_path
+    img = Image.open(map_png_path).convert("RGB")
+    w_px, h_px = img.size
+    x0, y0 = origin_xy
+    x1 = x0 + w_px * m_per_px
+    y1 = y0 + h_px * m_per_px
+    img_origin = "lower" if origin_is_lower_left else "upper"
+
+    # ----------------- figure 1: trajectory over map -----------------
+    fig1, ax1 = plt.subplots(figsize=(10, 8), dpi=120)
+    ax1.imshow(img, extent=[x0, x1, y0, y1], origin=img_origin)
+    ax1.plot(traj_xy[:,0], traj_xy[:,1], "-", lw=trajectory_lw, color="blue")
+    ax1.set_title("Trajectory over map")
+    ax1.set_xlabel("X [m]"); ax1.set_ylabel("Y [m]")
+    ax1.set_aspect("equal")
+    fig1.tight_layout()
+    if save_flag:
+        fig1.savefig(os.path.join(out_dir, f"{csv_base}_trajectory.png"), dpi=150)
+    plt.show()
+    plt.close(fig1)
+
+    # ----------------- grid for the time map -----------------
+    pad = max(0.5, grid_cell)  # little padding around trajectory bbox
+    xmin = float(np.min(traj_xy[:,0]) - pad)
+    xmax = float(np.max(traj_xy[:,0]) + pad)
+    ymin = float(np.min(traj_xy[:,1]) - pad)
+    ymax = float(np.max(traj_xy[:,1]) + pad)
+
+    xs = np.arange(xmin, xmax + grid_cell, grid_cell)
+    ys = np.arange(ymin, ymax + grid_cell, grid_cell)
+    Xc, Yc = np.meshgrid(xs, ys)
+    centers = np.column_stack([Xc.ravel(), Yc.ravel()])
+
+    # ----------------- paint values on grid -----------------
+    if method == "idw":
+        z, mind = utils.idw(centers, pts, vals, power=2)
+    elif method == "nearest":
+        tree = cKDTree(pts)
+        mind, nn = tree.query(centers, k=1)
+        z = vals[nn]
+    else:
+        raise ValueError("method must be 'idw' or 'nearest'")
+
+    # mask far cells (avoid painting far from path)
+    Z = np.full_like(Xc, np.nan, dtype=float)
+    mask = (mind <= mask_max_dist)
+    Z.ravel()[mask] = z[mask]
+
+    # robust color range
+    finite = np.isfinite(Z)
+    vmin = np.percentile(Z[finite], cbar_percentiles[0]) if finite.any() else None
+    vmax = np.percentile(Z[finite], cbar_percentiles[1]) if finite.any() else None
+
+    # ----------------- figure 2: time map + trajectory + map (and circle drawing) -----------------
+    fig2, ax2 = plt.subplots(figsize=(10, 8), dpi=120)
+    ax2.imshow(img, extent=[x0, x1, y0, y1], origin=img_origin)
+
+    # grid axes are Cartesian (x→, y↑), so use origin='lower' for the heat image
+    hm = ax2.imshow(
+        Z,
+        extent=[xs.min(), xs.max(), ys.min(), ys.max()],
+        origin="lower",
+        cmap=cmap,
+        alpha=heat_alpha,
+        interpolation="nearest",
+        aspect="equal",
+        vmin=vmin, vmax=vmax,
+    )
+    cbar = fig2.colorbar(hm, ax=ax2, shrink=0.9, pad=0.02)
+    cbar.set_label(f"Timestep ({stat})")
+
+    ax2.plot(traj_xy[:,0], traj_xy[:,1], "-k", lw=trajectory_lw, alpha=0.95)
+    ax2.scatter(pts[:,0], pts[:,1], s=10, c="k", alpha=0.4)
+    ax2.set_aspect("equal"); ax2.set_xlabel("X [m]"); ax2.set_ylabel("Y [m]")
+    ax2.set_title("1st click: CENTER, 2nd click: PERIMETER. Press Enter to finish")
+
+    circles = []
+    while True:
+        # Two clicks per circle (center, perimeter). Press Enter to stop.
+        clicks = plt.ginput(2, timeout=0)  
+        if len(clicks) < 2:
+            break
+        (xc, yc), (xp, yp) = clicks
+        r = float(np.hypot(xp - xc, yp - yc))
+        circles.append((xc, yc, r))
+        ax2.add_patch(plt.Circle((xc, yc), r, edgecolor="crimson", facecolor="none", lw=2))
+        # Draw an index label next to the circle so we know the drawing order (#1, #2, ...)
+        label_idx = len(circles)
+        # place label just outside the circle to the right; adjust offset if needed
+        text_x = xc + r + 0.05
+        text_y = yc
+        ax2.text(text_x, text_y, f"#{label_idx}", fontsize=12, fontweight='bold',
+                 color='crimson', zorder=11, va='center', ha='left')
+        fig2.canvas.draw_idle()
+        ax2.add_patch(plt.Circle((xc, yc), r, edgecolor="crimson", facecolor="none", lw=2))
+        fig2.canvas.draw_idle()
+
+    # Save the colored map with drawn circles (before closing), if requested
+    if save_flag:
+        fig2.savefig(os.path.join(out_dir, f"{csv_base}_time_map_with_circles.png"), dpi=150)
+
+
+    if not circles:
+        logging.info("No circles provided, program will be closed.")
+        return 
+
+    logging.info(f"Circles drawn: {len(circles)}")
+
+    # ----------------- per-circle selection and per-circle histograms -----------------
+    pos_xy = per_idx[["Pos X","Pos Y"]].to_numpy()
+    any_selected = False
+
+    for ci, (xc, yc, r) in enumerate(circles, start=1):
+        # boolean mask: which per-index positions fall inside this circle
+        inside = ((pos_xy[:, 0] - xc) ** 2 + (pos_xy[:, 1] - yc) ** 2) <= (r ** 2)
+        chosen_idx = per_idx.loc[inside, "Position idx"].tolist()
+
+        if len(chosen_idx) == 0:
+            logging.warning(f"[INFO] Circle #{ci}: no Position idx found inside.")
+            continue
+
+        any_selected = True
+
+        # Gather ALL raw timesteps for those indices (all scenarios/trials)
+        ts = df[df["Position idx"].isin(chosen_idx)]["Timestep"].to_numpy()
+
+        logging.info(
+            f"Circle #{ci}: {len(chosen_idx)} distinct positions, {len(ts)} timestep rows."
+        )
+
+        # Bin into categorical intervals and count
+        cat = pd.cut(ts, bins=timestep_bins, right=False, include_lowest=True)
+        counts = cat.value_counts().sort_index()
+
+        # Plot (and maybe save) histogram for this circle
+        hist_path = os.path.join(out_dir, f"{csv_base}_hist_circle_{ci}.png") if save_flag else None
+        utils.plot_and_maybe_save_hist(
+            counts,
+            title=f"Timestep usage for circle #{ci} (n={counts.sum()})",
+            save_path=hist_path
+        )
+    if not any_selected:
+        logging.warning("No Position idx found inside any of the drawn circles.")
+    else:
+        plt.show()
+    return
+    
 
 def main(args):
     """
@@ -2227,6 +2513,12 @@ def main(args):
         for model in range(len(args.model_ids)):
             logging.info(f"Plotting timestep analysis for model {args.model_ids[model]}")
             plot_timestep_analysis(rl_copp, model)
+
+    elif "timestep_map" in args.plot_types:
+        plot_type_correct = True
+        for model in range(len(args.model_ids)):
+            logging.info(f"Plotting timestep map for model {args.model_ids[model]}")
+            plot_timesteps_map(rl_copp, model)
 
     
     if not plot_type_correct:

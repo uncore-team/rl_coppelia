@@ -174,12 +174,11 @@ def _is_position_valid(
         # Robot case
         elif any(k in name for k in ("Turtlebot2", "Burger")):
             threshold = distance_between_wheels/2.0 + laser_distance + wheel_width + diam_obstacles/2.0 + collision_tolerance
-            print(threshold)
         # Other obstacle/wall case
         else:
             threshold = diam_obstacles + max_crash_dist_critical+ collision_tolerance
         if d < threshold:
-            print("Not valid position, obstacle is too close")
+            # print("Not valid position, obstacle is too close")
             return False
         
     # Path case
@@ -189,10 +188,10 @@ def _is_position_valid(
             d = math.hypot(dx, dy)
             threshold = distance_between_wheels/2.0 + laser_distance + 0.01 + diam_obstacles/2.0 + 0.02
             if d < threshold:
-                print("Not valid position, path point is too close")
+                # print("Not valid position, path point is too close")
                 return False
         
-    print("Valid position")
+    # print("Valid position")
     return True
 
 

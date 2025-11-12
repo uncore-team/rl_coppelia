@@ -759,7 +759,7 @@ class CoppeliaAgent:
                 if self.generator is not None:
                     # Generate new obstacles
                     logging.info(f"Regenerating new obstacles")
-                    self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script, [])
+                    self.obstacles_objs = self.sim.callScriptFunction('generate_obs',self.handle_obstaclegenerators_script, [], [])
             logging.info("Environment RST done")
 
 
