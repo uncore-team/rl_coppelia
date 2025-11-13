@@ -65,6 +65,68 @@ MIN_SAMPLES = 10
 # ----------------------------Path  helpers ----------------------------
 # ----------------------------------------------------------------------
 
+def augment_base_poses(
+    base_poses,
+    n_extra_poses: int = 0,
+    delta_deg: float = 5.0,
+    default_z: float = 0.0,
+    default_yaw: float = 0.0
+):
+    """
+    Augment base poses with additional yaw variants.
+
+    Accepts base_poses entries with shape:
+      - (x, y, z, yaw)
+      - (x, y, z)
+      - (x, y)
+
+    If an entry has only (x,y) or (x,y,z) the missing z/yaw are filled with
+    'default_z' and 'default_yaw' respectively. Yaw is normalized to [-pi,pi].
+
+    Returns list of (x, y, z, yaw).
+    """
+    n_extra = max(0, int(n_extra_poses))
+    delta = math.radians(float(delta_deg))
+    augmented_poses = []
+    default_yaw_rads = math.radians(float(default_yaw))
+
+    for p in base_poses:
+        # Support tuples/lists of length 2,3,4
+        if isinstance(p, (list, tuple)):
+            if len(p) == 4:
+                x, y, z, yaw = p
+            elif len(p) == 3:
+                x, y, z = p
+                yaw = default_yaw_rads
+            elif len(p) == 2:
+                x, y = p
+                z = default_z
+                yaw = default_yaw_rads
+            else:
+                raise ValueError(f"Base pose must be (x,y), (x,y,z) or (x,y,z,yaw); got length {len(p)}")
+        else:
+            raise TypeError(f"Base pose must be sequence, got {type(p)}")
+
+        # Ensure numeric types and normalize yaw
+        try:
+            x = float(x); y = float(y); z = float(z); yaw = float(yaw)
+        except Exception:
+            raise TypeError(f"Pose contains non-numeric values: {p}")
+
+        yaw = normalize_angle(yaw)
+        augmented_poses.append((x, y, z, yaw))  # base
+        for k in range(1, n_extra + 1):
+            augmented_poses.append((x, y, z, normalize_angle(yaw + k * delta)))
+        for k in range(1, n_extra + 1):
+            augmented_poses.append((x, y, z, normalize_angle(yaw - k * delta)))
+
+    return augmented_poses
+
+
+def normalize_angle(a):
+        return math.atan2(math.sin(a), math.cos(a))
+
+
 def build_world_poses_from_path_data(
     path_handle,
     n_samples: int,
@@ -106,9 +168,6 @@ def build_world_poses_from_path_data(
         s = 2.0 * (qw * qz + qx * qy)
         c = 1.0 - 2.0 * (qy * qy + qz * qz)
         return math.atan2(s, c)
-
-    def _normalize_angle(a):
-        return math.atan2(math.sin(a), math.cos(a))
 
 
     # --- Get path positions and quaternions
@@ -161,19 +220,11 @@ def build_world_poses_from_path_data(
         qz = float(path_quaternions_flat[4 * i + 2])
         qw = float(path_quaternions_flat[4 * i + 3])
 
-        yaw = _normalize_angle(_yaw_from_quat(qx, qy, qz, qw))
+        yaw = normalize_angle(_yaw_from_quat(qx, qy, qz, qw))
         base_poses.append((x, y, z, yaw))
 
     # --- Yaw augmentation for extra cases
-    n_extra = max(0, int(n_extra_poses))
-    delta = math.radians(float(delta_deg))
-    augmented_poses = []
-    for (x, y, z, yaw) in base_poses:
-        augmented_poses.append((x, y, z, yaw))  # base
-        for k in range(1, n_extra + 1):
-            augmented_poses.append((x, y, z, _normalize_angle(yaw + k * delta)))
-        for k in range(1, n_extra + 1):
-            augmented_poses.append((x, y, z, _normalize_angle(yaw - k * delta)))
+    augmented_poses = augment_base_poses(base_poses, n_extra_poses, delta_deg)
 
     return augmented_poses, base_poses
 
@@ -283,9 +334,9 @@ def rp_init(n_samples, n_extra_poses, path_name):
     print(f"Trying to sample the path using a path alias: {path_name}, with {n_samples} samples.")
     path_alias = path_name if path_name else "/RecordedPath"
     path_handle = sim.getObject(path_alias)
-    pos_samples = build_world_poses_from_path_data(path_handle, n_samples, n_extra_poses)
+    augmented_pos_samples, base_pos_samples = build_world_poses_from_path_data(path_handle, n_samples, n_extra_poses)
 
-    return pos_samples
+    return augmented_pos_samples, base_pos_samples
 
 
 def rp_tp(pose): 

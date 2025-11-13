@@ -1673,8 +1673,11 @@ def _build_replacements(
             "trials_per_sample": args.trials_per_sample,
             "n_samples": args.n_samples,
             "n_extra_poses": args.n_extra_poses,
+            "delta_deg": args.delta_deg,
             "place_obstacles_flag": args.place_obstacles_flag,
-            "random_target_flag": args.random_target_flag
+            "random_target_flag": args.random_target_flag,
+            "map_png_path": args.map_png_path,
+            "base_pos_samples": rl_copp_obj.base_pos_samples
         })
 
     replacements_robot = {
@@ -4483,6 +4486,462 @@ def draw_robust_uncertainty_ellipse(ax, mean_x, mean_y, points, color='gray', al
         ax.add_patch(ell)
     except Exception as e:
         logging.warning(f"Failed to draw ellipse: {e}")
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.path import Path as MplPath
+from PIL import Image
+from scipy.ndimage import distance_transform_edt
+
+# ----------------------------- utilities -----------------------------
+
+def _img_to_gray_uint8(img_path: str) -> np.ndarray:
+    """
+    Load an image and return a grayscale uint8 array of shape (H, W),
+    with values in [0, 255].
+    """
+    img = Image.open(img_path).convert("L")  # 8-bit grayscale
+    return np.array(img, dtype=np.uint8)
+
+def _world_to_pixel(x: float, y: float, *, m_per_px: float, origin_xy: tuple[float,float],
+                    h_px: int, origin_is_lower_left: bool) -> tuple[int, int]:
+    """
+    Convert world (meters) to pixel (row, col). Returns (py, px) integer indices.
+    """
+    x0, y0 = origin_xy
+    px = int(round((x - x0) / m_per_px))
+    py = int(round((y - y0) / m_per_px))
+    if not origin_is_lower_left:
+        py = (h_px - 1) - py
+    return py, px
+
+def _pixel_to_world(px: int, py: int, *, m_per_px: float, origin_xy: tuple[float,float],
+                    h_px: int, origin_is_lower_left: bool) -> tuple[float, float]:
+    """
+    Convert pixel (row, col) to world (meters). Input is (py, px).
+    """
+    x0, y0 = origin_xy
+    if not origin_is_lower_left:
+        py = (h_px - 1) - py
+    x = x0 + px * m_per_px
+    y = y0 + py * m_per_px
+    return float(x), float(y)
+
+# ----------------------------- 1) occupancy mask -----------------------------
+
+def build_occupancy_mask_from_png(
+    map_png_path: str,
+    *,
+    obstacle_threshold: int = 15,
+    m_per_px: float = 0.02013,
+    clearance_m: float = 0.35,
+) -> dict:
+    """
+    Build an occupancy mask from a PNG occupancy-like map.
+
+    Pixels considered obstacle if gray ∈ [0, obstacle_threshold] (inclusive).
+    Any other gray (e.g., light gray/white) is considered free.
+
+    The routine also inflates the obstacles by a given clearance (meters)
+    using a distance transform, so invalid pixels include both the solid
+    obstacles and any pixel closer than `clearance_m`.
+
+    Parameters
+    ----------
+    map_png_path : str
+        Path to the map image (PNG).
+    obstacle_threshold : int, default=15
+        Gray threshold (0..255). Pixels ≤ threshold are obstacles.
+    m_per_px : float, default=0.02013
+        Map resolution in meters per pixel.
+    clearance_m : float, default=0.35
+        Safety margin around obstacles in meters.
+
+    Returns
+    -------
+    result : dict
+        {
+          "occ_raw": np.ndarray bool, shape (H,W)  # True = obstacle pixel
+          "occ_inflated": np.ndarray bool, shape (H,W)  # True = invalid (obstacle or too close)
+          "dist_to_obstacle_m": np.ndarray float, shape (H,W)  # distance to nearest obstacle [m]
+          "size": (H, W),
+          "m_per_px": float
+        }
+    """
+    gray = _img_to_gray_uint8(map_png_path)
+    h, w = gray.shape
+
+    # raw obstacle mask: black/dark (0..threshold) = True
+    occ_raw = (gray <= obstacle_threshold)
+
+    # distance (in pixels) from each pixel to nearest obstacle.
+    # edt computes distance to the *zero* pixels, so use ~occ_raw:
+    dist_px = distance_transform_edt(~occ_raw)
+
+    dist_m = dist_px * m_per_px
+    occ_inflated = occ_raw | (dist_m < clearance_m)
+
+    return {
+        "occ_raw": occ_raw,
+        "occ_inflated": occ_inflated,
+        "dist_to_obstacle_m": dist_m,
+        "size": (h, w),
+        "m_per_px": m_per_px,
+    }
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from PIL import Image
+
+# TODO close_tol is not working properly
+def interactive_polygon_on_map_live(
+    map_png_path: str,
+    *,
+    m_per_px: float,
+    origin_xy: tuple[float, float],
+    origin_is_lower_left: bool = False,
+    close_tol: float = 0.3,  # meters: click near the first vertex to auto-finish
+    title: str = ("Click vertices to draw polygon. "
+                  "Click near the first to close. Enter=finish, Backspace/U=undo, Esc=cancel")
+) -> np.ndarray:
+    """
+    Interactive polygon over a map in WORLD coordinates, with live edges.
+    - Left-click adds a vertex.
+    - Clicking within `close_tol` meters of the FIRST vertex closes the polygon and finishes.
+    - Press Enter/Return to finish (if there are >=3 points, it will close last->first).
+    - Backspace or 'U' undoes the last point.
+    - Esc cancels (returns empty array).
+    Returns (N,2) vertices in meters (unique; first is NOT repeated at the end).
+    """
+    # --- background image in world coords
+    img = Image.open(map_png_path).convert("RGB")
+    w_px, h_px = img.size
+    x0, y0 = origin_xy
+    x1 = x0 + w_px * m_per_px
+    y1 = y0 + h_px * m_per_px
+    origin_kw = "lower" if origin_is_lower_left else "upper"
+
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=120)
+    ax.imshow(img, extent=[x0, x1, y0, y1], origin=origin_kw)
+    ax.set_aspect("equal")
+    ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]")
+    ax.set_title(title)
+
+    # state
+    pts: list[tuple[float, float]] = []
+    markers = []
+    line = Line2D([], [], color="cyan", lw=2)
+    ax.add_line(line)
+    finished = False
+    cancelled = False
+
+    def _redraw():
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        line.set_data(xs, ys)
+        fig.canvas.draw_idle()
+
+    def _cleanup_close():
+        """Disconnect callbacks and close the figure safely."""
+        fig.canvas.mpl_disconnect(cid_c)
+        fig.canvas.mpl_disconnect(cid_k)
+        plt.close(fig)
+
+    def on_click(event):
+        nonlocal finished
+        if finished or event.inaxes != ax or event.button != 1:
+            return
+        if event.xdata is None or event.ydata is None:
+            return  # clicked outside axes area
+
+        x, y = float(event.xdata), float(event.ydata)
+
+        # Close if near the first vertex (meters)
+        if len(pts) >= 3:
+            d = np.hypot(x - pts[0][0], y - pts[0][1])
+            if d <= close_tol:
+                # visually show closing edge
+                pts.append(pts[0])
+                _redraw()
+                # drop duplicate so returned polygon has unique vertices
+                pts.pop()
+                finished = True
+                _cleanup_close()
+                return
+
+        # Add vertex
+        pts.append((x, y))
+        m = ax.plot([x], [y], marker="o", color="cyan", ms=6)[0]
+        markers.append(m)
+        _redraw()
+
+    def on_key(event):
+        nonlocal finished, cancelled
+        key = (event.key or "").lower()
+        if key in ("escape", "esc"):
+            cancelled = True
+            _cleanup_close()
+        elif key in ("enter", "return"):
+            # finish if we have a valid polygon
+            if len(pts) >= 3 and not finished:
+                # close by connecting last->first for consistency
+                pts.append(pts[0])
+                _redraw()
+                pts.pop()
+                finished = True
+            _cleanup_close()
+        elif key in ("backspace", "u"):
+            if finished or not pts:
+                return
+            pts.pop()
+            if markers:
+                mk = markers.pop()
+                mk.remove()
+            _redraw()
+
+    cid_c = fig.canvas.mpl_connect("button_press_event", on_click)
+    cid_k = fig.canvas.mpl_connect("key_press_event", on_key)
+    plt.show()
+
+    # finalize
+    if cancelled or len(pts) < 3:
+        return np.empty((0, 2), dtype=float)
+    return np.asarray(pts, dtype=float)
+
+
+
+def interactive_polygon_on_map(
+    map_png_path: str,
+    *,
+    m_per_px: float,
+    origin_xy: tuple[float,float],
+    origin_is_lower_left: bool = False,
+    title: str = "Click polygon vertices; Enter to finish. Click near start to close.",
+) -> np.ndarray:
+    """
+    Let the user draw a polygon directly on the map in WORLD coordinates.
+
+    - Displays the PNG placed at (origin_xy, m_per_px) with the correct y-origin.
+    - User clicks vertices in order; press Enter to finish.
+    - If the last click is close to the first, the polygon is closed automatically.
+
+    Returns
+    -------
+    poly_xy : np.ndarray, shape (M, 2)
+        Vertices (x,y) in meters. If the user cancels (no clicks), returns an empty array.
+    """
+    img = Image.open(map_png_path).convert("RGB")
+    w, h = img.size
+    x0, y0 = origin_xy
+    x1 = x0 + w * m_per_px
+    y1 = y0 + h * m_per_px
+    origin_kw = "lower" if origin_is_lower_left else "upper"
+
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=120)
+    ax.imshow(img, extent=[x0, x1, y0, y1], origin=origin_kw)
+    ax.set_aspect("equal")
+    ax.set_title(title)
+    ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]")
+
+    pts = plt.ginput(n=-1, timeout=0)  # arbitrary number of clicks, Enter to end
+    plt.close(fig)
+
+    if len(pts) == 0:
+        return np.empty((0,2), dtype=float)
+
+    poly = np.array(pts, dtype=float)
+
+    # If last vertex is close to the first, drop it and close polygon logically
+    if len(poly) >= 3 and np.linalg.norm(poly[-1] - poly[0]) < 0.02:  # 2 cm tolerance
+        poly = poly[:-1]
+
+    return poly
+
+# ----------------------------- 3) grid of valid positions -----------------------------
+
+def grid_positions_from_mask(
+    *,
+    occ_inflated: np.ndarray,
+    map_png_path: str,
+    m_per_px: float,
+    origin_xy: tuple[float,float],
+    origin_is_lower_left: bool = False,
+    grid_step_m: float = 0.25,
+    polygon_xy: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Produce a list of valid (x,y) world positions sampled on a grid.
+
+    A position is valid if:
+      - It lies INSIDE the polygon of interest (if provided).
+      - It falls INSIDE the image bounds.
+      - The corresponding pixel is NOT invalid (occ_inflated == False).
+
+    Parameters
+    ----------
+    occ_inflated : np.ndarray bool, shape (H,W)
+        True for invalid pixels (obstacle or too close). Built by `build_occupancy_mask_from_png`.
+    map_png_path : str
+        Path to the PNG (used only for size/meta safety).
+    m_per_px : float
+        Meters per pixel.
+    origin_xy : tuple[float,float]
+        (x_min, y_min) where the image is placed in world coordinates.
+    origin_is_lower_left : bool, default=False
+        If True, the image y-origin is bottom-left; otherwise top-left.
+    grid_step_m : float, default=0.25
+        Grid step in meters.
+    polygon_xy : np.ndarray or None
+        Optional polygon (M,2) in world coords. If None, we accept the whole image rectangle.
+
+    Returns
+    -------
+    positions_xy : np.ndarray, shape (K, 2)
+        Valid (x,y) positions in meters.
+    """
+    h, w = occ_inflated.shape
+    x0, y0 = origin_xy
+    x1 = x0 + w * m_per_px
+    y1 = y0 + h * m_per_px
+
+    # grid over the whole image rect (then clip to polygon)
+    xs = np.arange(x0, x1 + 1e-9, grid_step_m)
+    ys = np.arange(y0, y1 + 1e-9, grid_step_m)
+    X, Y = np.meshgrid(xs, ys)
+    candidates = np.column_stack([X.ravel(), Y.ravel()])
+
+    # polygon filter (if provided)
+    if polygon_xy is not None and len(polygon_xy) >= 3:
+        poly_path = MplPath(polygon_xy, closed=True)
+        inside_poly = poly_path.contains_points(candidates)
+        candidates = candidates[inside_poly]
+
+    # keep only those inside image bounds & free in inflated mask
+    valid = []
+    for (x, y) in candidates:
+        py, px = _world_to_pixel(x, y, m_per_px=m_per_px, origin_xy=origin_xy,
+                                 h_px=h, origin_is_lower_left=origin_is_lower_left)
+        if 0 <= px < w and 0 <= py < h and not occ_inflated[py, px]:
+            valid.append((x, y))
+
+    return np.array(valid, dtype=float)
+
+# ----------------------------- convenience wrapper -----------------------------
+
+def build_valid_positions_from_map(
+    map_png_path: str,
+    *,
+    m_per_px: float = 0.02013,
+    origin_xy: tuple[float,float] = (-10.5, -6.0),
+    origin_is_lower_left: bool = False,
+    obstacle_threshold: int = 15,
+    clearance_m: float = 0.35,
+    grid_step_m: float = 0.25,
+    interactive_polygon: bool = True,
+) -> dict:
+    """
+    High-level helper that:
+      1) Builds an inflated occupancy mask from the PNG.
+      2) Lets the user draw a polygon of interest (optional).
+      3) Samples a grid of valid (x,y) positions within the polygon and away from obstacles.
+
+    Returns
+    -------
+    out : dict
+        {
+          "occ_mask": occ_inflated (H,W) bool,
+          "dist_to_obstacle_m": dist_m (H,W) float,
+          "polygon_xy": np.ndarray (M,2) or empty array,
+          "positions_xy": np.ndarray (K,2) world positions,
+          "meta": {"m_per_px":..., "origin_xy":..., "origin_is_lower_left":..., "size":(H,W)}
+        }
+    """
+    mask_data = build_occupancy_mask_from_png(
+        map_png_path,
+        obstacle_threshold=obstacle_threshold,
+        m_per_px=m_per_px,
+        clearance_m=clearance_m
+    )
+    occ_infl = mask_data["occ_inflated"]
+    h, w = mask_data["size"]
+
+    if interactive_polygon:
+        poly = interactive_polygon_on_map_live(
+            map_png_path,
+            m_per_px=m_per_px,
+            origin_xy=origin_xy,
+            origin_is_lower_left=origin_is_lower_left,
+            close_tol = 0.05,
+            title="Click polygon vertices; Enter to finish. (Close by clicking near start)"
+        )
+    else:
+        poly = np.empty((0,2), dtype=float)
+
+    positions = grid_positions_from_mask(
+        occ_inflated=occ_infl,
+        map_png_path=map_png_path,
+        m_per_px=m_per_px,
+        origin_xy=origin_xy,
+        origin_is_lower_left=origin_is_lower_left,
+        grid_step_m=grid_step_m,
+        polygon_xy=poly if len(poly) >= 3 else None
+    )
+
+    return {
+        "occ_mask": occ_infl,
+        "dist_to_obstacle_m": mask_data["dist_to_obstacle_m"],
+        "polygon_xy": poly,
+        "positions_xy": positions,
+        "meta": {
+            "m_per_px": m_per_px,
+            "origin_xy": origin_xy,
+            "origin_is_lower_left": origin_is_lower_left,
+            "size": (h, w),
+        }
+    }
+
+# ----------------------------- (optional) quick visual check -----------------------------
+
+def preview_mask_and_positions(
+    map_png_path: str,
+    result: dict,
+):
+    """
+    Quick visual check: show map, inflated occupancy mask overlay, polygon (if any),
+    and sampled valid positions as dots.
+    """
+    m_per_px = result["meta"]["m_per_px"]
+    origin_xy = result["meta"]["origin_xy"]
+    origin_is_lower_left = result["meta"]["origin_is_lower_left"]
+    occ = result["occ_mask"]
+    poly = result["polygon_xy"]
+    pts = result["positions_xy"]
+
+    img = Image.open(map_png_path).convert("RGB")
+    w, h = img.size
+    x0, y0 = origin_xy
+    x1 = x0 + w * m_per_px
+    y1 = y0 + h * m_per_px
+    origin_kw = "lower" if origin_is_lower_left else "upper"
+
+    fig, ax = plt.subplots(figsize=(10,8), dpi=120)
+    ax.imshow(img, extent=[x0,x1,y0,y1], origin=origin_kw)
+    # show inflated mask in red translucency
+    ax.imshow(occ.astype(float), extent=[x0,x1,y0,y1], origin=origin_kw,
+              cmap="Reds", alpha=0.35, vmin=0, vmax=1)
+    if len(poly) >= 3:
+        ax.plot(*poly.T, "-c", lw=2)
+        ax.plot([poly[-1,0], poly[0,0]], [poly[-1,1], poly[0,1]], "-c", lw=2)
+    if pts.size:
+        ax.scatter(pts[:,0], pts[:,1], s=12, c="lime", edgecolors="k", linewidths=0.3)
+    ax.set_aspect("equal"); ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]")
+    ax.set_title("Inflated occupancy (red) + valid grid positions (green)")
+    fig.tight_layout()
+    plt.show()
+
 
 
 

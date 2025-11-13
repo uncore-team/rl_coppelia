@@ -2254,10 +2254,26 @@ def plot_timesteps_map(
     cbar = fig2.colorbar(hm, ax=ax2, shrink=0.9, pad=0.02)
     cbar.set_label(f"Timestep ({stat})")
 
-    ax2.plot(traj_xy[:,0], traj_xy[:,1], "-k", lw=trajectory_lw, alpha=0.95)
-    ax2.scatter(pts[:,0], pts[:,1], s=10, c="k", alpha=0.4)
-    ax2.set_aspect("equal"); ax2.set_xlabel("X [m]"); ax2.set_ylabel("Y [m]")
-    ax2.set_title("1st click: CENTER, 2nd click: PERIMETER. Press Enter to finish")
+    # ax2.plot(traj_xy[:,0], traj_xy[:,1], "-k", lw=trajectory_lw, alpha=0.95)
+    # ax2.scatter(pts[:,0], pts[:,1], s=10, c="k", alpha=0.4)
+    # ax2.set_aspect("equal"); ax2.set_xlabel("X [m]"); ax2.set_ylabel("Y [m]")
+    ax2.set_xlim(x0, x1)
+    ax2.set_ylim(y0, y1)
+    ax2.set_xlabel("X [m]"); ax2.set_ylabel("Y [m]")
+    ax2.set_aspect("equal")
+    ax2.set_title("Timestep map")
+    help_msg = "Instructions for getting timestep histograms per zones -> Draw one circle per zone: \n1st click: center, 2nd click: radius.\n Press Enter to finish"
+    help_text = ax2.text(
+        0.5, -0.3,
+        help_msg,
+        transform=ax2.transAxes,
+        ha='center', va='bottom',
+        fontsize=10, color='gray', alpha=0.95, zorder=20
+    )
+    fig2.canvas.draw_idle()
+    plt.pause(7.0)           # display for x seconds (non-blocking for GUI backends)
+    help_text.set_visible(False)
+    fig2.canvas.draw_idle()
 
     circles = []
     while True:

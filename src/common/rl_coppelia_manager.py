@@ -298,6 +298,9 @@ class RLCoppeliaManager():
             self.current_coppelia_pid = None
             self.terminal_pid = None
 
+            # 'Test path' case: we will save a list of to-be-tested positions
+            self.base_pos_samples = []
+
             # --- Plugins ---
             self._autoload_env_plugins()
 

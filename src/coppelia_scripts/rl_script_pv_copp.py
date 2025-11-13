@@ -64,6 +64,8 @@ sample_step_m = None
 trials_per_sample = None
 n_samples = None
 n_extra_poses = None
+delta_deg = None
+base_pos_samples = None
 
 # Other control variables
 verbose = 3
@@ -105,7 +107,7 @@ def sysCall_init():
     global robot_name, model_ids, params_scene, params_env, paths, file_id, model_name, verbose
     global save_scene, save_traj, action_times, obstacles_csv_folder, scene_to_load_folder
     global comms_port, ip_address
-    global trials_per_sample, sample_step_m, n_samples, path_alias, n_extra_poses, place_obstacles_flag, random_target_flag
+    global trials_per_sample, sample_step_m, n_samples, path_alias, n_extra_poses, delta_deg, place_obstacles_flag, random_target_flag, base_pos_samples
 
     sim = require('sim')    # type: ignore
 
@@ -130,8 +132,10 @@ def sysCall_init():
     trials_per_sample = None
     n_samples = None
     n_extra_poses = None
+    delta_deg = None
     place_obstacles_flag = None
     random_target_flag = None
+    base_pos_samples = None
 
 
     # Generate needed routes for logs and tf
@@ -218,8 +222,21 @@ def sysCall_thread():
 
     # ----- Path sampling -----
     _robot_script = agent.handle_robot_scripts
-    agent.path_handle = sim.getObject(path_alias)
-    agent.path_pos_samples, agent.path_base_pos_samples = agent.sim.callScriptFunction('rp_init', _robot_script, n_samples, n_extra_poses, path_alias)
+    if base_pos_samples is None or base_pos_samples==[]:
+        agent.path_handle = sim.getObject(path_alias)
+        agent.path_pos_samples, agent.path_base_pos_samples = agent.sim.callScriptFunction('rp_init', _robot_script, n_samples, n_extra_poses, path_alias)
+    
+    else:
+        logging.info(f"Positions have been provided by RL.")
+        agent.grid_positions_flag = True
+
+        # Valid positions
+        agent.path_base_pos_samples = base_pos_samples
+        logging.info(f"Total number of grid positions: {len(agent.path_pos_samples)}.")
+
+        # We augment them by changing the orientation of the robot
+        agent.path_pos_samples = agent.sim.callScriptFunction('augment_base_poses', _robot_script, agent.path_base_pos_samples, n_extra_poses, delta_deg)
+    
     logging.info(f"Total number of scenarios to test: {len(agent.path_pos_samples)}.")
 
     logging.info(" ----- START EXPERIMENT ----- ")

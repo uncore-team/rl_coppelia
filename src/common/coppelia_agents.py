@@ -261,6 +261,7 @@ class CoppeliaAgent:
         self.path_handle = None
         self.perimeterRadius = 1.0 # meters
         self.new_robot_pose = (0.0,0.0,0.0,0.0)
+        self.grid_positions_flag = False    # True when the user sends a map image to get positions from a grid
         
 
     
@@ -448,6 +449,58 @@ class CoppeliaAgent:
         return objectPosX, objectPosY 
 
     
+    def get_target_ahead(
+        self,
+        robot_pose_world: tuple[float, float, float, float],
+        distance: float
+    ) -> tuple[float, float]:
+        """
+        Compute a target position placed 'distance' meters straight ahead of the robot.
+
+        The robot's forward axis is assumed to be the +X axis of its local frame
+        rotated by the yaw angle in world coordinates (standard 2D planar assumption).
+
+        Parameters
+        ----------
+        robot_pose_world : tuple[float, float, float, float]
+            Robot pose as a tuple/list of 4 floats: (x, y, z, yaw).
+            If you pass only 3 elements (x, y, yaw), z is assumed 0.0.
+            The last element is interpreted as yaw (heading).
+        distance : float
+            Forward distance in meters. Positive places the target in front,
+            negative places it behind (along -forward).
+    
+        Returns
+        -------
+        (tx, ty) : tuple[float, float]
+            Target position in world coordinates.
+
+        Notes
+        -----
+        - Forward direction is (cos(yaw), sin(yaw)) in world XY.
+        - This function does not clamp to map bounds nor check collisions.
+        """
+        if len(robot_pose_world) < 3:
+            raise ValueError("robot_pose_world must have at least (x, y, yaw).")
+        x = float(robot_pose_world[0])
+        y = float(robot_pose_world[1])
+
+        if len(robot_pose_world) == 3:
+            z = 0.0
+            yaw = float(robot_pose_world[2])
+        else:
+            z = float(robot_pose_world[2])
+            yaw = float(robot_pose_world[-1])  # last element is yaw
+
+        # forward vector in world frame
+        fx = math.cos(yaw)
+        fy = math.sin(yaw)
+
+        tx = x + distance * fx
+        ty = y + distance * fy
+        return tx, ty
+
+
     def get_target_in_path_pos(
         self,
         robot_pose_world: tuple[float, float, float, float],
@@ -1170,11 +1223,13 @@ class CoppeliaAgent:
                     # --- Reset the robot
                     # If the robot has been tested N trials_per_sample in the same position of the path, then change its position
                     if not self.first_reset_done or self.current_trial_idx_pv == self.trials_per_sample-1:
-                        if self.current_trial_idx_pv == self.trials_per_sample-1:
+                        
+                        if not self.first_reset_done:
+                            self.first_reset_done = True
+                            
+                        else:
                             self.current_sample_idx_pv +=1
                             self.current_trial_idx_pv = 0
-                        else:
-                            self.first_reset_done = True
 
                         self.new_robot_pose = self.path_pos_samples[self.current_sample_idx_pv]
                         self.sim.callScriptFunction('rp_tp', self.handle_robot_scripts, self.new_robot_pose)
@@ -1196,8 +1251,11 @@ class CoppeliaAgent:
                     # - Option B: Calculate target position based on the path
                     # The position will be the intersection between the path and a circular perimeter around the robot
                     # This option just needs to be done before the first trial of each scenario
-                    elif self.current_trial_idx_pv==0:   
-                        posX, posY = self.get_target_in_path_pos(self.new_robot_pose, self.perimeterRadius)
+                    elif self.current_trial_idx_pv==0:
+                        if self.grid_positions_flag:
+                            posX, posY = self.get_target_ahead(self.new_robot_pose, self.perimeterRadius)
+                        else:
+                            posX, posY = self.get_target_in_path_pos(self.new_robot_pose, self.perimeterRadius)
                     
                     # Place the target
                     if posX is not None and posY is not None:

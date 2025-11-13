@@ -40,6 +40,29 @@ def main(args):
 
     # --- Start/attach to Coppelia/SB3 as in your test.py ---
     rl_copp = RLCoppeliaManager(args)
+
+    # --- Get robot positions if a map has been provided
+    if args.map_png_path:
+        logging.info(f"Map provided: {args.map_png_path}.")
+
+        res = utils.build_valid_positions_from_map(
+            map_png_path=args.map_png_path,
+            m_per_px=0.02013,
+            origin_xy=(-10.5, -6.0),
+            origin_is_lower_left=False,
+            obstacle_threshold=15,
+            clearance_m=0.35,      # puedes subir a 0.4
+            grid_step_m=0.25,      # parametrizable
+            interactive_polygon=True
+        )
+
+        # Visual check
+        utils.preview_mask_and_positions(args.map_png_path, res)
+
+        # Valid positions (not augmented yet, that will be done inside Coppelia scene)
+        rl_copp.base_pos_samples = res["positions_xy"].tolist()
+        logging.info(f"{len(rl_copp.base_pos_samples)} positions will be sent to the Agent side to be tested.")
+
     if not args.agent_side:
         rl_copp.create_env()
     if not args.rl_side:
@@ -81,9 +104,14 @@ def main(args):
         position_info_headers = ["Pos X"] + ["Pos Y"] 
         headers = id_headers + position_info_headers + ["Timestep"] + observation_names
         
+        if rl_copp.base_pos_samples ==[]:
+            n_samples = args.n_samples
+        else:
+            n_samples = len(rl_copp.base_pos_samples)
+
         logging.info(
             f" ----- Testing the robot {rl_copp.robot_name} with its model {model_name} -----\n"
-            f"          --- Path will be sampled in: {args.n_samples}. ---\n"
+            f"          --- Path will be sampled in: {n_samples}. ---\n"
             f"          --- Each sample will be tested with {args.n_extra_poses*2+1} scenarios. ---\n"
             f"          --- Each scenario will be repeated {args.trials_per_sample} times. ---\n")
 
@@ -92,9 +120,9 @@ def main(args):
             writer.writerow(headers)
 
             # Iterate sampled points trials_per_sample times each point
-            total_robot_poses = args.n_samples*(args.n_extra_poses*2+1)
+            total_robot_poses = n_samples*(args.n_extra_poses*2+1)
 
-            for position_idx in range(args.n_samples):
+            for position_idx in tqdm(range(n_samples), desc="Testing positions", unit="position"):
 
                 for scenario_idx in range(args.n_extra_poses*2+1):
 
