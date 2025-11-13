@@ -45,15 +45,22 @@ def main(args):
     if args.map_png_path:
         logging.info(f"Map provided: {args.map_png_path}.")
 
+        # TODO extract function to get clearance distance
+        robot_width = rl_copp.params_scene["distance_between_wheels"]
+        radius_obs = rl_copp.params_scene["diam_obstacles"]/2
+        collision_dist = rl_copp.params_env["max_crash_dist_critical"]
+        min_robot_obstacle_dist =robot_width/2 + collision_dist + radius_obs    # TODO adjust this, right now is 0.37 with this calculation
+        print(min_robot_obstacle_dist)
         res = utils.build_valid_positions_from_map(
             map_png_path=args.map_png_path,
             m_per_px=0.02013,
             origin_xy=(-10.5, -6.0),
             origin_is_lower_left=False,
-            obstacle_threshold=15,
-            clearance_m=0.35,      # puedes subir a 0.4
-            grid_step_m=0.25,      # parametrizable
-            interactive_polygon=True
+            obstacle_threshold=50,
+            clearance_m=min_robot_obstacle_dist,    #0.35
+            grid_step_m=0.25,
+            interactive_polygon=True,
+            debug= False
         )
 
         # Visual check

@@ -4596,7 +4596,6 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from PIL import Image
 
-# TODO close_tol is not working properly
 def interactive_polygon_on_map_live(
     map_png_path: str,
     *,
@@ -4659,7 +4658,7 @@ def interactive_polygon_on_map_live(
 
         x, y = float(event.xdata), float(event.ydata)
 
-        # Close if near the first vertex (meters)
+        # Close if near the first vertex
         if len(pts) >= 3:
             d = np.hypot(x - pts[0][0], y - pts[0][1])
             if d <= close_tol:
@@ -4831,6 +4830,82 @@ def grid_positions_from_mask(
 
 # ----------------------------- convenience wrapper -----------------------------
 
+# def build_valid_positions_from_map(
+#     map_png_path: str,
+#     *,
+#     m_per_px: float = 0.02013,
+#     origin_xy: tuple[float,float] = (-10.5, -6.0),
+#     origin_is_lower_left: bool = False,
+#     obstacle_threshold: int = 15,
+#     clearance_m: float = 0.35,
+#     grid_step_m: float = 0.25,
+#     interactive_polygon: bool = True,
+# ) -> dict:
+#     """
+#     High-level helper that:
+#       1) Builds an inflated occupancy mask from the PNG.
+#       2) Lets the user draw a polygon of interest (optional).
+#       3) Samples a grid of valid (x,y) positions within the polygon and away from obstacles.
+
+#     Returns
+#     -------
+#     out : dict
+#         {
+#           "occ_mask": occ_inflated (H,W) bool,
+#           "dist_to_obstacle_m": dist_m (H,W) float,
+#           "polygon_xy": np.ndarray (M,2) or empty array,
+#           "positions_xy": np.ndarray (K,2) world positions,
+#           "meta": {"m_per_px":..., "origin_xy":..., "origin_is_lower_left":..., "size":(H,W)}
+#         }
+#     """
+#     mask_data = build_occupancy_mask_from_png(
+#         map_png_path,
+#         obstacle_threshold=obstacle_threshold,
+#         m_per_px=m_per_px,
+#         clearance_m=clearance_m
+#     )
+#     occ_infl = mask_data["occ_inflated"]
+#     h, w = mask_data["size"]
+
+#     if interactive_polygon:
+#         poly = interactive_polygon_on_map_live(
+#             map_png_path,
+#             m_per_px=m_per_px,
+#             origin_xy=origin_xy,
+#             origin_is_lower_left=origin_is_lower_left,
+#             close_tol = 0.05,
+#             title="Click polygon vertices; Enter to finish. (Close by clicking near start)"
+#         )
+#     else:
+#         poly = np.empty((0,2), dtype=float)
+
+#     positions = grid_positions_from_mask(
+#         occ_inflated=occ_infl,
+#         map_png_path=map_png_path,
+#         m_per_px=m_per_px,
+#         origin_xy=origin_xy,
+#         origin_is_lower_left=origin_is_lower_left,
+#         grid_step_m=grid_step_m,
+#         polygon_xy=poly if len(poly) >= 3 else None
+#     )
+
+#     return {
+#         "occ_mask": occ_infl,
+#         "dist_to_obstacle_m": mask_data["dist_to_obstacle_m"],
+#         "polygon_xy": poly,
+#         "positions_xy": positions,
+#         "meta": {
+#             "m_per_px": m_per_px,
+#             "origin_xy": origin_xy,
+#             "origin_is_lower_left": origin_is_lower_left,
+#             "size": (h, w),
+#         }
+#     }
+
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+
 def build_valid_positions_from_map(
     map_png_path: str,
     *,
@@ -4841,12 +4916,38 @@ def build_valid_positions_from_map(
     clearance_m: float = 0.35,
     grid_step_m: float = 0.25,
     interactive_polygon: bool = True,
+    debug: bool = False,
 ) -> dict:
     """
     High-level helper that:
       1) Builds an inflated occupancy mask from the PNG.
-      2) Lets the user draw a polygon of interest (optional).
+      2) Optionally lets the user draw a polygon of interest.
       3) Samples a grid of valid (x,y) positions within the polygon and away from obstacles.
+      4) Optionally shows debug plots of intermediate steps (raw mask, inflated mask, final positions).
+
+    Parameters
+    ----------
+    map_png_path : str
+        Path to the map PNG.
+    m_per_px : float, default 0.02013
+        Map resolution in meters per pixel.
+    origin_xy : (float, float), default (-10.5, -6.0)
+        World coordinates (x_min, y_min) where the image is anchored.
+    origin_is_lower_left : bool, default False
+        If True, image origin is bottom-left (y up). If False, top-left (y down).
+    obstacle_threshold : int, default 15
+        Gray threshold in [0,255]. Pixels ≤ threshold are considered obstacles.
+    clearance_m : float, default 0.35
+        Inflation margin around obstacles in meters (robot clearance).
+    grid_step_m : float, default 0.25
+        Spacing of the sampling grid in meters.
+    interactive_polygon : bool, default True
+        If True, the user is asked to draw a polygon of interest on the map.
+        If False, the whole image rectangle is considered.
+    debug : bool, default False
+        If True, show intermediate debug plots:
+          - raw vs inflated occupancy mask
+          - final map with polygon and valid positions.
 
     Returns
     -------
@@ -4856,30 +4957,47 @@ def build_valid_positions_from_map(
           "dist_to_obstacle_m": dist_m (H,W) float,
           "polygon_xy": np.ndarray (M,2) or empty array,
           "positions_xy": np.ndarray (K,2) world positions,
-          "meta": {"m_per_px":..., "origin_xy":..., "origin_is_lower_left":..., "size":(H,W)}
+          "meta": {"m_per_px":..., "origin_xy":..., "origin_is_lower_left":..., "size": (H,W)}
         }
     """
+    # ---- 1) Build occupancy (raw + inflated) from image ----
     mask_data = build_occupancy_mask_from_png(
         map_png_path,
         obstacle_threshold=obstacle_threshold,
         m_per_px=m_per_px,
         clearance_m=clearance_m
     )
+    occ_raw = mask_data["occ_raw"]
     occ_infl = mask_data["occ_inflated"]
+    dist_m = mask_data["dist_to_obstacle_m"]
     h, w = mask_data["size"]
 
+    if debug:
+        _debug_show_masks(
+            map_png_path,
+            occ_raw=occ_raw,
+            occ_inflated=occ_infl,
+            m_per_px=m_per_px,
+            origin_xy=origin_xy,
+            origin_is_lower_left=origin_is_lower_left,
+            obstacle_threshold=obstacle_threshold,
+            clearance_m=clearance_m,
+        )
+
+    # ---- 2) interactive polygon selection (optional) ----
     if interactive_polygon:
         poly = interactive_polygon_on_map_live(
             map_png_path,
             m_per_px=m_per_px,
             origin_xy=origin_xy,
             origin_is_lower_left=origin_is_lower_left,
-            close_tol = 0.05,
-            title="Click polygon vertices; Enter to finish. (Close by clicking near start)"
+            close_tol=0.05,  # meters
+            title="Click polygon vertices; click near start to close. Enter=finish, Backspace=undo"
         )
     else:
         poly = np.empty((0,2), dtype=float)
 
+    # ---- 3) grid-based sampling of valid positions ----
     positions = grid_positions_from_mask(
         occ_inflated=occ_infl,
         map_png_path=map_png_path,
@@ -4890,9 +5008,20 @@ def build_valid_positions_from_map(
         polygon_xy=poly if len(poly) >= 3 else None
     )
 
+    if debug:
+        _debug_show_final_positions(
+            map_png_path,
+            occ_inflated=occ_infl,
+            positions_xy=positions,
+            polygon_xy=poly,
+            m_per_px=m_per_px,
+            origin_xy=origin_xy,
+            origin_is_lower_left=origin_is_lower_left,
+        )
+
     return {
         "occ_mask": occ_infl,
-        "dist_to_obstacle_m": mask_data["dist_to_obstacle_m"],
+        "dist_to_obstacle_m": dist_m,
         "polygon_xy": poly,
         "positions_xy": positions,
         "meta": {
@@ -4902,6 +5031,115 @@ def build_valid_positions_from_map(
             "size": (h, w),
         }
     }
+
+
+# ----------------- debug helpers -----------------
+
+def _debug_show_masks(
+    map_png_path: str,
+    *,
+    occ_raw: np.ndarray,
+    occ_inflated: np.ndarray,
+    m_per_px: float,
+    origin_xy: tuple[float,float],
+    origin_is_lower_left: bool,
+    obstacle_threshold: int,
+    clearance_m: float,
+) -> None:
+    """
+    Debug helper: show raw and inflated occupancy masks as **binary black/white images**,
+    plus the original map for comparison.
+    """
+    img = Image.open(map_png_path).convert("RGB")
+    h, w = occ_raw.shape
+    x0, y0 = origin_xy
+    x1 = x0 + w * m_per_px
+    y1 = y0 + h * m_per_px
+    origin_kw = "lower" if origin_is_lower_left else "upper"
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5), dpi=120)
+
+    # --- 1) Original map (for visual reference) ---
+    ax = axes[0]
+    ax.imshow(img, extent=[x0, x1, y0, y1], origin=origin_kw)
+    ax.set_title("Original map")
+    ax.set_aspect("equal")
+    ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]")
+
+    # --- 2) Raw binary obstacle mask (black/white) ---
+    # Black = obstacle, White = free
+    ax = axes[1]
+    ax.imshow(1 - occ_raw.astype(float), extent=[x0, x1, y0, y1],
+              origin=origin_kw, cmap="gray", vmin=0, vmax=1)
+    ax.set_title(f"Raw obstacle mask (≤ {obstacle_threshold})\nBlack = obstacle")
+    ax.set_aspect("equal")
+    ax.set_xlabel("X [m]")
+
+    # --- 3) Inflated mask (black/white) ---
+    ax = axes[2]
+    ax.imshow(1 - occ_inflated.astype(float), extent=[x0, x1, y0, y1],
+              origin=origin_kw, cmap="gray", vmin=0, vmax=1)
+    ax.set_title(f"Inflated mask (clearance = {clearance_m} m)\nBlack = inflated obstacle")
+    ax.set_aspect("equal")
+    ax.set_xlabel("X [m]")
+
+    fig.suptitle("Occupancy mask debug (binary black/white)", fontsize=14)
+    fig.tight_layout()
+    plt.show()
+    plt.close(fig)
+
+
+
+def _debug_show_final_positions(
+    map_png_path: str,
+    *,
+    occ_inflated: np.ndarray,
+    positions_xy: np.ndarray,
+    polygon_xy: np.ndarray,
+    m_per_px: float,
+    origin_xy: tuple[float,float],
+    origin_is_lower_left: bool,
+) -> None:
+    """
+    Debug helper: show map + inflated occupancy + polygon + valid positions as blue 'x'.
+    """
+    img = Image.open(map_png_path).convert("RGB")
+    h, w = occ_inflated.shape
+    x0, y0 = origin_xy
+    x1 = x0 + w * m_per_px
+    y1 = y0 + h * m_per_px
+    origin_kw = "lower" if origin_is_lower_left else "upper"
+
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=120)
+    ax.imshow(img, extent=[x0, x1, y0, y1], origin=origin_kw)
+
+    # inflated occupancy overlay
+    ax.imshow(occ_inflated.astype(float), extent=[x0, x1, y0, y1], origin=origin_kw,
+              cmap="Reds", alpha=0.35, vmin=0, vmax=1)
+
+    # polygon (if any)
+    if polygon_xy is not None and len(polygon_xy) >= 3:
+        ax.plot(polygon_xy[:,0], polygon_xy[:,1], "-c", lw=2)
+        ax.plot([polygon_xy[-1,0], polygon_xy[0,0]],
+                [polygon_xy[-1,1], polygon_xy[0,1]],
+                "-c", lw=2)
+
+    # valid positions as blue 'x'
+    if positions_xy is not None and len(positions_xy):
+        ax.plot(
+            positions_xy[:,0], positions_xy[:,1],
+            marker="x", linestyle="None",
+            markersize=9, markeredgewidth=2,
+            color="royalblue"
+        )
+
+    ax.set_aspect("equal")
+    ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]")
+    ax.set_title(f"Inflated occupancy + valid positions (N={len(positions_xy)})")
+    fig.tight_layout()
+    plt.show()
+    plt.close(fig)
+
 
 # ----------------------------- (optional) quick visual check -----------------------------
 
