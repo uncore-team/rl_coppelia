@@ -127,8 +127,8 @@ class RLCoppeliaManager():
 
     def _load_params_if_needed(self, args) -> None:
         """Load params if the flow expects a params file (train/test)."""
-        if not hasattr(args, "params_file"):
-            return
+        # if not hasattr(args, "params_file"):
+        #     return
 
         if args.params_file is None:
             args.params_file = utils.get_params_file(self.paths, self.args)

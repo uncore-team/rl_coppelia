@@ -81,7 +81,9 @@ def main(argv=None):
     test_path_parser.add_argument("--trials_per_sample", type=int, default=10,help="Random target placements per sampled pose.")
     test_path_parser.add_argument("--n_samples", type=int, default=50,help="POints number to sample the path.")
     test_path_parser.add_argument("--n_extra_poses", type=int, default=2,help="Extra robot poses for testing the robot at each scenario in each direction, changing the orientation of the robot in 'delta_deg' degrees each time.")
-    test_path_parser.add_argument("--delta_deg", type=int, default=5,help="Number of degrees to change the orientation of the robot at each iteration.")
+    test_path_parser.add_argument("--delta_deg", type=float, default=5,help="Number of degrees to change the orientation of the robot at each iteration.")
+    test_path_parser.add_argument("--robot_world_ori", type=float, default=0,help="Orientation in degrees between the robot and the world.")
+    test_path_parser.add_argument("--robot_target_ori", type=float, default=0,help="Orientation in degrees between the robot and the target.")
     test_path_parser.add_argument("--map_png_path", type=str, help="Path to the png map file. If used, then it will activate the grid mode for testing the robot at each cell of a grid", required=False)
     test_path_parser.add_argument("--place_obstacles_flag", action="store_true", help="Flag for placing obstacles in the scene or not.", default=False, required=False)
     test_path_parser.add_argument("--random_target_flag", action="store_true", help="Flag for placing target randomly or not.", default=False, required=False)
@@ -166,6 +168,7 @@ def main(argv=None):
     plot_parser.add_argument("--timestep_unit", type=str, help="Unit for timestep for LAT plots (optional).", default="s", required=False)
     plot_parser.add_argument("--csv_file_name", type=str, help="Path to a specific CSV file, e.g. LAT file (optional).", required=False)
     plot_parser.add_argument("--map_png_path", type=str, help="Path to a specific PNG file with a map, e.g. for building timestep map.", required=False)
+    plot_parser.add_argument("--params_file", type=str, help="Path to the configuration file.",required=False)
     plot_parser.add_argument("--verbose", type=int, help="Enable debugging through info logs using the terminal. 0: no logs at all. \
                              1: just a progress bar and save warnings. 2: just a progress bar and save everything. 3: all logs shown and saved for debugging. Other: just terminal, logs are not saved", default=-1, required=False)
 

@@ -2052,16 +2052,16 @@ def plot_timesteps_map(
     m_per_px: float = 0.02013,
     origin_xy: tuple[float, float] = (-10.5, -6.0),
     grid_cell: float = 0.2,
-    stat: str = "mean",            # 'median'|'mean'|'min'|'max'|'std'
+    stat: str = "std",            # 'median'|'mean'|'min'|'max'|'std'
     cmap: str = "viridis",
     heat_alpha: float = 0.55,
     trajectory_lw: float = 2.0,
     origin_is_lower_left: bool = False,
-    # --- new options ---
     method: str = "idw",             # 'idw' or 'nearest'
     mask_max_dist: float = 0.6,      # mask-out cells farther than this (meters)
     cbar_percentiles: tuple[float,float] = (5, 95),  # robust color range
-    timestep_bins=(0.2, 0.4, 0.7, 1.25, 1.75, 3.0),
+    complete_ranges: bool = True,
+    timestep_bins=(0.2, 0.4, 0.7, 1.25, 1.75, 3.0)
 ):
     """
     Build a trajectory and a per-position time map on top of a map image, allow drawing
@@ -2117,6 +2117,8 @@ def plot_timesteps_map(
         Maximum distance (meters) from any trajectory point to paint a heatmap value.
     cbar_percentiles : tuple[float,float], default=(5,95)
         Percentiles for robust min/max color limits in the heatmap.
+    complete_ranges: bool, default=True
+        If True, the colorbar covers the full range of the action 'timestep'.
     timestep_bins : tuple[float,...], default=(0.2,0.4,0.7,1.25,1.75,3.0)
         Explicit bins to aggregate timestep usage when plotting per-circle histograms.
 
@@ -2232,9 +2234,17 @@ def plot_timesteps_map(
     Z.ravel()[mask] = z[mask]
 
     # robust color range
-    finite = np.isfinite(Z)
-    vmin = np.percentile(Z[finite], cbar_percentiles[0]) if finite.any() else None
-    vmax = np.percentile(Z[finite], cbar_percentiles[1]) if finite.any() else None
+    if not complete_ranges:
+        finite = np.isfinite(Z)
+        vmin = np.percentile(Z[finite], cbar_percentiles[0]) if finite.any() else None
+        vmax = np.percentile(Z[finite], cbar_percentiles[1]) if finite.any() else None
+
+    # Check index of 'timestep' action in action_names list
+    else:
+        action_names = rl_copp_obj.params_env["action_names"]
+        ts_idx = action_names.index('timestep') if 'timestep' in action_names else None
+        vmin = rl_copp_obj.params_env["action_bottom_limits"][ts_idx]
+        vmax = rl_copp_obj.params_env["action_upper_limits"][ts_idx]
 
     # ----------------- figure 2: time map + trajectory + map (and circle drawing) -----------------
     fig2, ax2 = plt.subplots(figsize=(10, 8), dpi=120)

@@ -65,6 +65,8 @@ trials_per_sample = None
 n_samples = None
 n_extra_poses = None
 delta_deg = None
+robot_world_ori = None
+robot_target_ori = None
 base_pos_samples = None
 
 # Other control variables
@@ -107,7 +109,7 @@ def sysCall_init():
     global robot_name, model_ids, params_scene, params_env, paths, file_id, model_name, verbose
     global save_scene, save_traj, action_times, obstacles_csv_folder, scene_to_load_folder
     global comms_port, ip_address
-    global trials_per_sample, sample_step_m, n_samples, path_alias, n_extra_poses, delta_deg, place_obstacles_flag, random_target_flag, base_pos_samples
+    global trials_per_sample, sample_step_m, n_samples, path_alias, n_extra_poses, delta_deg, place_obstacles_flag, random_target_flag, base_pos_samples, robot_world_ori, robot_target_ori
 
     sim = require('sim')    # type: ignore
 
@@ -133,6 +135,8 @@ def sysCall_init():
     n_samples = None
     n_extra_poses = None
     delta_deg = None
+    robot_world_ori = None
+    robot_target_ori = None
     place_obstacles_flag = None
     random_target_flag = None
     base_pos_samples = None
@@ -229,13 +233,14 @@ def sysCall_thread():
     else:
         logging.info(f"Positions have been provided by RL.")
         agent.grid_positions_flag = True
+        agent.robot_target_ori = robot_target_ori
 
         # Valid positions
         agent.path_base_pos_samples = base_pos_samples
         logging.info(f"Total number of grid positions: {len(agent.path_pos_samples)}.")
 
         # We augment them by changing the orientation of the robot
-        agent.path_pos_samples = agent.sim.callScriptFunction('augment_base_poses', _robot_script, agent.path_base_pos_samples, n_extra_poses, delta_deg)
+        agent.path_pos_samples = agent.sim.callScriptFunction('augment_base_poses', _robot_script, agent.path_base_pos_samples, n_extra_poses, delta_deg, 0, robot_world_ori)
     
     logging.info(f"Total number of scenarios to test: {len(agent.path_pos_samples)}.")
 

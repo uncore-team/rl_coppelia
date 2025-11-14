@@ -1674,6 +1674,8 @@ def _build_replacements(
             "n_samples": args.n_samples,
             "n_extra_poses": args.n_extra_poses,
             "delta_deg": args.delta_deg,
+            "robot_world_ori": args.robot_world_ori,
+            "robot_target_ori": args.robot_target_ori,
             "place_obstacles_flag": args.place_obstacles_flag,
             "random_target_flag": args.random_target_flag,
             "map_png_path": args.map_png_path,

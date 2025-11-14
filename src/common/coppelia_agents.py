@@ -262,7 +262,7 @@ class CoppeliaAgent:
         self.perimeterRadius = 1.0 # meters
         self.new_robot_pose = (0.0,0.0,0.0,0.0)
         self.grid_positions_flag = False    # True when the user sends a map image to get positions from a grid
-        
+        self.robot_target_ori = 0   # Orientation between the robot and the target (with respect to X axis of the robot)
 
     
     def start_communication(self):
@@ -449,10 +449,11 @@ class CoppeliaAgent:
         return objectPosX, objectPosY 
 
     
-    def get_target_ahead(
+    def get_target_relative_to_robot(
         self,
         robot_pose_world: tuple[float, float, float, float],
-        distance: float
+        distance: float,
+        robot_target_ori: float
     ) -> tuple[float, float]:
         """
         Compute a target position placed 'distance' meters straight ahead of the robot.
@@ -469,6 +470,8 @@ class CoppeliaAgent:
         distance : float
             Forward distance in meters. Positive places the target in front,
             negative places it behind (along -forward).
+        robot_target_ori: float
+            Orientation in degrees between the robot X axis and the target.
     
         Returns
         -------
@@ -487,14 +490,15 @@ class CoppeliaAgent:
 
         if len(robot_pose_world) == 3:
             z = 0.0
-            yaw = float(robot_pose_world[2])
+            robot_yaw = float(robot_pose_world[2])
         else:
             z = float(robot_pose_world[2])
-            yaw = float(robot_pose_world[-1])  # last element is yaw
+            robot_yaw = float(robot_pose_world[-1])
 
-        # forward vector in world frame
-        fx = math.cos(yaw)
-        fy = math.sin(yaw)
+        # dirección definida por la orientación del target
+        robot_target_ori = math.radians(robot_target_ori)
+        fx = math.cos(robot_target_ori)
+        fy = math.sin(robot_target_ori)
 
         tx = x + distance * fx
         ty = y + distance * fy
@@ -1253,7 +1257,7 @@ class CoppeliaAgent:
                     # This option just needs to be done before the first trial of each scenario
                     elif self.current_trial_idx_pv==0:
                         if self.grid_positions_flag:
-                            posX, posY = self.get_target_ahead(self.new_robot_pose, self.perimeterRadius)
+                            posX, posY = self.get_target_relative_to_robot(self.new_robot_pose, self.perimeterRadius, self.robot_target_ori)
                         else:
                             posX, posY = self.get_target_in_path_pos(self.new_robot_pose, self.perimeterRadius)
                     
